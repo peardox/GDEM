@@ -10,6 +10,8 @@ reports, per unit:
   - interface declarations with no comment immediately before them
   - unbalanced parentheses inside @tag(...) in comments
   - @link(...) targets that are not declared anywhere in the project
+  - fields declared after a method or property in the same section of a
+    class, which Delphi rejects (E2169)
 
 It does not parse Pascal fully, so it can miss things PasDoc would warn
 about, but it has no dependencies beyond Python 3. Prints
@@ -85,6 +87,8 @@ for f in files:
     in_comment = False
     in_uses = False
     paren_depth = 0
+    in_class = False
+    seen_member = False
     for i in range(start + 1, end):
         raw = lines[i]
         line = strip_strings(raw)
@@ -107,7 +111,14 @@ for f in files:
             if s.endswith(';'):
                 in_uses = False
             continue
-        if SECTION.match(s) or re.match(r'^end\s*;', s, re.I) or s in ('end;', 'end'):
+        if re.match(r'^[A-Za-z_]\w*(<[^>]*>)?\s*=\s*class\b(?!.*;\s*$)', s, re.I) \
+                and not re.search(r'=\s*class\s+of\b', s, re.I):
+            in_class, seen_member = True, False
+        if SECTION.match(s):
+            seen_member = False
+            continue
+        if re.match(r'^end\s*;', s, re.I) or s in ('end;', 'end'):
+            in_class = False
             continue
         # continuation lines (parameters, wrapped expressions)
         if paren_depth > 0:
@@ -117,6 +128,12 @@ for f in files:
                        or (ENUM_VAL.match(s) and not re.match(r'^\s*\w+\s*:', s)))
         if not is_decl:
             continue
+        if in_class and paren_depth == 0:
+            if DECL_KW.match(s):
+                seen_member = True
+            elif FIELD.match(s) and seen_member:
+                problems.append(f'{f.name}:{i+1}: field after a method or property '
+                                f'(Delphi E2169): {s[:60]}')
         # previous non-blank line, skipping compiler directives
         j = i - 1
         while j > start and (not lines[j].strip() or lines[j].strip().startswith('{$')

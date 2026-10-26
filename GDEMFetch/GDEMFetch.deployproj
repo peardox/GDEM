@@ -25,10 +25,10 @@
             <RemoteCommand/>
             <Overwrite>True</Overwrite>
         </DeployFile>
-        <DeployFile Include="OSXARM64\Debug\GDEMFetch.dSYM" Condition="'$(Config)'=='Debug'">
-            <RemoteDir>GDEMFetch.app\..\$(PROJECTNAME).app.dSYM\Contents\Resources\DWARF\</RemoteDir>
-            <RemoteName>GDEMFetch</RemoteName>
-            <DeployClass>ProjectOSXDebug</DeployClass>
+        <DeployFile Include="OSXARM64\Release\GDEMFetch.entitlements" Condition="'$(Config)'=='Release'">
+            <RemoteDir>GDEMFetch.app\..\</RemoteDir>
+            <RemoteName>GDEMFetch.entitlements</RemoteName>
+            <DeployClass>ProjectOSXEntitlements</DeployClass>
             <Operation>1</Operation>
             <LocalCommand/>
             <RemoteCommand/>
@@ -53,7 +53,35 @@
             <RemoteCommand/>
             <Overwrite>True</Overwrite>
         </DeployFile>
+        <DeployFile Include="OSXARM64\Release\GDEMFetch.info.plist" Condition="'$(Config)'=='Release'">
+            <RemoteDir>GDEMFetch.app\Contents\</RemoteDir>
+            <RemoteName>Info.plist</RemoteName>
+            <DeployClass>ProjectOSXInfoPList</DeployClass>
+            <Operation>1</Operation>
+            <LocalCommand/>
+            <RemoteCommand/>
+            <Overwrite>True</Overwrite>
+        </DeployFile>
         <DeployFile Include="$(BDS)\bin\delphi_PROJECTICNS.icns" Condition="'$(Config)'=='Debug'">
+            <RemoteDir>GDEMFetch.app\Contents\Resources\</RemoteDir>
+            <RemoteName>GDEMFetch.icns</RemoteName>
+            <DeployClass>ProjectOSXResource</DeployClass>
+            <Operation>1</Operation>
+            <LocalCommand/>
+            <RemoteCommand/>
+            <Overwrite>True</Overwrite>
+        </DeployFile>
+        <DeployFile Include="OSXARM64\Release\GDEMFetch" Condition="'$(Config)'=='Release'">
+            <RemoteDir>GDEMFetch.app\Contents\MacOS\</RemoteDir>
+            <RemoteName>GDEMFetch</RemoteName>
+            <DeployClass>ProjectOutput</DeployClass>
+            <Operation>1</Operation>
+            <LocalCommand/>
+            <RemoteCommand/>
+            <Overwrite>True</Overwrite>
+            <Required>True</Required>
+        </DeployFile>
+        <DeployFile Include="$(BDS)\bin\delphi_PROJECTICNS.icns" Condition="'$(Config)'=='Release'">
             <RemoteDir>GDEMFetch.app\Contents\Resources\</RemoteDir>
             <RemoteName>GDEMFetch.icns</RemoteName>
             <DeployClass>ProjectOSXResource</DeployClass>

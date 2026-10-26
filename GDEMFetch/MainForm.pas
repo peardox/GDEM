@@ -19,6 +19,12 @@
   @bold(Fetch selection) downloads only tiles that have data and are not
   yet downloaded.
 
+  @bold(Borders.) Country borders and coastlines from Natural Earth
+  (@link(TWorldVectors)) are drawn over the map, and the status bar names
+  the country under the pointer. @bold(View) has items to hide them. A
+  right click on a country selects every tile it touches, for fetching or
+  deleting like any other selection.
+
   @bold(Data folder.) Chosen in @bold(File > Settings) and may be on a
   removable drive. When the user picks a new folder and the old one holds
   data, they are asked whether to move it. Once a folder has been used, a
@@ -66,7 +72,7 @@ uses
   FMX.StdCtrls, FMX.Edit, FMX.Memo, FMX.Memo.Types, FMX.ScrollBox, FMX.Layouts,
   FMX.Controls.Presentation, FMX.Menus, FMX.TabControl,
   GDEMCancel, GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex,
-  GDEMStore, GDEMThemes, GDEMReport, ProgressForm;
+  GDEMStore, GDEMThemes, GDEMReport, GDEMVectors, ProgressForm;
 
 const
   { Name of the RCDATA resource holding the world map image. }
@@ -136,6 +142,10 @@ type
     mnuShowTiles: TMenuItem;
     { View > Show Downloaded Tiles: toggles the tint on downloaded tiles. }
     mnuShowDownloaded: TMenuItem;
+    { View > Show Country Borders. }
+    mnuShowBorders: TMenuItem;
+    { View > Show Coastlines. }
+    mnuShowCoastlines: TMenuItem;
     { Separator above the log commands. }
     mnuLogSep: TMenuItem;
     { View > Copy Log: puts the whole log on the clipboard. }
@@ -261,6 +271,14 @@ type
       @param(Sender The menu item, which checks itself.) }
     procedure mnuShowDownloadedClick(Sender: TObject);
 
+    { Shows or hides country borders on the map.
+      @param(Sender The menu item, which checks itself.) }
+    procedure mnuShowBordersClick(Sender: TObject);
+
+    { Shows or hides coastlines on the map.
+      @param(Sender The menu item, which checks itself.) }
+    procedure mnuShowCoastlinesClick(Sender: TObject);
+
     { Puts the whole log on the clipboard, ready to paste.
       @param(Sender The menu item.) }
     procedure mnuCopyLogClick(Sender: TObject);
@@ -293,6 +311,11 @@ type
     { Which tiles are fully downloaded in @link(FStore). Owned by the form
       and shown on @link(FMap). Only touched on the main thread. }
     FDownloaded: TTileIndex;
+
+    { Country borders, coastlines and names, from the
+      @code(WORLD_VECTORS_RESOURCE) resource. Owned by the form and shown on
+      @link(FMap); empty if they could not be loaded. }
+    FVectors: TWorldVectors;
 
     { @true once @link(FDownloaded) has been loaded or rebuilt for the
       current data folder. Cleared when the folder becomes unavailable, so
@@ -364,7 +387,9 @@ type
     function ReserveBytes: Int64;
 
     { Loads the world map image from the @link(WORLD_MAP_RESOURCE)
-      resource into @link(FMap), reporting any failure. }
+      resource into @link(FMap), reporting any failure, then the borders and
+      coastlines. The map works without the borders, so failing to load them
+      is only logged as a warning. }
     procedure LoadWorldMap;
 
     { Updates the selection label and buttons after the map selection or a
@@ -389,6 +414,24 @@ type
       @param(ALon Longitude under the pointer.)
       @param(AOnMap @false when the pointer is off the map.) }
     procedure MapHover(Sender: TObject; ALat, ALon: Double; AOnMap: Boolean);
+
+    { Selects every tile of the country under a right click, ready to fetch
+      or delete. Does nothing over the sea.
+      @param(Sender The map view.)
+      @param(ALat Latitude clicked.)
+      @param(ALon Longitude clicked.) }
+    procedure MapRightClick(Sender: TObject; ALat, ALon: Double);
+
+    { Names the selected tiles: every tile of the map's selection block, or
+      only those in its @code(SelectionMask) when it is a country.
+      @param(AOnlyIn If not @nil, only tiles also in this bitmap.)
+      @returns(Tile names, north-west first, row by row.) }
+    function SelectedTileNames(AOnlyIn: TTileIndex): TArray<string>;
+
+    { Counts the selected tiles, as @link(SelectedTileNames) names them.
+      @param(AOnlyIn If not @nil, only tiles also in this bitmap.)
+      @returns(The number of tiles.) }
+    function SelectedTileCount(AOnlyIn: TTileIndex): Integer;
 
     { Enables and disables controls to match what is running. }
     procedure UpdateButtons;
@@ -616,6 +659,8 @@ begin
   FMap.OnSelectionChanged := MapSelectionChanged;
   FMap.OnSelectionChanging := MapSelectionChanging;
   FMap.OnHover := MapHover;
+  FMap.OnRightClick := MapRightClick;
+  FVectors := TWorldVectors.Create;
   LoadWorldMap;
 
   FTileIndex := TTileIndex.Create;
@@ -668,6 +713,8 @@ end;
 procedure TfrmMain.FormDestroy(Sender: TObject);
 begin
   tmrStorage.Enabled := False;
+  FMap.Vectors := nil;
+  FVectors.Free;
   FStore.Free;
   FSettings.Free;
   FTileIndex.Free;
@@ -792,6 +839,53 @@ begin
     on E: Exception do
       ReportError('Could not load the world map: ' + E.Message);
   end;
+
+  try
+    FVectors.LoadFromResource;
+    FMap.Vectors := FVectors;
+    AddLog('Borders and coastlines: ' + FVectors.Describe +
+      ' (Natural Earth, public domain)');
+  except
+    on E: Exception do
+      AddLog('WARNING: could not load the borders and coastlines (' +
+        E.Message.TrimRight(['.']) + '); the map is shown without them');
+  end;
+end;
+
+function TfrmMain.SelectedTileCount(AOnlyIn: TTileIndex): Integer;
+var
+  LRect: TTileRect;
+  LMask: TTileIndex;
+  LLat, LLon: Integer;
+begin
+  Result := 0;
+  LRect := FMap.Selection;
+  LMask := FMap.SelectionMask;
+  for LLat := LRect.South to LRect.North - 1 do
+    for LLon := LRect.West to LRect.East - 1 do
+      if ((LMask = nil) or LMask.Has(LLat, LLon)) and
+         ((AOnlyIn = nil) or AOnlyIn.Has(LLat, LLon)) then
+        Inc(Result);
+end;
+
+function TfrmMain.SelectedTileNames(AOnlyIn: TTileIndex): TArray<string>;
+var
+  LRect: TTileRect;
+  LMask: TTileIndex;
+  LLat, LLon, LIndex: Integer;
+begin
+  SetLength(Result, SelectedTileCount(AOnlyIn));
+  LIndex := 0;
+  LRect := FMap.Selection;
+  LMask := FMap.SelectionMask;
+  for LLat := LRect.North - 1 downto LRect.South do
+    for LLon := LRect.West to LRect.East - 1 do
+      if ((LMask = nil) or LMask.Has(LLat, LLon)) and
+         ((AOnlyIn = nil) or AOnlyIn.Has(LLat, LLon)) then
+      begin
+        Result[LIndex] := TileName(LLat, LLon);
+        Inc(LIndex);
+      end;
 end;
 
 procedure TfrmMain.UpdateSelectionText;
@@ -800,12 +894,15 @@ var
   LText: string;
 begin
   LSelection := FMap.Selection;
-  LText := LSelection.Describe;
+  if FMap.SelectionMask <> nil then
+    LText := Format('%s: %d tile(s)', [FMap.SelectionName, SelectedTileCount(nil)])
+  else
+    LText := LSelection.Describe;
   if not LSelection.IsEmpty then
   begin
     if not FTileIndex.IsEmpty then
-      LText := LText + Format(', %d with data', [FTileIndex.CountIn(LSelection)]);
-    LText := LText + Format(', %d downloaded', [FDownloaded.CountIn(LSelection)]);
+      LText := LText + Format(', %d with data', [SelectedTileCount(FTileIndex)]);
+    LText := LText + Format(', %d downloaded', [SelectedTileCount(FDownloaded)]);
   end;
   lblSelection.Text := LText;
 end;
@@ -826,9 +923,32 @@ begin
   UpdateButtons;
 end;
 
+procedure TfrmMain.MapRightClick(Sender: TObject; ALat, ALon: Double);
+var
+  LCountry: Integer;
+  LName: string;
+  LTiles: TTileIndex;
+begin
+  LCountry := FVectors.CountryIndexAt(ALat, ALon);
+  if LCountry < 0 then
+    Exit;
+  LName := FVectors.CountryName(LCountry);
+  LTiles := TTileIndex.Create;
+  try
+    FVectors.AddCountryTiles(LCountry, LTiles);
+    if LTiles.IsEmpty then
+      ShowMessage(LName + ' lies outside ASTER GDEM coverage.')
+    else
+      FMap.SelectTiles(LTiles, LName);
+  finally
+    LTiles.Free;
+  end;
+end;
+
 procedure TfrmMain.MapHover(Sender: TObject; ALat, ALon: Double; AOnMap: Boolean);
 var
   LSouth, LWest: Integer;
+  LCountry: string;
 begin
   if not AOnMap then
   begin
@@ -848,6 +968,9 @@ begin
     else
       lblHover.Text := lblHover.Text + ' (no data)';
   end;
+  LCountry := FVectors.CountryAt(ALat, ALon);
+  if LCountry <> '' then
+    lblHover.Text := lblHover.Text + '   ' + LCountry;
 end;
 
 procedure TfrmMain.UpdateButtons;
@@ -916,6 +1039,16 @@ end;
 procedure TfrmMain.mnuShowDownloadedClick(Sender: TObject);
 begin
   FMap.ShowDownloadedTiles := mnuShowDownloaded.IsChecked;
+end;
+
+procedure TfrmMain.mnuShowBordersClick(Sender: TObject);
+begin
+  FMap.ShowBorders := mnuShowBorders.IsChecked;
+end;
+
+procedure TfrmMain.mnuShowCoastlinesClick(Sender: TObject);
+begin
+  FMap.ShowCoastlines := mnuShowCoastlines.IsChecked;
 end;
 
 procedure TfrmMain.mnuCopyLogClick(Sender: TObject);
@@ -1585,7 +1718,7 @@ procedure TfrmMain.mnuDeleteSelectedClick(Sender: TObject);
 var
   LTiles: TArray<string>;
 begin
-  LTiles := FDownloaded.TileNamesIn(FMap.Selection);
+  LTiles := SelectedTileNames(FDownloaded);
   if Length(LTiles) = 0 then
   begin
     ShowMessage('None of the selected tiles are downloaded.');
@@ -1792,9 +1925,9 @@ var
 begin
   // Only tiles with data (when that is known) and not yet downloaded
   if FTileIndex.IsEmpty then
-    LCandidates := FMap.Selection.TileNames
+    LCandidates := SelectedTileNames(nil)
   else
-    LCandidates := FTileIndex.TileNamesIn(FMap.Selection);
+    LCandidates := SelectedTileNames(FTileIndex);
   SetLength(LTiles, Length(LCandidates));
   LCount := 0;
   for LTile in LCandidates do
@@ -1984,7 +2117,7 @@ begin
         procedure(ABatch, ABatches: Integer)
         begin
           ProgressOverall(ABatch - 1, ABatches,
-            Format('Looking up tiles: batch %d of %d', [ABatch, ABatches]));
+            Format('Looking up tiles: request %d of %d', [ABatch, ABatches]));
         end);
     finally
       LLookup.Free;

@@ -94,13 +94,15 @@ If you already cloned without submodules, run
 | Action | Control |
 |--------|---------|
 | Select a block of tiles | Left-drag. The size and tile counts update as you drag. A left click selects one tile. To reach beyond the screen, drag towards an edge and the map scrolls that way, or use the mouse wheel to zoom while still dragging. |
-| Move the map | Right-drag, middle-drag, or Shift + left-drag. The map wraps east to west, so you can keep going past 180°, and selections can cross it (for example around Fiji or the Bering Strait). It stops at the poles, since the world does not wrap north to south. |
+| Select a whole country | Right-click it (on a Mac trackpad, click with two fingers). Every tile the country touches is selected and tinted, including tiles along its borders and coasts, so neighbouring countries' tiles are included where they share one. Overseas parts count too: France includes French Guiana, the United States includes Alaska and Hawaii. The selection label then gives the country, its tile count, and how many have data and are downloaded, such as `Germany: 68 tile(s), ...`. Fetch selection and Delete Selected Downloads work on just those tiles. Dragging a new selection or clicking replaces it. |
+| Move the map | Right-drag, middle-drag, or Shift + left-drag. A right click that does not move selects a country instead. The map wraps east to west, so you can keep going past 180°, and selections can cross it (for example around Fiji or the Bering Strait). It stops at the poles, since the world does not wrap north to south. |
 | Zoom | Mouse wheel, or the View menu |
 | Show or hide tiles that have data (cyan) | View > Show Available Tiles |
 | Show or hide downloaded tiles (green) | View > Show Downloaded Tiles |
+| Show or hide country borders (pink) and coastlines (white) | View > Show Country Borders, View > Show Coastlines |
 
-The status bar shows the position and tile under the pointer, and whether
-that tile has data. Progress messages and errors appear in the log on the
+The status bar shows the position and tile under the pointer, whether
+that tile has data, and the country it is in. Progress messages and errors appear in the log on the
 **Debug** tab (the file-by-file detail of downloads goes to a
 [report file](#how-downloads-work) instead), and serious errors (a failed download or tile index build,
 unreadable settings, a missing world map) are also shown in a dialog. The
@@ -116,6 +118,8 @@ unreadable settings, a missing world map) are also shown in a dialog. The
 | Data | Rescan Data Folder | Rebuilds the downloaded-tiles bitmap from the files, files any misplaced downloads into place, and removes leftovers and empty folders |
 | Data | Delete Selected Downloads... | Deletes the downloaded tiles inside the map selection |
 | View | Zoom In / Zoom Out / Whole World / Zoom to Selection | Map view |
+| View | Show Available Tiles / Show Downloaded Tiles | The cyan and green tile tints |
+| View | Show Country Borders / Show Coastlines | The borders and coastlines drawn over the map |
 | View | Copy Log / Clear Log | Copy the Debug tab's log to the clipboard, or empty it |
 
 **Fetch selection** downloads only tiles that have data and are not yet
@@ -126,13 +130,17 @@ rather than go below the reserve set in Settings (2 GB by default). The
 #### How downloads work
 
 1. Tiles already in the data folder are skipped.
-2. NASA CMR is asked where the rest are, up to 100 tiles in each request,
-   rather than once per tile. Tiles with no data (ocean) are left out.
+2. NASA CMR is asked where the rest are. For a selection on the map it
+   lists every tile in the selected block, 2,000 per request, so even the
+   whole world takes only about a dozen requests. Tiles scattered far
+   apart are asked for by name instead, 100 per request. Tiles with no
+   data (ocean) are left out.
 3. The tiles are downloaded, several files at once. A single download
    uses only a small part of a fast connection, so more at once is much
    faster. On a 1 Gbit/s line in the UK, 1 at a time gave about 3 MB/s,
-   12 about 26 MB/s and 16 about 56 MB/s (100 tiles, 2.1 GB in 38 s; the
-   whole world would take about 2 hours at that rate).
+   12 about 26 MB/s and 16 about 56 MB/s (100 tiles, 2.1 GB in 38 s).
+   At the Fast setting a 168-tile batch (3.1 GB) ran at 47 MB/s. The
+   whole world would take 2 to 2.5 hours at those rates.
 
 **Download speed** in Settings sets how hard GDEMFetch pushes:
 
@@ -197,6 +205,35 @@ progress dialog shows the step in progress, overall progress, and progress
 through the current file, with a Cancel button. The dialog stays until the
 download has actually stopped.
 
+### Borders and coastlines
+
+Country borders and coastlines are drawn over the world map, and the
+status bar names the country under the pointer. They come from
+[Natural Earth](https://www.naturalearthdata.com), which is in the public
+domain, so no permission or credit is needed (credit is given anyway).
+
+- Land borders are drawn as lines, so a border shared by two countries is
+  drawn once and coasts are not drawn as borders.
+- While much of the world is in view the 1:110m data is drawn; once a
+  degree is 8 pixels or more across, the more detailed 1:50m data.
+- Country names come from Natural Earth's 1:50m country outlines and use
+  its `ADMIN` names ("United Kingdom", "Ivory Coast").
+- Borders are shown as they are on the ground, which is Natural Earth's
+  default for disputed areas.
+- Right-clicking a country selects its tiles: every tile its outline
+  passes through (found by walking each edge across the tile grid) and
+  every tile whose centre lies inside it (found by filling between the
+  outline's crossings of each row). An island smaller than a tile still
+  gives its tile.
+
+The data is linked into the program as the `WORLDVECTORS` resource, built
+from `maps/world_vectors.bin`, so nothing is deployed. That file is made
+from Natural Earth's GeoJSON files by `tools/build_vectors.py`; its
+comments say which files it needs and how to run it. It holds five layers
+(1:110m and 1:50m borders, 1:110m and 1:50m coastlines, and 1:50m country
+outlines with names), about 190,000 points in 790 KB. `GDEMVectors.pas`
+documents the format.
+
 ### Themes
 
 Choose the program's look under **File > Settings > Theme**:
@@ -231,15 +268,16 @@ look and behave alike.
 ## Deploying
 
 GDEMFetch needs **no extra files deployed** on any platform. The world map
-is linked into the executable as a resource, which Delphi does on Windows,
-macOS and Linux alike, and everything else (settings, the tile index, the
-data folder) is created at run time. The default Deployment Manager
-entries are all that is needed.
+and its borders and coastlines are linked into the executable as
+resources, which Delphi does on Windows, macOS and Linux alike, and
+everything else (settings, the tile index, the data folder) is created at
+run time. The default Deployment Manager entries are all that is needed.
 
-The IDE adds files that are part of the project, such as the map image
-and `styles/buildstyles.cmd`, to the deployment on its own. These are
-disabled in `GDEMFetch.dproj` for every platform: the map is already
-inside the program, the script only runs at build time, and on macOS
+The IDE adds files that are part of the project, such as the map image,
+`maps/world_vectors.bin` and `styles/buildstyles.cmd`, to the deployment
+on its own. These are disabled in `GDEMFetch.dproj` for every platform:
+the map and vectors are already inside the program, the script only runs
+at build time, and on macOS
 anything in the app's `Resources/StartUp` folder is copied out to the
 user's folders by `System.StartUpCopy`. If the Deployment Manager ever
 shows them ticked again, untick them.
@@ -373,9 +411,10 @@ Existing Tiles...** and choose that folder.
 | `GDEM.groupproj` | Project group |
 | `GDEMFetch/` | The GDEMFetch application |
 | `styles/` | FMX styles for the themes, with the resource script and the pre-build script that builds them; see [Themes](#themes) |
-| `maps/` | World map images. `world_1080x540.jpg` is linked into GDEMFetch as a resource. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository. |
+| `maps/` | World map images and vectors. `world_1080x540.jpg` and `world_vectors.bin` (borders and coastlines) are linked into GDEMFetch as resources. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository. |
 | `delphi-neon/` | Neon JSON library (git submodule) |
 | `tools/pasdoc_check.py` | Checks the units follow the PasDoc rules; see [Notes for Claude](#notes-for-claude) |
+| `tools/build_vectors.py` | Builds `maps/world_vectors.bin` from Natural Earth; see [Borders and coastlines](#borders-and-coastlines) |
 | `CLAUDE.md` | Handover notes: the project's current state, test results and lessons learned, for picking the work up in a new conversation |
 | `docs/` | Ignored for development |
 | `models/` | Ignored for development |
@@ -398,14 +437,16 @@ Existing Tiles...** and choose that folder.
 | `GDEMCMR` | Neon models for CMR search results; no networking |
 | `GDEMReport` | `TDownloadReport`, the report file for each batch of downloads |
 | `GDEMAwake` | `TKeepAwake`, which keeps the computer from sleeping while a job runs |
+| `GDEMVectors` | `TWorldVectors`: country borders, coastlines and country names for the map; no FMX |
 | `GDEMDownloader` | Finds and downloads tiles |
 | `GDEMStore` | The data folder: block layout, downloaded-tiles bitmap, rescanning, moving, deleting, free space |
 | `GDEMCancel` | `TCancelToken`, shared by the Cancel button and background jobs |
 
 The world map image `maps/world_1080x540.jpg` is linked into GDEMFetch as
-the `WORLDMAP` RCDATA resource, so nothing needs deploying beside the
-program. It is an equirectangular projection: 3 pixels per degree,
-longitude -180 at the left and latitude 90 at the top.
+the `WORLDMAP` RCDATA resource, and `maps/world_vectors.bin` as
+`WORLDVECTORS`, so nothing needs deploying beside the program. The image
+is an equirectangular projection: 3 pixels per degree, longitude -180 at
+the left and latitude 90 at the top.
 
 ## Roadmap
 
@@ -469,7 +510,8 @@ got to, what has been tested and what was learned along the way.
     generated docs, but are documented anyway.
   - Before delivering, run `python3 tools/pasdoc_check.py GDEMFetch`. It
     reports undocumented interface items, `@link` targets that do not
-    exist and unbalanced `@tag(...)` brackets, and prints
+    exist, unbalanced `@tag(...)` brackets, and class fields declared
+    after a method or property (which Delphi rejects), and prints
     `No problems found` when all is well.
 - **Source files are ASCII only.** Delphi reads files without a byte
   order mark as ANSI, so write characters such as the degree sign as
@@ -514,6 +556,12 @@ got to, what has been tested and what was learned along the way.
   row in `THEMES` in `GDEMThemes.pas`.
 - Write files atomically: write a temporary file, then rename it.
 - Never put credentials in source code or log output.
+- Look tiles up in CMR by area (`bounding_box`), not by name, whenever
+  there are more than a few: wildcard name searches are slow for CMR to
+  answer, and the whole world took 230 of them. `LookUpTiles` chooses;
+  see `CMR_BOX_CELLS_PER_TILE`.
+- When paging CMR results, a page with fewer results than the page size
+  is the last; do not ask for another.
 - Get download URLs from CMR; do not guess Earthdata Cloud paths. Send
   the bearer token only to `*.earthdata.nasa.gov` and
   `*.earthdatacloud.nasa.gov`.

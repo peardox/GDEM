@@ -22,6 +22,9 @@
       the mouse wheel still zooms, so a selection can reach beyond what is
       on screen.)
     @item(Right-drag, middle-drag or Shift+left-drag moves the map.)
+    @item(A right click, without moving, fires
+      @link(TWorldMapView.OnRightClick); GDEMFetch uses it to select the
+      country under the pointer.)
     @item(The mouse wheel zooms in and out around the pointer.)
   )
 
@@ -36,6 +39,12 @@
   the map without smoothing, so tiles stay crisp squares at every zoom level
   and drawing costs the same however many tiles exist.
 
+  Country borders and coastlines from a @link(TWorldVectors) can be drawn
+  over the map (@link(TWorldMapView.Vectors)): the 1:110m data while much of
+  the world is in view, the more detailed 1:50m data once a degree is at
+  least @code(FINE_DETAIL_PIXELS_PER_DEGREE) pixels across. Only lines on
+  screen are drawn, and points closer together than a pixel are skipped.
+
   The control is created in code, so no design-time package is needed. }
 unit GDEMWorldMap;
 
@@ -44,7 +53,7 @@ interface
 uses
   System.SysUtils, System.Classes, System.Types, System.UITypes,
   FMX.Types, FMX.Controls, FMX.Graphics,
-  GDEMTiles, GDEMTileIndex;
+  GDEMTiles, GDEMTileIndex, GDEMVectors;
 
 type
   { Reports the position under the mouse pointer.
@@ -54,6 +63,12 @@ type
     @param(AOnMap @false when the pointer is outside the map image, in which
       case ALat and ALon should be ignored.) }
   TMapHoverEvent = procedure(Sender: TObject; ALat, ALon: Double; AOnMap: Boolean) of object;
+
+  { Reports a point clicked on the map.
+    @param(Sender The map view.)
+    @param(ALat Latitude clicked, in degrees.)
+    @param(ALon Longitude clicked, from -180 to 180.) }
+  TMapPointEvent = procedure(Sender: TObject; ALat, ALon: Double) of object;
 
   { What a mouse drag is currently doing. }
   TMapDragMode = (
@@ -87,6 +102,8 @@ type
     FDragMode: TMapDragMode;
     { Mouse position where a pan started. }
     FDragStart: TPointF;
+    { The button that started a pan, so a right click can be told apart. }
+    FPanButton: TMouseButton;
     { @link(FOrigin) when a pan started. }
     FDragOrigin: TPointF;
     { Latitude where a selection drag started. }
@@ -106,6 +123,20 @@ type
     FOnSelectionChanging: TNotifyEvent;
     { Backing field for @link(OnHover). }
     FOnHover: TMapHoverEvent;
+    { Backing field for @link(OnRightClick). }
+    FOnRightClick: TMapPointEvent;
+    { The tiles of a selection made of separate tiles (see
+      @link(SelectTiles)); owned. Only meaningful while
+      @link(FHasSelectionMask) is @true. }
+    FSelectionMask: TTileIndex;
+    { @true while the selection is the tiles in @link(FSelectionMask)
+      rather than the whole of @link(FSelection). }
+    FHasSelectionMask: Boolean;
+    { Backing field for @link(SelectionName). }
+    FSelectionName: string;
+    { One pixel per tile of @link(FSelectionMask), in the selection colour;
+      @nil when there is no mask. }
+    FSelectionOverlay: TBitmap;
     { Backing field for @link(TileIndex). Not owned. }
     FTileIndex: TTileIndex;
     { Backing field for @link(DownloadedIndex). Not owned. }
@@ -114,10 +145,50 @@ type
       transparent elsewhere, following @link(ShowAvailableTiles) and
       @link(ShowDownloadedTiles). @nil when there is nothing to show. }
     FTileOverlay: TBitmap;
+
     { Backing field for @link(ShowAvailableTiles). }
     FShowAvailableTiles: Boolean;
     { Backing field for @link(ShowDownloadedTiles). }
     FShowDownloadedTiles: Boolean;
+    { Backing field for @link(Vectors). Not owned. }
+    FVectors: TWorldVectors;
+    { Backing field for @link(ShowBorders). }
+    FShowBorders: Boolean;
+    { Backing field for @link(ShowCoastlines). }
+    FShowCoastlines: Boolean;
+
+    { Ends a selection made of separate tiles, leaving
+      @link(FSelection) as it is. }
+    procedure ClearSelectionMask;
+
+    { Reader for @link(SelectionMask).
+      @returns(The mask, or @nil for a plain block.) }
+    function GetSelectionMask: TTileIndex;
+
+    { Stretches a 360 by 180 bitmap, one pixel per tile, over one copy of
+      the map.
+      @param(ABitmap The bitmap; row 0 is latitude 89 to 90, column 0
+        longitude -180 to -179.)
+      @param(AOpacity Opacity, from 0 to 1.)
+      @param(ACopy Which copy of the map, as for @link(PaintMapCopy).)
+      @param(ANorth Northernmost latitude on screen.)
+      @param(ASouth Southernmost latitude on screen.)
+      @param(AWest Westernmost longitude on screen, not wrapped.)
+      @param(AEast Easternmost longitude on screen, not wrapped.) }
+    procedure PaintTileBitmap(ABitmap: TBitmap; AOpacity: Single; ACopy: Integer;
+      ANorth, ASouth, AWest, AEast: Double);
+
+    { Writer for @link(Vectors).
+      @param(AValue The borders and coastlines, or @nil.) }
+    procedure SetVectors(AValue: TWorldVectors);
+
+    { Writer for @link(ShowBorders).
+      @param(AValue @true to draw country borders.) }
+    procedure SetShowBorders(AValue: Boolean);
+
+    { Writer for @link(ShowCoastlines).
+      @param(AValue @true to draw coastlines.) }
+    procedure SetShowCoastlines(AValue: Boolean);
 
     { Writer for @link(DownloadedIndex).
       @param(AValue The new index, or @nil.) }
@@ -202,6 +273,19 @@ type
       @param(AWest Westernmost longitude on screen, not wrapped.)
       @param(AEast Easternmost longitude on screen, not wrapped.) }
     procedure PaintMapCopy(ACopy: Integer; ANorth, ASouth, AWest, AEast: Double);
+
+    { Draws the lines of a vector layer that are on screen, on every copy
+      of the map that is showing, as one path.
+      @param(ALayer The layer; nothing is drawn if it is @nil.)
+      @param(AColor Line colour.)
+      @param(AOpacity Line opacity, from 0 to 1.)
+      @param(AThickness Line width, in pixels.)
+      @param(ANorth Northernmost latitude on screen.)
+      @param(ASouth Southernmost latitude on screen.)
+      @param(AWest Westernmost longitude on screen, not wrapped.)
+      @param(AEast Easternmost longitude on screen, not wrapped.) }
+    procedure PaintLayer(ALayer: TGeoLayer; AColor: TAlphaColor;
+      AOpacity, AThickness: Single; ANorth, ASouth, AWest, AEast: Double);
 
     { Converts a local point to a map position for dragging: the latitude
       is clamped to just inside the poles, and the longitude is not wrapped.
@@ -314,6 +398,17 @@ type
     { Clears the selection and fires @link(OnSelectionChanged). }
     procedure ClearSelection;
 
+    { Selects a set of separate tiles, such as the tiles a country covers,
+      rather than a whole block. @link(Selection) becomes the smallest block
+      holding them, @link(SelectionMask) the tiles themselves and
+      @link(SelectionName) the name given; they are shown tinted. Starting
+      a drag or calling @link(ClearSelection) ends it. Fires
+      @link(OnSelectionChanged).
+      @param(ATiles The tiles; copied, so the caller keeps and frees it. An
+        empty set clears the selection.)
+      @param(AName What the tiles are, such as a country's name.) }
+    procedure SelectTiles(ATiles: TTileIndex; const AName: string);
+
     { Call after changing the contents of @link(TileIndex) or
       @link(DownloadedIndex) in place, so the map shows the change. Not
       needed after assigning a new index. }
@@ -336,6 +431,18 @@ type
       until @link(DownloadedIndex) is set. }
     property ShowDownloadedTiles: Boolean read FShowDownloadedTiles write SetShowDownloadedTiles;
 
+    { Country borders and coastlines to draw over the map. Not owned, like
+      @link(TileIndex). @nil draws none. }
+    property Vectors: TWorldVectors read FVectors write SetVectors;
+
+    { Whether country borders are drawn. On by default; has no effect
+      until @link(Vectors) is set. }
+    property ShowBorders: Boolean read FShowBorders write SetShowBorders;
+
+    { Whether coastlines are drawn. On by default; has no effect until
+      @link(Vectors) is set. }
+    property ShowCoastlines: Boolean read FShowCoastlines write SetShowCoastlines;
+
     { The selected block of tiles. Changed by dragging on the map or by
       @link(ClearSelection). Empty when nothing is selected. }
     property Selection: TTileRect read FSelection;
@@ -352,6 +459,20 @@ type
 
     { Fired as the pointer moves over the control. }
     property OnHover: TMapHoverEvent read FOnHover write FOnHover;
+
+    { When the selection is a set of separate tiles (see
+      @link(SelectTiles)), those tiles, all inside @link(Selection);
+      otherwise @nil, and every tile of @link(Selection) is selected. Owned
+      by the map view: do not free or keep it. }
+    property SelectionMask: TTileIndex read GetSelectionMask;
+
+    { The name given to @link(SelectTiles), or an empty string for a
+      selection dragged on the map. }
+    property SelectionName: string read FSelectionName;
+
+    { Fired by a right click that does not move the map: a right-drag still
+      moves it. }
+    property OnRightClick: TMapPointEvent read FOnRightClick write FOnRightClick;
   end;
 
 implementation
@@ -375,6 +496,26 @@ const
   DOWNLOADED_COLOR = $FF4CDB5C;
   { Opacity of the tile tints. }
   TILE_TINT_OPACITY = 0.4;
+  { Opacity of the tiles of a selection made of separate tiles. }
+  SELECTION_TINT_OPACITY = 0.5;
+  { How far the pointer may move between pressing and releasing the right
+    button for it still to count as a click, in pixels. }
+  CLICK_SLOP = 4;
+  { Colour of country borders: pink, unlike anything else on the map. }
+  BORDER_COLOR = $FFFF80AB;
+  { Opacity of country borders. }
+  BORDER_OPACITY = 0.9;
+  { Colour of coastlines. }
+  COAST_COLOR = $FFFFFFFF;
+  { Opacity of coastlines; lower than the borders, as the map image already
+    shows where the land is. }
+  COAST_OPACITY = 0.55;
+  { Screen pixels per degree from which the 1:50m borders and coastlines
+    are drawn instead of the 1:110m ones. }
+  FINE_DETAIL_PIXELS_PER_DEGREE = 8;
+  { Points of a line closer than this to the last one drawn are skipped,
+    in pixels. }
+  MIN_SEGMENT_PIXELS = 0.75;
   { Zoom step for one mouse wheel notch. }
   WHEEL_ZOOM_STEP = 1.25;
   { Approximate largest size of one degree on screen, in pixels. }
@@ -408,6 +549,9 @@ begin
   FSelection := TTileRect.Empty;
   FShowAvailableTiles := True;
   FShowDownloadedTiles := True;
+  FShowBorders := True;
+  FShowCoastlines := True;
+  FSelectionMask := TTileIndex.Create;
   FScrollTimer := TTimer.Create(Self);
   FScrollTimer.Enabled := False;
   FScrollTimer.Interval := EDGE_SCROLL_INTERVAL;
@@ -416,6 +560,8 @@ end;
 
 destructor TWorldMapView.Destroy;
 begin
+  FSelectionOverlay.Free;
+  FSelectionMask.Free;
   FTileOverlay.Free;
   FMap.Free;
   inherited;
@@ -448,6 +594,30 @@ begin
   begin
     FShowDownloadedTiles := AValue;
     RebuildTileOverlay;
+  end;
+end;
+
+procedure TWorldMapView.SetVectors(AValue: TWorldVectors);
+begin
+  FVectors := AValue;
+  Repaint;
+end;
+
+procedure TWorldMapView.SetShowBorders(AValue: Boolean);
+begin
+  if FShowBorders <> AValue then
+  begin
+    FShowBorders := AValue;
+    Repaint;
+  end;
+end;
+
+procedure TWorldMapView.SetShowCoastlines(AValue: Boolean);
+begin
+  if FShowCoastlines <> AValue then
+  begin
+    FShowCoastlines := AValue;
+    Repaint;
   end;
 end;
 
@@ -622,8 +792,60 @@ begin
   Repaint;
 end;
 
+procedure TWorldMapView.ClearSelectionMask;
+begin
+  FHasSelectionMask := False;
+  FSelectionName := '';
+  FSelectionMask.Clear;
+  FreeAndNil(FSelectionOverlay);
+end;
+
+function TWorldMapView.GetSelectionMask: TTileIndex;
+begin
+  if FHasSelectionMask then
+    Result := FSelectionMask
+  else
+    Result := nil;
+end;
+
+procedure TWorldMapView.SelectTiles(ATiles: TTileIndex; const AName: string);
+var
+  LData: TBitmapData;
+  LRow, LCol: Integer;
+begin
+  ClearSelectionMask;
+  if (ATiles = nil) or ATiles.IsEmpty then
+  begin
+    ClearSelection;
+    Exit;
+  end;
+  FSelectionMask.Assign(ATiles);
+  FHasSelectionMask := True;
+  FSelectionName := AName;
+  FSelection := FSelectionMask.BoundingRect;
+
+  FSelectionOverlay := TBitmap.Create(TILE_INDEX_WIDTH, TILE_INDEX_HEIGHT);
+  if FSelectionOverlay.Map(TMapAccess.Write, LData) then
+  try
+    // Row 0 is the northernmost row of tiles, as in RebuildTileOverlay
+    for LRow := 0 to TILE_INDEX_HEIGHT - 1 do
+      for LCol := 0 to TILE_INDEX_WIDTH - 1 do
+        if FSelectionMask.Has(89 - LRow, LCol - 180) then
+          LData.SetPixel(LCol, LRow, SELECTION_COLOR)
+        else
+          LData.SetPixel(LCol, LRow, TAlphaColors.Null);
+  finally
+    FSelectionOverlay.Unmap(LData);
+  end;
+
+  Repaint;
+  if Assigned(FOnSelectionChanged) then
+    FOnSelectionChanged(Self);
+end;
+
 procedure TWorldMapView.ClearSelection;
 begin
+  ClearSelectionMask;
   FSelection := TTileRect.Empty;
   Repaint;
   if Assigned(FOnSelectionChanged) then
@@ -780,7 +1002,6 @@ procedure TWorldMapView.PaintMapCopy(ACopy: Integer; ANorth, ASouth, AWest, AEas
 var
   LShift: TPointF;
   LClient, LSource, LDest: TRectF;
-  LWest, LEast: Double;
 begin
   // This copy's image sits a whole number of map widths from FOrigin
   LShift := PointF(ACopy * MapWidth * FScale, 0);
@@ -794,18 +1015,79 @@ begin
                          FOrigin + LShift + LSource.BottomRight * FScale);
   Canvas.DrawBitmap(FMap, LSource, LDest, 1, False);
 
-  // Tint tiles that have data or are downloaded; overlay pixels are whole
-  // degrees, so the source rectangle is this copy's visible longitudes
+  // Tint tiles that have data or are downloaded
   if FTileOverlay <> nil then
-  begin
-    LWest := Max(AWest - ACopy * 360, -180);
-    LEast := Min(AEast - ACopy * 360, 180);
-    if LEast > LWest then
-      Canvas.DrawBitmap(FTileOverlay,
-        TRectF.Create(LWest + 180, 90 - ANorth, LEast + 180, 90 - ASouth),
-        TRectF.Create(GeoToScreen(ANorth, LWest + ACopy * 360),
-                      GeoToScreen(ASouth, LEast + ACopy * 360)),
-        TILE_TINT_OPACITY, True);
+    PaintTileBitmap(FTileOverlay, TILE_TINT_OPACITY, ACopy, ANorth, ASouth, AWest, AEast);
+end;
+
+procedure TWorldMapView.PaintTileBitmap(ABitmap: TBitmap; AOpacity: Single;
+  ACopy: Integer; ANorth, ASouth, AWest, AEast: Double);
+var
+  LWest, LEast: Double;
+begin
+  // Bitmap pixels are whole degrees, so the source rectangle is this copy's
+  // visible longitudes; drawn without smoothing so tiles stay square
+  LWest := Max(AWest - ACopy * 360, -180);
+  LEast := Min(AEast - ACopy * 360, 180);
+  if LEast > LWest then
+    Canvas.DrawBitmap(ABitmap,
+      TRectF.Create(LWest + 180, 90 - ANorth, LEast + 180, 90 - ASouth),
+      TRectF.Create(GeoToScreen(ANorth, LWest + ACopy * 360),
+                    GeoToScreen(ASouth, LEast + ACopy * 360)),
+      AOpacity, True);
+end;
+
+procedure TWorldMapView.PaintLayer(ALayer: TGeoLayer; AColor: TAlphaColor;
+  AOpacity, AThickness: Single; ANorth, ASouth, AWest, AEast: Double);
+var
+  LPath: TPathData;
+  LCopy, LFeature, LPart, LPoint, LLast: Integer;
+  LShift: Double;
+  LBounds: TRectF;
+  LPoints: TArray<TPointF>;
+  LScreen, LDrawn: TPointF;
+begin
+  if ALayer = nil then
+    Exit;
+  LPath := TPathData.Create;
+  try
+    for LCopy := Floor((AWest + 180) / 360) to Floor((AEast + 180) / 360) do
+    begin
+      LShift := LCopy * 360;
+      for LFeature := 0 to High(ALayer.Features) do
+        for LPart := 0 to High(ALayer.Features[LFeature].Parts) do
+        begin
+          // Skip lines wholly off screen; Top is the smaller latitude
+          LBounds := ALayer.Features[LFeature].Parts[LPart].Bounds;
+          if (LBounds.Right + LShift < AWest) or (LBounds.Left + LShift > AEast) or
+             (LBounds.Bottom < ASouth) or (LBounds.Top > ANorth) then
+            Continue;
+          LPoints := ALayer.Features[LFeature].Parts[LPart].Points;
+          LLast := High(LPoints);
+          LDrawn := GeoToScreen(LPoints[0].Y, LPoints[0].X + LShift);
+          LPath.MoveTo(LDrawn);
+          for LPoint := 1 to LLast do
+          begin
+            LScreen := GeoToScreen(LPoints[LPoint].Y, LPoints[LPoint].X + LShift);
+            // Detail finer than a pixel cannot be seen, but the last point
+            // is always drawn so lines meet
+            if (LPoint = LLast) or (Abs(LScreen.X - LDrawn.X) >= MIN_SEGMENT_PIXELS) or
+               (Abs(LScreen.Y - LDrawn.Y) >= MIN_SEGMENT_PIXELS) then
+            begin
+              LPath.LineTo(LScreen);
+              LDrawn := LScreen;
+            end;
+          end;
+        end;
+    end;
+    if LPath.Count = 0 then
+      Exit;
+    Canvas.Stroke.Kind := TBrushKind.Solid;
+    Canvas.Stroke.Color := AColor;
+    Canvas.Stroke.Thickness := AThickness;
+    Canvas.DrawPath(LPath, AOpacity);
+  finally
+    LPath.Free;
   end;
 end;
 
@@ -815,6 +1097,7 @@ var
   LNorth, LWest, LSouth, LEast, LLat, LLon: Double;
   LCopy, LFirstCopy, LLastCopy: Integer;
   LTop, LBottom, LEdge: Single;
+  LDetail: TGeoDetail;
 begin
   LClient := LocalRect;
   Canvas.Fill.Kind := TBrushKind.Solid;
@@ -855,6 +1138,21 @@ begin
       0, 0, AllCorners, 0.45);
   end;
 
+  // Borders and coastlines, over the map and tints but under the grid
+  if FVectors <> nil then
+  begin
+    if ScreenPixelsPerDegree >= FINE_DETAIL_PIXELS_PER_DEGREE then
+      LDetail := gdFine
+    else
+      LDetail := gdCoarse;
+    if FShowCoastlines then
+      PaintLayer(FVectors.Coastlines(LDetail), COAST_COLOR, COAST_OPACITY, 1,
+        LNorth, LSouth, LWest, LEast);
+    if FShowBorders then
+      PaintLayer(FVectors.Borders(LDetail), BORDER_COLOR, BORDER_OPACITY, 1.25,
+        LNorth, LSouth, LWest, LEast);
+  end;
+
   PaintGrid(TRectF.Create(LWest, LNorth, LEast, LSouth));
 
   // Outline the tile under the pointer once tiles are big enough to see.
@@ -873,11 +1171,21 @@ begin
     end;
   end;
 
+  // A selection of separate tiles shows those tiles, inside a thin outline
+  // of the block holding them
+  if FHasSelectionMask and (FSelectionOverlay <> nil) then
+    for LCopy := LFirstCopy to LLastCopy do
+      PaintTileBitmap(FSelectionOverlay, SELECTION_TINT_OPACITY, LCopy,
+        LNorth, LSouth, LWest, LEast);
+
   // The selection is stored with West in -180..179 but may be up to 360
   // degrees wide, so it can show on the copies either side as well
   if not FSelection.IsEmpty then
     for LCopy := LFirstCopy - 1 to LLastCopy + 1 do
-      PaintTileRect(FSelection, SELECTION_COLOR, 0.25, LCopy * 360);
+      if FHasSelectionMask then
+        PaintTileRect(FSelection, SELECTION_COLOR, 0, LCopy * 360)
+      else
+        PaintTileRect(FSelection, SELECTION_COLOR, 0.25, LCopy * 360);
 end;
 
 procedure TWorldMapView.UpdateDragSelection;
@@ -964,6 +1272,7 @@ begin
   if (Button = TMouseButton.mbLeft) and not (ssShift in Shift) then
   begin
     FDragMode := mdSelect;
+    ClearSelectionMask;
     ScreenToGeoClamped(FMousePos, FAnchorLat, FAnchorLon);
     FSelection := TTileRect.FromPoints(FAnchorLon, FAnchorLat, FAnchorLon, FAnchorLat);
     if Assigned(FOnSelectionChanging) then
@@ -972,6 +1281,7 @@ begin
   else
   begin
     FDragMode := mdPan;
+    FPanButton := Button;
     FDragStart := FMousePos;
     FDragOrigin := FOrigin;
   end;
@@ -1004,15 +1314,22 @@ end;
 
 procedure TWorldMapView.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Single);
 var
-  LWasSelecting: Boolean;
+  LWasSelecting, LRightClick: Boolean;
+  LLat, LLon: Double;
 begin
   inherited;
   LWasSelecting := FDragMode = mdSelect;
+  // A right press and release that barely moved is a click, not a pan
+  LRightClick := (FDragMode = mdPan) and (FPanButton = TMouseButton.mbRight) and
+    (Button = TMouseButton.mbRight) and
+    (PointF(X, Y).Distance(FDragStart) <= CLICK_SLOP);
   FDragMode := mdNone;
   FScrollTimer.Enabled := False;
   Repaint;
   if LWasSelecting and Assigned(FOnSelectionChanged) then
     FOnSelectionChanged(Self);
+  if LRightClick and Assigned(FOnRightClick) and ScreenToGeo(PointF(X, Y), LLat, LLon) then
+    FOnRightClick(Self, LLat, LLon);
 end;
 
 procedure TWorldMapView.MouseWheel(Shift: TShiftState; WheelDelta: Integer;

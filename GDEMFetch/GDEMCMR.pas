@@ -155,6 +155,18 @@ type
         results.) }
     class function NamesURL(const AGranules: array of string): string; static;
 
+    { Builds the URL that lists every ASTER GDEM V3 granule touching a
+      block of whole degrees. Granules just outside the block are included
+      too, as their edges overlap it slightly, so filter the results. Page
+      through them as for @link(CollectionURL).
+      @param(AWest Western edge, from -180.)
+      @param(ASouth Southern edge, from -90.)
+      @param(AEast Eastern edge, at most 180 and greater than AWest.)
+      @param(ANorth Northern edge, at most 90 and greater than ASouth.)
+      @returns(The search URL, asking for up to @link(CMR_MAX_PAGE_SIZE)
+        results per page.) }
+    class function BoxURL(AWest, ASouth, AEast, ANorth: Integer): string; static;
+
     { Deserialises a CMR granule search response.
 
       @param(AJSON The response body as returned by
@@ -237,6 +249,15 @@ begin
   for LGranule in AGranules do
     Result := Result + '&readable_granule_name%5B%5D=' +
       TNetEncoding.URL.Encode(LGranule) + '*';
+end;
+
+class function TCMRGranuleSearch.BoxURL(AWest, ASouth, AEast, ANorth: Integer): string;
+begin
+  Result := CMR_GRANULE_SEARCH_URL +
+    '?short_name=' + ASTGTM_SHORT_NAME +
+    '&version=' + ASTGTM_VERSION +
+    '&page_size=' + IntToStr(CMR_MAX_PAGE_SIZE) +
+    Format('&bounding_box=%d,%d,%d,%d', [AWest, ASouth, AEast, ANorth]);
 end;
 
 class function TCMRGranuleSearch.CollectionURL(APageSize: Integer): string;

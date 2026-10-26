@@ -80,6 +80,18 @@ object frmMain: TfrmMain
         Text = 'Show Downloaded Tiles'
         OnClick = mnuShowDownloadedClick
       end
+      object mnuShowBorders: TMenuItem
+        AutoCheck = True
+        IsChecked = True
+        Text = 'Show Country Borders'
+        OnClick = mnuShowBordersClick
+      end
+      object mnuShowCoastlines: TMenuItem
+        AutoCheck = True
+        IsChecked = True
+        Text = 'Show Coastlines'
+        OnClick = mnuShowCoastlinesClick
+      end
       object mnuLogSep: TMenuItem
         Text = '-'
       end

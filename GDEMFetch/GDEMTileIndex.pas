@@ -119,6 +119,13 @@ type
       @returns(Tile names such as @code(N50W002).) }
     function TileNamesIn(const ARect: TTileRect): TArray<string>;
 
+    { The smallest block of tiles holding every tile in the index. Across
+      longitudes it takes the shorter way round the world, so tiles on both
+      sides of the 180 degree meridian (Russia, Fiji) give a block that
+      crosses it rather than one spanning the whole world.
+      @returns(The block, or @code(TTileRect.Empty) if the index is empty.) }
+    function BoundingRect: TTileRect;
+
     { Checks whether the index holds no tiles at all, which means it has
       not been loaded or built.
       @returns(@true if no tile has data.) }
@@ -343,6 +350,61 @@ begin
         Result[LIndex] := TileName(LLat, LLon);
         Inc(LIndex);
       end;
+end;
+
+function TTileIndex.BoundingRect: TTileRect;
+var
+  LUsed: array[0..TILE_INDEX_WIDTH - 1] of Boolean;
+  LRow, LCol, LSouth, LNorth, LGap, LBestGap, LBestEnd, LStep: Integer;
+begin
+  if FCount = 0 then
+    Exit(TTileRect.Empty);
+
+  // Which rows and columns hold any tile
+  LSouth := MaxInt;
+  LNorth := -MaxInt;
+  FillChar(LUsed, SizeOf(LUsed), 0);
+  for LRow := -90 to 89 do
+    for LCol := 0 to TILE_INDEX_WIDTH - 1 do
+      if Has(LRow, LCol - 180) then
+      begin
+        LUsed[LCol] := True;
+        LSouth := Min(LSouth, LRow);
+        LNorth := Max(LNorth, LRow + 1);
+      end;
+
+  // The longest run of empty columns, going round the world twice so a run
+  // through the 180 degree meridian is measured whole
+  LGap := 0;
+  LBestGap := 0;
+  LBestEnd := 0;
+  for LStep := 0 to 2 * TILE_INDEX_WIDTH - 1 do
+    if LUsed[LStep mod TILE_INDEX_WIDTH] then
+      LGap := 0
+    else
+    begin
+      Inc(LGap);
+      if (LGap > LBestGap) and (LGap <= TILE_INDEX_WIDTH) then
+      begin
+        LBestGap := LGap;
+        LBestEnd := LStep mod TILE_INDEX_WIDTH;
+      end;
+    end;
+
+  Result.South := LSouth;
+  Result.North := LNorth;
+  if LBestGap = 0 then
+  begin
+    // Every column is used
+    Result.West := -180;
+    Result.East := 180;
+  end
+  else
+  begin
+    // The block starts just after the gap and covers everything else
+    Result.West := NormalizeLon((LBestEnd + 1) mod TILE_INDEX_WIDTH - 180);
+    Result.East := Result.West + TILE_INDEX_WIDTH - LBestGap;
+  end;
 end;
 
 function TTileIndex.IsEmpty: Boolean;

@@ -7,8 +7,10 @@
   @orderedList(
     @item(NASA CMR, which is public and needs no login, is asked where the
       tiles' files live. For a batch, @link(TGDEMDownloader.LookUpTiles)
-      asks about up to @link(CMR_NAMES_PER_REQUEST) tiles in one request.
-      See @link(TCMRGranuleSearch).)
+      lists every granule in the block the tiles cover, 2000 at a time, or
+      for tiles scattered far apart asks about up to
+      @link(CMR_NAMES_PER_REQUEST) by name in one request. See
+      @link(TCMRGranuleSearch).)
     @item(Each file is downloaded from Earthdata Cloud using an Earthdata
       Login bearer token.)
   )
@@ -81,6 +83,14 @@ const
     one request. Keeps the request's address well under the length CMR
     accepts. }
   CMR_NAMES_PER_REQUEST = 100;
+  { @link(TGDEMDownloader.LookUpTiles) lists the whole block the tiles
+    cover, rather than asking for them by name, when the block has fewer
+    than this many one-degree cells for each tile wanted. A page of a block
+    listing returns up to 2000 granules, against 100 tiles per request by
+    name, and name searches (which use wildcards) are much slower for CMR
+    to answer; 20 keeps the block listing the cheaper of the two even if
+    every cell of the block had data. }
+  CMR_BOX_CELLS_PER_TILE = 20;
 
 type
   { Called with a line of progress text for the user.
@@ -422,17 +432,25 @@ type
       @raises(ECMRError if the CMR response cannot be read.) }
     function FindTileURLs(const AGranule: string): TArray<string>;
 
-    { Asks CMR for the download URLs of many tiles, up to
-      @link(CMR_NAMES_PER_REQUEST) in each request rather than one request
-      per tile.
-
-      Should a combined search find nothing at all for a batch of several
-      tiles, each tile in it is looked up on its own instead, so a CMR
-      that did not understand the combined search costs time but never
-      loses tiles.
+    { Asks CMR for the download URLs of many tiles, in one of two ways:
+      @unorderedList(
+        @item(When the tiles fill a good part of the block they lie in, as a
+          selection on the map does, every granule in that block is listed,
+          up to 2000 per request, and the ones wanted are kept. The whole
+          world takes about a dozen requests this way.)
+        @item(Otherwise, when they are few and far apart, they are asked
+          for by name, @link(CMR_NAMES_PER_REQUEST) in each request.)
+      )
+      See @link(CMR_BOX_CELLS_PER_TILE) for the choice. Should a block
+      listing find none of the tiles, they are asked for by name instead;
+      should a search by name find nothing at all for several tiles, each
+      is looked up on its own. So a CMR that does not understand a search
+      costs time but never loses tiles.
 
       @param(ATiles Tile names such as @code(N50W002), in any letter case.)
-      @param(AOnBatch Called before each batch. May be @nil.)
+      @param(AOnBatch Called before each request or batch, with how many
+        there are thought to be; a block listing learns its page count from
+        the first answer. May be @nil.)
       @returns(A new dictionary, which the caller frees, from each tile
         that has data, named as @code(TileName) names it (such as
         @code(N50W002)), to its file URLs. Tiles with no data are not in
@@ -995,55 +1013,93 @@ end;
 function TGDEMDownloader.LookUpTiles(const ATiles: TArray<string>;
   const AOnBatch: TGDEMBatchEvent): TDictionary<string, TArray<string>>;
 var
-  LBatches, LBatch, LFrom, LCount, LIndex, LFound, LSouth, LWest: Integer;
-  LNames: TArray<string>;
-  LBody: TStringStream;
-  LResp: IHTTPResponse;
-  LSearch: TCMRGranuleSearch;
-  LGranule: TCMRGranule;
-  LURLs: TArray<string>;
-  LSearchAfter: string;
-begin
-  Result := TDictionary<string, TArray<string>>.Create;
-  try
-    LBatches := (Length(ATiles) + CMR_NAMES_PER_REQUEST - 1) div CMR_NAMES_PER_REQUEST;
+  // The dictionary returned; named so the nested routines can reach it
+  LResult: TDictionary<string, TArray<string>>;
+  LWanted: TDictionary<string, Boolean>;
+  LTile: string;
+  LSouth, LWest, LMinS, LMaxS, LMinW, LMaxW: Integer;
+  LCells: Int64;
+
+  { Fetches every page of a search, keeping the tiles in LWanted that have
+    data files. Stops at a page that is not full, so the empty page CMR
+    would otherwise send last is never asked for.
+    @param(AURL The search URL.)
+    @param(ABoxPages @true to report each page through AOnBatch, working
+      out the page count from the CMR-Hits header.)
+    @returns(How many wanted tiles were found.) }
+  function FetchAll(const AURL: string; ABoxPages: Boolean): Integer;
+  var
+    LBody: TStringStream;
+    LResp: IHTTPResponse;
+    LSearch: TCMRGranuleSearch;
+    LGranule: TCMRGranule;
+    LURLs: TArray<string>;
+    LSearchAfter, LName: string;
+    LPage, LPages, LS, LW, LEntries: Integer;
+    LHits: Int64;
+  begin
+    Result := 0;
+    LSearchAfter := '';
+    LPage := 0;
+    LPages := 1;
+    LBody := TStringStream.Create('', TEncoding.UTF8);
+    try
+      repeat
+        Inc(LPage);
+        if ABoxPages and Assigned(AOnBatch) then
+          AOnBatch(LPage, Max(LPage, LPages));
+        LResp := GetCMRPage(AURL, LSearchAfter, LBody);
+        if (LPage = 1) and TryStrToInt64(LResp.HeaderValue[CMR_HITS_HEADER], LHits) then
+          LPages := Max(1, Integer((LHits + CMR_MAX_PAGE_SIZE - 1) div CMR_MAX_PAGE_SIZE));
+        LSearch := TCMRGranuleSearch.FromJSON(LBody.DataString);
+        LEntries := Length(LSearch.Feed.Entry);
+        for LGranule in LSearch.Feed.Entry do
+          if TryParseTileName(LGranule.Title, LS, LW) or
+             TryParseTileName(LGranule.ProducerGranuleId, LS, LW) then
+          begin
+            LName := TileName(LS, LW);
+            if not LWanted.ContainsKey(LName) or LResult.ContainsKey(LName) then
+              Continue;
+            LURLs := LGranule.DataFileURLs(TILE_FILE_SUFFIXES);
+            if Length(LURLs) > 0 then
+            begin
+              LResult.Add(LName, LURLs);
+              Inc(Result);
+            end;
+          end;
+        if ABoxPages then
+          Log(Format('  page %d of %d: %d granule(s)', [LPage, LPages, LEntries]));
+        LSearchAfter := LResp.HeaderValue[CMR_SEARCH_AFTER_HEADER];
+      until (LEntries < CMR_MAX_PAGE_SIZE) or (LSearchAfter = '');
+    finally
+      LBody.Free;
+    end;
+  end;
+
+  { Looks the tiles up by name, @link(CMR_NAMES_PER_REQUEST) at a time,
+    falling back to one at a time for a batch where nothing is found.
+    @param(ANames The tile names to look up.) }
+  procedure ByName(const ANames: TArray<string>);
+  var
+    LBatches, LBatch, LFrom, LCount, LIndex, LFound, LS, LW: Integer;
+    LNames: TArray<string>;
+    LURLs: TArray<string>;
+  begin
+    LBatches := (Length(ANames) + CMR_NAMES_PER_REQUEST - 1) div CMR_NAMES_PER_REQUEST;
     for LBatch := 0 to LBatches - 1 do
     begin
       CheckCancelled;
       LFrom := LBatch * CMR_NAMES_PER_REQUEST;
-      LCount := Min(CMR_NAMES_PER_REQUEST, Length(ATiles) - LFrom);
+      LCount := Min(CMR_NAMES_PER_REQUEST, Length(ANames) - LFrom);
       SetLength(LNames, LCount);
       for LIndex := 0 to LCount - 1 do
-        LNames[LIndex] := TileGranuleName(ATiles[LFrom + LIndex]);
+        LNames[LIndex] := TileGranuleName(ANames[LFrom + LIndex]);
       if Assigned(AOnBatch) then
         AOnBatch(LBatch + 1, LBatches);
-      Log(Format('Asking NASA CMR about %d tile(s) (batch %d of %d) ...',
+      Log(Format('Asking NASA CMR about %d tile(s) by name (batch %d of %d) ...',
         [LCount, LBatch + 1, LBatches]));
 
-      LFound := 0;
-      LSearchAfter := '';
-      LBody := TStringStream.Create('', TEncoding.UTF8);
-      try
-        repeat
-          LResp := GetCMRPage(TCMRGranuleSearch.NamesURL(LNames), LSearchAfter, LBody);
-          LSearch := TCMRGranuleSearch.FromJSON(LBody.DataString);
-          for LGranule in LSearch.Feed.Entry do
-            if TryParseTileName(LGranule.Title, LSouth, LWest) or
-               TryParseTileName(LGranule.ProducerGranuleId, LSouth, LWest) then
-            begin
-              LURLs := LGranule.DataFileURLs(TILE_FILE_SUFFIXES);
-              if Length(LURLs) > 0 then
-              begin
-                Result.AddOrSetValue(TileName(LSouth, LWest), LURLs);
-                Inc(LFound);
-              end;
-            end;
-          LSearchAfter := LResp.HeaderValue[CMR_SEARCH_AFTER_HEADER];
-        until (Length(LSearch.Feed.Entry) = 0) or (LSearchAfter = '');
-      finally
-        LBody.Free;
-      end;
-
+      LFound := FetchAll(TCMRGranuleSearch.NamesURL(LNames), False);
       if (LFound = 0) and (LCount > 1) then
       begin
         // Either all ocean, or CMR did not take the names together: ask
@@ -1052,18 +1108,63 @@ begin
         for LIndex := 0 to LCount - 1 do
         begin
           LURLs := FindTileURLs(LNames[LIndex]);
-          if (Length(LURLs) > 0) and TryParseTileName(LNames[LIndex], LSouth, LWest) then
+          if (Length(LURLs) > 0) and TryParseTileName(LNames[LIndex], LS, LW) then
           begin
-            Result.AddOrSetValue(TileName(LSouth, LWest), LURLs);
+            LResult.AddOrSetValue(TileName(LS, LW), LURLs);
             Inc(LFound);
           end;
         end;
       end;
       Log(Format('  %d of %d tile(s) have data', [LFound, LCount]));
     end;
-  except
-    Result.Free;
-    raise;
+  end;
+
+begin
+  LResult := TDictionary<string, TArray<string>>.Create;
+  Result := LResult;
+  LWanted := TDictionary<string, Boolean>.Create;
+  try
+    try
+      // Validate and tidy the names, and find the block they lie in
+      LMinS := MaxInt;
+      LMaxS := -MaxInt;
+      LMinW := MaxInt;
+      LMaxW := -MaxInt;
+      for LTile in ATiles do
+      begin
+        TileGranuleName(LTile);
+        TryParseTileName(LTile, LSouth, LWest);
+        LWanted.AddOrSetValue(TileName(LSouth, LWest), True);
+        LMinS := Min(LMinS, LSouth);
+        LMaxS := Max(LMaxS, LSouth);
+        LMinW := Min(LMinW, LWest);
+        LMaxW := Max(LMaxW, LWest);
+      end;
+      if LWanted.Count = 0 then
+        Exit;
+
+      // A selection that crosses 180 degrees spans the whole width here,
+      // which only makes the block listing less likely to be chosen
+      LCells := Int64(LMaxS - LMinS + 1) * (LMaxW - LMinW + 1);
+      if LCells < Int64(LWanted.Count) * CMR_BOX_CELLS_PER_TILE then
+      begin
+        Log(Format('Asking NASA CMR for every tile from %s to %s ' +
+          '(%d tile(s) wanted) ...', [TileName(LMinS, LMinW), TileName(LMaxS, LMaxW),
+          LWanted.Count]));
+        if FetchAll(TCMRGranuleSearch.BoxURL(LMinW, LMinS, LMaxW + 1, LMaxS + 1), True) > 0 then
+        begin
+          Log(Format('  %d of %d tile(s) have data', [LResult.Count, LWanted.Count]));
+          Exit;
+        end;
+        Log('  the block search found none of them; asking by name instead');
+      end;
+      ByName(LWanted.Keys.ToArray);
+    except
+      LResult.Free;
+      raise;
+    end;
+  finally
+    LWanted.Free;
   end;
 end;
 
@@ -1084,9 +1185,7 @@ begin
   FCurrentFile := TPath.GetFileName(ADestFile);
   LURL := AURL;
   LHops := 0;
-  LCode := 0;
   LResp := nil;
-  LToFile := False;
   LKeepPart := False;
   LMemory := TMemoryStream.Create;
   try
@@ -1276,7 +1375,8 @@ begin
     end;
   try
     repeat
-      LWaitMs := DOWNLOAD_RETRY_DELAY_MS;
+      // No pause before the next try unless a handler below asks for one
+      LWaitMs := 0;
       if TFile.Exists(LTempFile) then
         LBefore := TFile.GetSize(LTempFile)
       else
@@ -1302,12 +1402,10 @@ begin
           raise;
         on E: EGDEMRateLimited do
         begin
-          // Every worker pauses, through the throttle when there is one
+          // Every worker pauses, through the throttle when there is one;
+          // without one, this download waits by itself
           if FThrottle <> nil then
-          begin
-            FThrottle.ReportProblem('NASA asked us to slow down', E.RetryAfter * 1000);
-            LWaitMs := 0;
-          end
+            FThrottle.ReportProblem('NASA asked us to slow down', E.RetryAfter * 1000)
           else
             LWaitMs := E.RetryAfter * 1000;
           Log(Format('  NASA asked us to slow down; waiting %d s before trying %s again',

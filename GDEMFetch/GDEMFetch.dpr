@@ -25,6 +25,8 @@
       downloads to a report file.)
     @item(@link(GDEMAwake) keeps the computer from sleeping while a job
       runs.)
+    @item(@link(GDEMVectors) holds the country borders, coastlines and
+      country names drawn on the map.)
   ) }
 program GDEMFetch;
 
@@ -47,10 +49,12 @@ uses
   GDEMTitleBar in 'GDEMTitleBar.pas',
   GDEMThemes in 'GDEMThemes.pas',
   GDEMReport in 'GDEMReport.pas',
-  GDEMAwake in 'GDEMAwake.pas';
+  GDEMAwake in 'GDEMAwake.pas',
+  GDEMVectors in 'GDEMVectors.pas';
 
 {$R *.res}
-{ The world map image, built from the RcItem in the project file. }
+{ The world map image and its borders and coastlines, built from the
+  RcItems in the project file. }
 {$R *.dres}
 { The themes' FMX styles, inside the program on every platform. The .res is
   built by styles\buildstyles.cmd in the pre-build event; see
