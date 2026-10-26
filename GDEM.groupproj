@@ -1,0 +1,36 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{B33540B0-49D2-4120-8391-9862991D8503}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="GDEMFetch\GDEMFetch.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="GDEMFetch">
+        <MSBuild Projects="GDEMFetch\GDEMFetch.dproj"/>
+    </Target>
+    <Target Name="GDEMFetch:Clean">
+        <MSBuild Projects="GDEMFetch\GDEMFetch.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="GDEMFetch:Make">
+        <MSBuild Projects="GDEMFetch\GDEMFetch.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="GDEMFetch"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="GDEMFetch:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="GDEMFetch:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>
