@@ -3,7 +3,7 @@ object frmSettings: TfrmSettings
   Top = 0
   BorderIcons = [biSystemMenu]
   Caption = 'Settings'
-  ClientHeight = 440
+  ClientHeight = 488
   ClientWidth = 560
   Position = MainFormCenter
   FormFactor.Width = 320
@@ -177,6 +177,34 @@ object frmSettings: TfrmSettings
       Size.Height = 22.000000000000000000
       Size.PlatformDefault = False
       Text = 'MB'
+    end
+  end
+  object layTheme: TLayout
+    Align = Bottom
+    Margins.Left = 12.000000000000000000
+    Margins.Top = 8.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Position.X = 12.000000000000000000
+    Position.Y = 232.000000000000000000
+    Size.Width = 536.000000000000000000
+    Size.Height = 40.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 5
+    object lblTheme: TLabel
+      StyledSettings = [Family, Size, FontColor]
+      Position.Y = 9.000000000000000000
+      Size.Width = 80.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Theme'
+    end
+    object cbTheme: TComboBox
+      Position.X = 88.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 200.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 0
     end
   end
   object memToken: TMemo

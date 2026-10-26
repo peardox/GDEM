@@ -1,0 +1,14 @@
+// The FMX styles GDEM's themes use, linked into the programs as RCDATA
+// resources so they are inside them on every platform, with nothing to
+// deploy. ApplyTheme in GDEMThemes looks for these names first.
+//
+// The .style files are the ones RAD Studio ships in $(BDS)\Redist\styles\Fmx.
+// buildstyles.cmd, run by each project's pre-build event, copies any that are
+// missing into this folder and compiles this file, from this folder, into
+// GDEMThemes.res, which the programs link in. The IDE does not compile this
+// file itself, as it may do so before the pre-build event has run.
+
+GDEMDarkStyle            RCDATA "Dark.style"
+GDEMAquaGraphiteStyle    RCDATA "AquaGraphite.style"
+GDEMRubyGraphiteStyle    RCDATA "RubyGraphite.style"
+GDEMGoldenGraphiteStyle  RCDATA "GoldenGraphite.style"

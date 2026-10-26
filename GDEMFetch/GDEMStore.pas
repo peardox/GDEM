@@ -92,6 +92,27 @@ type
     property Layout: string read FLayout write FLayout;
   end;
 
+  { @abstract(Where an import has got to.) }
+  TImportProgress = record
+    { Files dealt with so far, copied or skipped. }
+    FilesDone: Integer;
+    { Tile files found in the source. }
+    FilesTotal: Integer;
+    { Bytes copied so far. }
+    BytesCopied: Int64;
+    { Bytes that need copying in all, leaving out files the store already
+      has. }
+    BytesToCopy: Int64;
+    { Name, without its folder, of the file about to be copied or just
+      dealt with; empty once the import is finished. }
+    CurrentFile: string;
+  end;
+
+  { Reports progress through an import. Called before each file is copied
+    and after each file is dealt with.
+    @param(AProgress Where the import has got to.) }
+  TImportProgressEvent = reference to procedure(const AProgress: TImportProgress);
+
   { Reports progress through a long store operation.
     @param(ADone Items processed so far.)
     @param(ATotal Total items, or 0 if not known.) }
@@ -280,13 +301,14 @@ type
         the store, nor contain it.)
       @param(AReserve Bytes that must be left free on the store's drive.)
       @param(AToken Checked between files.)
-      @param(AOnProgress Called after each file. May be @nil.)
+      @param(AOnProgress Called before each file is copied and after each
+        file is dealt with. May be @nil.)
       @returns(What was copied and skipped.)
       @raises(EStoreError if the folders overlap, space is short, or a file
         cannot be copied.)
       @raises(EOperationCancelled if AToken is cancelled.) }
     function ImportFrom(const ASourceFolder: string; AReserve: Int64;
-      AToken: TCancelToken; const AOnProgress: TStoreProgressEvent): TImportResult;
+      AToken: TCancelToken; const AOnProgress: TImportProgressEvent): TImportResult;
 
     { Total size of all tile files.
       @param(AToken Checked between files. May be @nil.)
@@ -769,7 +791,7 @@ begin
 end;
 
 function TGDEMStore.ImportFrom(const ASourceFolder: string; AReserve: Int64;
-  AToken: TCancelToken; const AOnProgress: TStoreProgressEvent): TImportResult;
+  AToken: TCancelToken; const AOnProgress: TImportProgressEvent): TImportResult;
 type
   { One file to import. }
   TImportItem = record
@@ -782,9 +804,28 @@ var
   LItems: TList<TImportItem>;
   LItem: TImportItem;
   LIndex, LSouth, LWest: Integer;
-  LNeeded, LFree: Int64;
+  LNeeded, LFree, LCopiedBytes: Int64;
+  LProgress: TImportProgress;
+
+  { Passes the progress on, if anyone is listening.
+    @param(AFilesDone Files dealt with so far.)
+    @param(ACurrentFile The file about to be copied or just dealt with.) }
+  procedure Report(AFilesDone: Integer; const ACurrentFile: string);
+  begin
+    if not Assigned(AOnProgress) then
+      Exit;
+    LProgress.FilesDone := AFilesDone;
+    LProgress.FilesTotal := LItems.Count;
+    LProgress.BytesCopied := LCopiedBytes;
+    LProgress.BytesToCopy := LNeeded;
+    LProgress.CurrentFile := ACurrentFile;
+    AOnProgress(LProgress);
+  end;
+
 begin
   Result := Default(TImportResult);
+  LNeeded := 0;
+  LCopiedBytes := 0;
   LSource := ExcludeTrailingPathDelimiter(TPath.GetFullPath(ASourceFolder));
   if not TDirectory.Exists(LSource) then
     raise EStoreError.CreateFmt('The folder %s does not exist.', [LSource]);
@@ -803,7 +844,6 @@ begin
   LItems := TList<TImportItem>.Create;
   try
     // Work out what needs copying and how much space it takes
-    LNeeded := 0;
     for LIndex := 0 to High(LFiles) do
     begin
       AToken.Check;
@@ -827,6 +867,7 @@ begin
         'free and %s must be kept free. Free some space, choose a larger drive, or ' +
         'lower the reserve in File > Settings.',
         [FormatByteSize(LNeeded), FormatByteSize(LFree), FormatByteSize(AReserve)]);
+    Report(0, '');
 
     for LIndex := 0 to LItems.Count - 1 do
     begin
@@ -847,6 +888,7 @@ begin
           raise EStoreError.CreateFmt('Import stopped: only %s is free on the data drive, ' +
             'and %s must be kept free.', [FormatByteSize(LFree), FormatByteSize(AReserve)]);
 
+        Report(LIndex, ExtractFileName(LItem.Source));
         LTemp := LItem.Dest + '.tmp';
         try
           ForceDirectories(TPath.GetDirectoryName(LItem.Dest));
@@ -870,14 +912,15 @@ begin
         end;
         Inc(Result.Copied);
         Inc(Result.Bytes, LItem.Size);
+        Inc(LCopiedBytes, LItem.Size);
       end;
 
       if (LIndex + 1) mod 250 = 0 then
         Log(Format('  %d of %d file(s) checked, %s copied',
           [LIndex + 1, LItems.Count, FormatByteSize(Result.Bytes)]));
-      if Assigned(AOnProgress) then
-        AOnProgress(LIndex + 1, LItems.Count);
+      Report(LIndex + 1, ExtractFileName(LItem.Source));
     end;
+    Report(LItems.Count, '');
   finally
     LItems.Free;
   end;

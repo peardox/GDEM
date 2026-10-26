@@ -58,6 +58,8 @@ type
     FDataFolderUsed: Boolean;
     { Backing field for @link(MinFreeSpaceMB). }
     FMinFreeSpaceMB: Integer;
+    { Backing field for @link(Theme). }
+    FTheme: string;
 
     { Writer for @link(DataFolder); trims spaces and any trailing path
       separator. It has no other side effects, because Neon may set
@@ -133,6 +135,13 @@ type
       holding @link(DataFolder). A batch of downloads stops before going
       below it. Defaults to @link(DEFAULT_MIN_FREE_SPACE_MB). }
     property MinFreeSpaceMB: Integer read FMinFreeSpaceMB write FMinFreeSpaceMB;
+
+    { The look of the program, stored by key: @code(Default), @code(Dark),
+      @code(AquaGraphite), @code(RubyGraphite) or @code(GoldenGraphite).
+      Kept as text so that a name this version does not know can never stop
+      the settings loading; use @code(ThemeFromKey) in @code(GDEMThemes) to
+      turn it into a theme. Defaults to @code(Default). }
+    property Theme: string read FTheme write FTheme;
   end;
 
 implementation
@@ -162,6 +171,7 @@ begin
   inherited Create;
   FDataFolder := DefaultDataFolder;
   FMinFreeSpaceMB := DEFAULT_MIN_FREE_SPACE_MB;
+  FTheme := 'Default';
 end;
 
 class function TGDEMSettings.DefaultDataFolder: string;

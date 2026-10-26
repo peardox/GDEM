@@ -46,7 +46,9 @@ GDEM on 3 December 2025, so older scripts that use it no longer work.
 
 ## Requirements
 
-- **Delphi 13** with FireMonkey (FMX).
+- **Delphi 13** with FireMonkey (FMX). The build uses RAD Studio's
+  `brcc32` and its FMX styles in `Redist\styles\Fmx` (see
+  [Themes](#themes)); both come with every RAD Studio install.
 - **Neon JSON library**, included as a git submodule in `delphi-neon/`.
   Clone with submodules (see below). The project's search path already
   points at `..\delphi-neon\Source`.
@@ -57,10 +59,9 @@ GDEM on 3 December 2025, so older scripts that use it no longer work.
   - `cmr.earthdata.nasa.gov` (tile index and download links)
   - `data.lpdaac.earthdatacloud.nasa.gov` (the files)
   - `urs.earthdata.nasa.gov` (Earthdata Login)
-- **Platforms:** Windows 32 and 64-bit and Linux 64-bit are enabled in the
-  project; macOS is set up but switched off until a PAServer and SDK are
-  ready.
-  - Linux builds need FMX for Linux, and use `xdg-open` to open web links.
+- **Platforms:** Windows 32 and 64-bit, Linux 64-bit, and macOS on Intel
+  (OSX64) and Apple silicon (OSXARM64). See [Deploying](#deploying) for
+  what each needs at run time.
 - **Disk space:** about 18 MB per tile on average; the whole world is
   roughly 400 GB in about 46,000 files. The data folder can be anywhere,
   including a removable drive, and can be moved later.
@@ -102,7 +103,7 @@ unreadable settings, a missing world map) are also shown in a dialog. The
 
 | Menu | Item | Does |
 |------|------|------|
-| File | Settings... | Bearer token, data folder, free-space reserve |
+| File | Settings... | Bearer token, data folder, free-space reserve, theme |
 | File | Refresh Tile Index | Rebuilds the list of tiles that exist, from CMR |
 | Data | Import Existing Tiles... | Copies tiles you already have, from any folder, into the data folder. The originals are not changed. |
 | Data | Rescan Data Folder | Rebuilds the downloaded-tiles bitmap from the files, files any misplaced downloads into place, and removes leftovers and empty folders |
@@ -113,6 +114,76 @@ unreadable settings, a missing world map) are also shown in a dialog. The
 downloaded. Free space is checked before every tile, and downloading stops
 rather than go below the reserve set in Settings (2 GB by default). The
 **Cancel** button stops whatever job is running.
+
+Whenever data is downloaded (tiles, or the tile index from NASA CMR) a
+progress dialog shows the step in progress, overall progress, and progress
+through the current file, with a Cancel button. The dialog stays until the
+download has actually stopped.
+
+### Themes
+
+Choose the program's look under **File > Settings > Theme**:
+
+| Theme | Look |
+|-------|------|
+| Default | FMX's own platform style, with the system's title bars |
+| Dark | RAD Studio's Dark style |
+| Aqua Graphite, Ruby Graphite, Golden Graphite | RAD Studio's Graphite styles, with a coloured accent |
+
+The theme is applied as soon as Settings closes with OK, and at start-up.
+Where the system allows, title bars are coloured to match: the caption and
+border on Windows 11, dark or light on Windows 10, and dark or light
+appearance on macOS. Linux leaves title bars to the window manager.
+
+The styles are the `.style` files RAD Studio ships in
+`Redist\styles\Fmx`. They are kept in the repository's `styles/` folder
+and linked into the program as resources, so nothing needs deploying:
+
+- `styles/GDEMThemes.rc` lists them as RCDATA resources named
+  `GDEM<Name>Style`.
+- `styles/buildstyles.cmd` runs as the project's pre-build event. It
+  copies any missing style from RAD Studio's `Redist\styles\Fmx` (styles
+  already in the folder are kept, so one can be replaced by hand), then
+  compiles `GDEMThemes.rc` into `GDEMThemes.res` with `brcc32`. If anything
+  is missing the build stops with an error saying what.
+- `GDEMFetch.dpr` links `..\styles\GDEMThemes.res`.
+
+This is the same arrangement as Sprite3D's themes, so the two projects
+look and behave alike.
+
+## Deploying
+
+GDEMFetch needs **no extra files deployed** on any platform. The world map
+is linked into the executable as a resource, which Delphi does on Windows,
+macOS and Linux alike, and everything else (settings, the tile index, the
+data folder) is created at run time. The default Deployment Manager
+entries are all that is needed.
+
+**Windows:** the executable on its own.
+
+**macOS:** deployed as an app bundle through PAServer.
+- The bundle identifier is `com.peardox.GDEMFetch`.
+- `Info.plist` carries only the privacy descriptions GDEMFetch can need:
+  the Documents, Desktop and Downloads folders, removable drives and
+  network drives. macOS shows these the first time the program uses such
+  a location, for example when the data folder is on an external drive.
+  The IDE's default descriptions for location, camera, microphone,
+  Bluetooth and so on were removed because the program uses none of them.
+  If the IDE puts them back after a platform change, remove them again
+  under Project > Options > Application > Version Info.
+- To run it on Macs other than your own it must be signed and notarised.
+
+**Linux:** these must be installed on the target machine, not deployed
+with the program. Desktop distributions usually have them already.
+
+| Needed for | Package (Debian / Ubuntu) | Package (Fedora) |
+|------------|---------------------------|------------------|
+| Downloads (`THTTPClient` uses libcurl) | `libcurl4` | `libcurl` |
+| The FMX user interface | `libgtk-3-0` | `gtk3` |
+| Opening web links from Settings (`xdg-open`) | `xdg-utils` | `xdg-utils` |
+
+Removable drives are normally mounted under `/media/<user>/` or
+`/run/media/<user>/`; choose the data folder there in Settings.
 
 ## Where files are kept
 
@@ -184,6 +255,10 @@ Existing Tiles...** and choose that folder.
   takes its real name, so a cancelled import leaves no partial tiles.
   Files the data folder already has are skipped, so an import can be
   cancelled and run again to finish.
+- A progress dialog shows the file being copied, how many files have been
+  dealt with, and how much has been copied out of the total, with the
+  copying speed and an estimate of the time left. Its Cancel button stops
+  the import after the file in progress.
 - When it finishes (or is cancelled) the data folder is rescanned and the
   map shows the imported tiles in green.
 - The source folder must not be inside the data folder, or contain it.
@@ -194,6 +269,7 @@ Existing Tiles...** and choose that folder.
 |------|----------|
 | `GDEM.groupproj` | Project group |
 | `GDEMFetch/` | The GDEMFetch application |
+| `styles/` | FMX styles for the themes, with the resource script and the pre-build script that builds them; see [Themes](#themes) |
 | `maps/` | World map images. `world_1080x540.jpg` is linked into GDEMFetch as a resource. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository. |
 | `delphi-neon/` | Neon JSON library (git submodule) |
 | `docs/` | Ignored for development |
@@ -205,6 +281,10 @@ Existing Tiles...** and choose that folder.
 |------|---------|
 | `MainForm` | Main window: toolbar and menus over three tabs (Map, 3D, Debug), with progress and status bars |
 | `SettingsForm` | Modal settings dialog |
+| `ProgressForm` | Modal progress dialog shown while data is downloaded |
+| `GDEMThemes` | The themes, and `ApplyTheme` |
+| `GDEMStyles` | Switches FMX styles at run time (ported from Sprite3D) |
+| `GDEMTitleBar` | Colours title bars to match the style (ported from Sprite3D) |
 | `GDEMSettings` | Loads and saves `settings.json` with Neon |
 | `GDEMBrowser` | Opens web links in the default browser on each platform |
 | `GDEMWorldMap` | `TWorldMapView`, the zoomable map with tile selection |
@@ -276,6 +356,13 @@ before starting work.
   order mark as ANSI, so write characters such as the degree sign as
   character codes (`#$00B0`).
 - Keep the existing UTF-8 byte order mark on `.dproj` files.
+- Anything the program needs at run time is linked in as a resource
+  (an `RcItem` in the `.dproj`, read with `TResourceStream`), so nothing
+  has to be deployed beside it. If a file ever cannot be a resource, add
+  Deployment entries for every platform and say so in
+  [Deploying](#deploying).
+- On macOS, every privacy-sensitive location the program touches needs a
+  usage description in the Version Info keys; keep them accurate.
 - Naming: fields `F`, parameters `A`, locals `L`; non-visual units
   `GDEM*.pas`; forms `*Form.pas`.
 - Keep non-visual logic in its own units, out of forms, so later programs
@@ -286,6 +373,22 @@ before starting work.
 - Report serious failures with `TfrmMain.ReportError`, which logs them and
   shows a modal error dialog. Cancelling is not an error. Problems that are
   recovered from automatically are logged as `WARNING:` only.
+- Anything that downloads external data shows the modal progress dialog:
+  pass a title to `RunJob` (its last parameter), or use `BeginProgress`,
+  `ShowProgressModal` and `EndProgress` directly, and send updates with
+  `ProgressStatus`, `ProgressOverall` and `ProgressItem`, which are safe to
+  call from any thread. Importing uses the same dialog, because it can run
+  for hours. Other local work (rescanning, moving, deleting) shows progress
+  on the main window's bar instead.
+- Anything at start-up that may need the user goes in
+  `TfrmMain.RunStartup`, in order, so one dialog never opens on top of
+  another.
+- Forms must not have their own StyleBook, so the theme set through
+  `TStyleManager` reaches them. Colours a control paints for itself (the
+  map, for example) are fixed and must read well on light and dark themes.
+- To add a theme, add the `.style` file name to `buildstyles.cmd` and an
+  RCDATA line to `GDEMThemes.rc`, then a value to `TGDEMTheme` and its
+  row in `THEMES` in `GDEMThemes.pas`.
 - Write files atomically: write a temporary file, then rename it.
 - Never put credentials in source code or log output.
 - Get download URLs from CMR; do not guess Earthdata Cloud paths. Send

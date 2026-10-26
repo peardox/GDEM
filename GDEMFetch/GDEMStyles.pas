@@ -1,0 +1,117 @@
+{ @abstract(Switches the whole application between FireMonkey's own default
+  look and a named FMX style, at run time.)
+
+  @link(ApplyFmxStyle) sets the style through @code(TStyleManager), so it
+  reaches every form that has no StyleBook of its own, including forms
+  already on screen. A named style is looked for first as a resource linked
+  into the program, then as a @code(<name>.style) file in each of the
+  folders given, in order, with the file name matched regardless of case.
+  An empty name puts back the platform's default style.
+
+  The styles that come with RAD Studio are in its @code(Redist\styles\Fmx)
+  folder. GDEM links the ones it uses into the programs as RCDATA resources;
+  see @code(styles/GDEMThemes.rc).
+
+  Ported from Sprite3D's @code(Sprite3DStyles). The unit knows nothing of
+  any particular application. Call it on the main thread only. }
+unit GDEMStyles;
+
+interface
+
+uses
+  System.SysUtils;
+
+{ Applies a named FMX style to the whole application, or puts back the
+  default.
+
+  For a non-empty AName, AResourceName is tried first, if given, then
+  @code(<AName>.style) in each of AFolders in turn; the first that loads is
+  used. When none is found or none loads, the style in use is left as it
+  was.
+
+  @param(AName The style's file name without @code(.style), such as
+    @code(Dark); empty for the platform's default style.)
+  @param(AResourceName The name of an RCDATA resource holding the style, or
+    empty to look for files only.)
+  @param(AFolders The folders to look in for the style file, in order;
+    empty entries are skipped.)
+  @param(AError On failure, why; empty on success.)
+  @returns(@true if the style, or the default, is now in use.) }
+function ApplyFmxStyle(const AName, AResourceName: string;
+  const AFolders: array of string; out AError: string): Boolean;
+
+implementation
+
+uses
+  System.IOUtils, FMX.Styles;
+
+{ Finds @code(<AName>.style) in a folder, matching the file name regardless
+  of case, as RAD Studio ships some styles with a capital S and Linux file
+  names are case-sensitive.
+  @param(AFolder The folder to look in.)
+  @param(AName The style's name, without @code(.style).)
+  @returns(The full path, or an empty string if there is no such file.) }
+function FindStyleFile(const AFolder, AName: string): string;
+var
+  LCandidate: string;
+begin
+  Result := TPath.Combine(AFolder, AName + '.style');
+  if TFile.Exists(Result) then
+    Exit;
+  Result := '';
+  if not TDirectory.Exists(AFolder) then
+    Exit;
+  try
+    for LCandidate in TDirectory.GetFiles(AFolder) do
+      if SameText(ExtractFileName(LCandidate), AName + '.style') then
+        Exit(LCandidate);
+  except
+    // An unreadable folder has nothing to offer
+  end;
+end;
+
+function ApplyFmxStyle(const AName, AResourceName: string;
+  const AFolders: array of string; out AError: string): Boolean;
+var
+  LFolder, LFileName, LTried: string;
+begin
+  AError := '';
+  if AName = '' then
+  begin
+    // nil hands every form back to the platform's own style
+    TStyleManager.SetStyle(nil);
+    Exit(True);
+  end;
+
+  if AResourceName <> '' then
+  try
+    if TStyleManager.TrySetStyleFromResource(AResourceName) then
+      Exit(True);
+  except
+    // A damaged resource: carry on with the files
+  end;
+
+  LTried := '';
+  for LFolder in AFolders do
+  begin
+    if LFolder = '' then
+      Continue;
+    LFileName := FindStyleFile(LFolder, AName);
+    LTried := LTried + sLineBreak + '  ' + TPath.Combine(LFolder, AName + '.style');
+    if LFileName = '' then
+      Continue;
+    try
+      TStyleManager.SetStyleFromFile(LFileName);
+      Exit(True);
+    except
+      on E: Exception do
+        AError := 'Cannot load ' + LFileName + ': ' + E.Message;
+    end;
+  end;
+
+  if AError = '' then
+    AError := 'The ' + AName + ' style was not found. Looked in:' + LTried;
+  Result := False;
+end;
+
+end.

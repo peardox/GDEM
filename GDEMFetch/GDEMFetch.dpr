@@ -8,6 +8,7 @@
   @unorderedList(
     @item(@link(MainForm) holds the main window.)
     @item(@link(SettingsForm) is the modal settings dialog.)
+    @item(@link(ProgressForm) is the modal progress dialog for downloads.)
     @item(@link(GDEMSettings) stores settings as JSON in a per-user folder.)
     @item(@link(GDEMBrowser) opens web pages in the default browser.)
     @item(@link(GDEMWorldMap) is the zoomable map used to select tiles.)
@@ -16,6 +17,8 @@
     @item(@link(GDEMDownloader) finds and downloads tiles.)
     @item(@link(GDEMStore) keeps downloaded tiles in the data folder.)
     @item(@link(GDEMCancel) lets the user cancel background work.)
+    @item(@link(GDEMThemes), @link(GDEMStyles) and @link(GDEMTitleBar) give
+      the program its chosen look.)
     @item(@link(GDEMCMR) models and parses NASA CMR search results with the
       Neon JSON library.)
   ) }
@@ -34,11 +37,19 @@ uses
   GDEMWorldMap in 'GDEMWorldMap.pas',
   GDEMTileIndex in 'GDEMTileIndex.pas',
   GDEMCancel in 'GDEMCancel.pas',
-  GDEMStore in 'GDEMStore.pas';
+  GDEMStore in 'GDEMStore.pas',
+  ProgressForm in 'ProgressForm.pas' {frmProgress},
+  GDEMStyles in 'GDEMStyles.pas',
+  GDEMTitleBar in 'GDEMTitleBar.pas',
+  GDEMThemes in 'GDEMThemes.pas';
 
 {$R *.res}
 { The world map image, built from the RcItem in the project file. }
 {$R *.dres}
+{ The themes' FMX styles, inside the program on every platform. The .res is
+  built by styles\buildstyles.cmd in the pre-build event; see
+  styles\GDEMThemes.rc. }
+{$R '..\styles\GDEMThemes.res'}
 
 begin
   Application.Initialize;

@@ -7,10 +7,12 @@
       generated;)
     @item(the data folder that downloaded tiles are kept in, with a Browse
       button;)
-    @item(how much free space downloads must leave on that drive.)
+    @item(how much free space downloads must leave on that drive;)
+    @item(the theme, the program's look; see @link(GDEMThemes).)
   )
 
-  The token and free-space setting are saved by the dialog itself. A new
+  The token, free-space setting and theme are saved by the dialog itself;
+  the caller applies a changed theme. A new
   data folder is only handed back to the caller (see
   @link(TSettingsClosedProc)), because switching folders may mean moving a
   large amount of data, which the caller arranges.
@@ -28,7 +30,7 @@ uses
   System.SysUtils, System.Types, System.UITypes, System.Classes,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   FMX.StdCtrls, FMX.Memo, FMX.Memo.Types, FMX.ScrollBox, FMX.Layouts,
-  FMX.Controls.Presentation, FMX.Edit, FMX.EditBox, FMX.NumberBox,
+  FMX.Controls.Presentation, FMX.Edit, FMX.EditBox, FMX.NumberBox, FMX.ListBox,
   GDEMSettings;
 
 const
@@ -77,6 +79,12 @@ type
     nbMinFree: TNumberBox;
     { Unit shown after @link(nbMinFree). }
     lblMinFreeUnit: TLabel;
+    { Holds the theme controls. }
+    layTheme: TLayout;
+    { Caption for @link(cbTheme). }
+    lblTheme: TLabel;
+    { The theme, in the order of @code(TGDEMTheme). }
+    cbTheme: TComboBox;
     { Shows where the settings file is stored. }
     lblLocation: TLabel;
     { Holds the OK and Cancel buttons. }
@@ -87,7 +95,8 @@ type
     { Closes the dialog without saving. }
     btnCancel: TButton;
 
-    { Styles the labels and fills in the link text and settings location.
+    { Styles the labels, fills in the link text and settings location, and
+      lists the themes.
       @param(Sender The form.) }
     procedure FormCreate(Sender: TObject);
 
@@ -117,8 +126,8 @@ type
   public
     { Shows the settings dialog modally for ASettings.
 
-      If the user presses OK, the token and free-space setting are stored in
-      ASettings and saved to disk, and the chosen data folder is passed to
+      If the user presses OK, the token, free-space setting and theme are
+      stored in ASettings and saved to disk, and the chosen data folder is passed to
       AOnClosed. If saving fails, the error is shown and AOnClosed is told
       nothing was saved. The form is freed before AOnClosed is called, so
       AOnClosed may safely open other dialogs.
@@ -140,14 +149,20 @@ implementation
 {$R *.fmx}
 
 uses
-  System.IOUtils, GDEMBrowser;
+  System.IOUtils, GDEMBrowser, GDEMThemes;
 
 { TfrmSettings }
 
 procedure TfrmSettings.FormCreate(Sender: TObject);
+var
+  LTheme: TGDEMTheme;
 begin
   lblToken.TextSettings.Font.Style := [TFontStyle.fsBold];
   lblDataFolder.TextSettings.Font.Style := [TFontStyle.fsBold];
+  lblTheme.TextSettings.Font.Style := [TFontStyle.fsBold];
+  cbTheme.Items.Clear;
+  for LTheme := Low(TGDEMTheme) to High(TGDEMTheme) do
+    cbTheme.Items.Add(ThemeCaption(LTheme));
   lblLink.TextSettings.Font.Style := [TFontStyle.fsUnderline];
   lblLink.Text := EARTHDATA_TOKEN_URL;
   lblLocation.Text := 'Settings are saved to: ' + TGDEMSettings.SettingsFileName;
@@ -216,6 +231,7 @@ begin
   LForm.memToken.Text := ASettings.BearerToken;
   LForm.edtDataFolder.Text := ASettings.DataFolder;
   LForm.nbMinFree.Value := ASettings.MinFreeSpaceMB;
+  LForm.cbTheme.ItemIndex := Ord(ThemeFromKey(ASettings.Theme));
   LForm.UpdateOK;
 
   // Reads the dialog and saves the settings. It does not free the form or
@@ -228,6 +244,8 @@ begin
       begin
         ASettings.BearerToken := LForm.Token;
         ASettings.MinFreeSpaceMB := Round(LForm.nbMinFree.Value);
+        if LForm.cbTheme.ItemIndex >= 0 then
+          ASettings.Theme := ThemeKey(TGDEMTheme(LForm.cbTheme.ItemIndex));
         try
           ASettings.Save;
           LSaved := True;

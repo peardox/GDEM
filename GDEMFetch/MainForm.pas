@@ -33,6 +33,22 @@
   index from CMR runs separately. All updates to controls are queued back
   to the main thread.
 
+  @bold(Themes.) The look chosen in Settings (see @link(GDEMThemes)) is
+  applied at start-up and as soon as Settings closes with OK.
+
+  @bold(Progress.) Whenever external data is fetched (downloading tiles,
+  or building the tile index from NASA CMR), and while existing tiles are
+  imported, a modal @link(TfrmProgress) dialog shows what is happening,
+  with two progress bars and a Cancel button. For an import the second bar
+  shows the amount copied, with the speed and an estimate of the time left.
+  See @link(TfrmMain.BeginProgress).
+
+  @bold(Start-up.) Everything that may need the user is done in one
+  sequence once the window is showing (@link(TfrmMain.RunStartup)): the
+  settings dialog if there are no settings, then the tile index download
+  if there is no index, then the request to connect the data folder's
+  drive. Running them in turn stops one dialog opening on top of another.
+
   Serious problems are written to the log and also shown in a modal error
   dialog (see @link(TfrmMain.ReportError)). Cancelling is not treated as an
   error.
@@ -50,7 +66,7 @@ uses
   FMX.StdCtrls, FMX.Edit, FMX.Memo, FMX.Memo.Types, FMX.ScrollBox, FMX.Layouts,
   FMX.Controls.Presentation, FMX.Menus, FMX.TabControl,
   GDEMCancel, GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex,
-  GDEMStore;
+  GDEMStore, GDEMThemes, ProgressForm;
 
 const
   { Name of the RCDATA resource holding the world map image. }
@@ -277,6 +293,19 @@ type
       it closes once the work has stopped. }
     FCloseWhenIdle: Boolean;
 
+    { The progress dialog being shown, or @nil. Only touched on the main
+      thread; background work updates it through the @code(Progress...)
+      methods. }
+    FProgress: TfrmProgress;
+
+    { Whether settings were loaded at start-up; if not,
+      @link(RunStartup) opens the settings dialog. }
+    FHaveSettings: Boolean;
+
+    { Set at start-up when there is no usable tile index, so
+      @link(RunStartup) downloads one. }
+    FNeedIndexBuild: Boolean;
+
     { Adds a line to @link(memLog). Safe to call from any thread.
       @param(Msg The line to add.) }
     procedure AddLog(const Msg: string);
@@ -339,9 +368,74 @@ type
         were saved. May be @nil.) }
     procedure ShowSettings(const AOnSaved: TProc);
 
-    { Loads the tile index from its default file, or starts building one if
-      there is none or it cannot be read. }
+    { Gives the program the theme saved in the settings.
+      @param(AReport @true to report a failure with @link(ReportError);
+        @false to log it only, as at start-up.) }
+    procedure ApplyThemeSetting(AReport: Boolean);
+
+    { Loads the tile index from its default file. If there is none, or it
+      cannot be read, sets @link(FNeedIndexBuild) so that
+      @link(RunStartup) downloads one. }
     procedure LoadTileIndex;
+
+    { Does, in turn, everything at start-up that may need the user: the
+      settings dialog if there were no settings, the tile index download if
+      there is no index, and the request to connect the data folder's drive
+      if it is missing. Queued by @link(FormCreate) so it runs once the
+      window is showing. }
+    procedure RunStartup;
+
+    { Creates the progress dialog, ready to be shown with
+      @link(ShowProgressModal).
+      @param(ATitle Window title.)
+      @param(AOnCancel Called when the user cancels; it should only ask the
+        work to stop.)
+      @param(AShowItem @true to show the per-file progress bar.) }
+    procedure BeginProgress(const ATitle: string; const AOnCancel: TProc;
+      AShowItem: Boolean);
+
+    { Shows the progress dialog created by @link(BeginProgress). On desktop
+      platforms this blocks until @link(EndProgress) is called (updates
+      queued by the background work are still processed meanwhile) and
+      then frees the dialog. Call it straight after starting the background
+      work. }
+    procedure ShowProgressModal;
+
+    { Lets the progress dialog close because the work has stopped. Called
+      on the main thread by the work's clean-up. Does nothing if there is no
+      dialog. }
+    procedure EndProgress;
+
+    { Shows the step in progress in the progress dialog. Safe to call from
+      any thread.
+      @param(AText The text to show.) }
+    procedure ProgressStatus(const AText: string);
+
+    { Shows overall progress in the progress dialog. Safe to call from any
+      thread.
+      @param(ADone Items finished, or the number of the current item.)
+      @param(ATotal Total items.)
+      @param(AText Description shown above the bar.) }
+    procedure ProgressOverall(ADone, ATotal: Integer; const AText: string);
+
+    { Shows progress through the current file in the progress dialog. Safe
+      to call from any thread.
+      @param(AReceived Bytes received so far.)
+      @param(ATotal Expected size in bytes, or 0 or less if unknown.) }
+    procedure ProgressItem(AReceived, ATotal: Int64);
+
+    { Shows any progress, with a description, on the progress dialog's
+      second bar. Safe to call from any thread.
+      @param(ADone How far through.)
+      @param(ATotal The end.)
+      @param(AText Description shown above the bar.) }
+    procedure ProgressItemText(ADone, ATotal: Int64; const AText: string);
+
+    { Formats a duration for a time-left estimate, such as @code(1 h 20 min)
+      or @code(45 s).
+      @param(ASeconds The duration in seconds.)
+      @returns(The formatted duration.) }
+    class function FormatDuration(ASeconds: Double): string; static;
 
     { Builds a new tile index from CMR on a background task. On success it
       replaces the current index, is saved, and the map is updated. Does
@@ -359,15 +453,21 @@ type
       @param(AWork The work, run on a background thread.)
       @param(AOnDone Called on the main thread when the job has finished,
         whether or not it succeeded. May be @nil.)
+      @param(AProgressTitle When not empty, a modal progress dialog with
+        this title is shown while the job runs, and on desktop platforms
+        this call returns only once the job has finished. Use it for jobs
+        that fetch external data.)
       @returns(@false if another job is already running.) }
     function RunJob(const AName: string; const AWork: TJobWork;
-      const AOnDone: TJobDone): Boolean;
+      const AOnDone: TJobDone; const AProgressTitle: string = ''): Boolean;
 
     { Replaces @link(FStore) with the folder from the settings, and loads
-      its downloaded-tiles bitmap if the folder is available. If a folder
-      that has been used before is missing, asks the user to connect it.
-      Must only be called while no job is running. }
-    procedure OpenStore;
+      its downloaded-tiles bitmap if the folder is available. Must only be
+      called while no job is running.
+      @param(APromptIfMissing @true to ask the user to connect a folder that
+        has been used before but is missing. @false at start-up, where
+        @link(RunStartup) asks instead.) }
+    procedure OpenStore(APromptIfMissing: Boolean = True);
 
     { Loads @link(FDownloaded) for the current data folder, rebuilding it
       with a rescan if its file is missing or damaged.
@@ -440,7 +540,7 @@ implementation
 {$R *.fmx}
 
 uses
-  System.Math, FMX.DialogService,
+  System.Math, System.Diagnostics, FMX.DialogService,
   {$IFDEF MSWINDOWS}
   Winapi.Windows,
   {$ENDIF}
@@ -449,8 +549,6 @@ uses
 { TfrmMain }
 
 procedure TfrmMain.FormCreate(Sender: TObject);
-var
-  LHaveSettings: Boolean;
 begin
   {$IF defined(MACOS) and not defined(IOS)}
   mnuFileSep.Visible := False;
@@ -473,29 +571,42 @@ begin
 
   FSettings := TGDEMSettings.Create;
   try
-    LHaveSettings := FSettings.Load;
+    FHaveSettings := FSettings.Load;
   except
     on E: Exception do
     begin
       ReportError(E.Message);
-      LHaveSettings := False;
+      FHaveSettings := False;
     end;
   end;
 
+  // Before anything is shown, so no window appears in the wrong look
+  if ThemeFromKey(FSettings.Theme) <> thDefault then
+    ApplyThemeSetting(False);
+
   LoadTileIndex;
-  OpenStore;
+  OpenStore(False);
   MapSelectionChanged(FMap);
 
   tmrStorage.Interval := STORAGE_CHECK_INTERVAL;
   tmrStorage.Enabled := True;
 
-  // The form is not visible yet, so show the dialog once it is
-  if not LHaveSettings then
-    TThread.ForceQueue(nil,
-      procedure
-      begin
-        ShowSettings(nil);
-      end);
+  // The form is not visible yet, so ask the user anything once it is
+  TThread.ForceQueue(nil, RunStartup);
+end;
+
+procedure TfrmMain.RunStartup;
+begin
+  // Each of these waits for the user (or the download) before the next
+  if not FHaveSettings then
+    ShowSettings(nil);
+  if FNeedIndexBuild then
+  begin
+    FNeedIndexBuild := False;
+    StartIndexBuild;
+  end;
+  if not FStore.IsAvailable and FSettings.DataFolderUsed then
+    WithStore(nil);
 end;
 
 procedure TfrmMain.FormDestroy(Sender: TObject);
@@ -663,6 +774,18 @@ begin
   mnuDeleteSelected.Enabled := not LBusy and LHaveSelection;
 end;
 
+procedure TfrmMain.ApplyThemeSetting(AReport: Boolean);
+var
+  LError: string;
+begin
+  if ApplyTheme(ThemeFromKey(FSettings.Theme), LError) then
+    AddLog('Theme: ' + ThemeCaption(ThemeFromKey(FSettings.Theme)))
+  else if AReport then
+    ReportError('Could not apply the theme. ' + LError)
+  else
+    AddLog('WARNING: could not apply the theme. ' + LError);
+end;
+
 procedure TfrmMain.mnuSettingsClick(Sender: TObject);
 begin
   ShowSettings(nil);
@@ -706,13 +829,18 @@ end;
 { Settings }
 
 procedure TfrmMain.ShowSettings(const AOnSaved: TProc);
+var
+  LOldTheme: string;
 begin
+  LOldTheme := FSettings.Theme;
   TfrmSettings.Edit(FSettings,
     procedure(ASaved: Boolean; const ADataFolder: string)
     begin
       if not ASaved then
         Exit;
       AddLog('Settings saved to ' + TGDEMSettings.SettingsFileName);
+      if not SameText(FSettings.Theme, LOldTheme) then
+        ApplyThemeSetting(True);
       RefreshStorageStatus;
       if not SameFileName(ADataFolder, FSettings.DataFolder) then
         ChangeDataFolder(ADataFolder);
@@ -737,33 +865,52 @@ begin
       AddLog(Format('Tile index: %d tiles with data', [FTileIndex.Count]));
       Exit;
     end;
-    AddLog('No tile index yet; building one from NASA CMR (no login needed).');
+    AddLog('No tile index yet; it will be downloaded from NASA CMR (no login needed).');
   except
     on E: Exception do
-      AddLog('WARNING: ' + E.Message + ' Rebuilding it.');
+      AddLog('WARNING: ' + E.Message + ' It will be downloaded again.');
   end;
-  TThread.ForceQueue(nil, StartIndexBuild);
+  FNeedIndexBuild := True;
 end;
 
 procedure TfrmMain.StartIndexBuild;
 var
   LBuilder: TTileIndexBuilder;
 begin
-  if FIndexBuilder <> nil then
+  if (FIndexBuilder <> nil) or (FProgress <> nil) then
     Exit;
 
   LBuilder := TTileIndexBuilder.Create;
-  LBuilder.OnLog := AddLog;
+  LBuilder.OnLog :=
+    procedure(const Msg: string)
+    begin
+      AddLog(Msg);
+      ProgressStatus(Trim(Msg));
+    end;
   LBuilder.OnProgress :=
     procedure(APage, APages, ATiles: Integer)
     begin
       if APages > 0 then
-        AddLog(Format('  page %d of %d: %d tiles so far', [APage, APages, ATiles]))
+      begin
+        AddLog(Format('  page %d of %d: %d tiles so far', [APage, APages, ATiles]));
+        ProgressOverall(APage, APages,
+          Format('Page %d of %d: %d tiles found', [APage, APages, ATiles]));
+      end
       else
+      begin
         AddLog(Format('  page %d: %d tiles so far', [APage, ATiles]));
+        ProgressOverall(0, 0, Format('Page %d: %d tiles found', [APage, ATiles]));
+      end;
     end;
   FIndexBuilder := LBuilder;
   UpdateButtons;
+  BeginProgress('Downloading the tile index from NASA CMR',
+    procedure
+    begin
+      LBuilder.Cancel;
+      AddLog('Cancelling...');
+    end,
+    False);
 
   TTask.Run(
     procedure
@@ -807,6 +954,7 @@ begin
           LNew.Free;
           FIndexBuilder := nil;
           LBuilder.Free;
+          EndProgress;
           UpdateButtons;
           CloseIfIdle;
         end);
@@ -816,12 +964,14 @@ begin
       if LError <> '' then
         ReportError('Could not build the tile index: ' + LError);
     end);
+
+  ShowProgressModal;
 end;
 
 { Jobs }
 
 function TfrmMain.RunJob(const AName: string; const AWork: TJobWork;
-  const AOnDone: TJobDone): Boolean;
+  const AOnDone: TJobDone; const AProgressTitle: string): Boolean;
 var
   LToken: TCancelToken;
   LName: string;
@@ -842,6 +992,14 @@ begin
   FJob := LToken;
   pbDownload.Value := 0;
   UpdateButtons;
+  if AProgressTitle <> '' then
+    BeginProgress(AProgressTitle,
+      procedure
+      begin
+        LToken.Cancel;
+        AddLog('Cancelling...');
+      end,
+      True);
 
   TTask.Run(
     procedure
@@ -868,6 +1026,7 @@ begin
           FJob := nil;
           LToken.Free;
           pbDownload.Value := 0;
+          EndProgress;
           UpdateButtons;
           if Assigned(LOnDone) then
             LOnDone((LError = '') and not LCancelled);
@@ -879,6 +1038,119 @@ begin
       // buttons are usable again
       if LError <> '' then
         ReportError(LName + ' failed: ' + LError);
+    end);
+
+  if AProgressTitle <> '' then
+    ShowProgressModal;
+end;
+
+procedure TfrmMain.BeginProgress(const ATitle: string; const AOnCancel: TProc;
+  AShowItem: Boolean);
+begin
+  FProgress := TfrmProgress.CreateWithTitle(Self, ATitle, AShowItem);
+  FProgress.OnCancel := AOnCancel;
+end;
+
+procedure TfrmMain.ShowProgressModal;
+var
+  LDialog: TfrmProgress;
+begin
+  LDialog := FProgress;
+  if LDialog = nil then
+    Exit;
+  {$IFDEF ANDROID}
+  // Android cannot block on a modal form; EndProgress closes and frees it
+  LDialog.Show;
+  {$ELSE}
+  // Returns once EndProgress has been called. Updates queued by the
+  // background work run inside the modal loop meanwhile.
+  try
+    LDialog.ShowModal;
+  finally
+    if FProgress = LDialog then
+      FProgress := nil;
+    LDialog.Free;
+  end;
+  {$ENDIF}
+end;
+
+procedure TfrmMain.EndProgress;
+var
+  LDialog: TfrmProgress;
+begin
+  LDialog := FProgress;
+  if LDialog = nil then
+    Exit;
+  // Later queued updates find no dialog and do nothing
+  FProgress := nil;
+  LDialog.Finish;
+  {$IFDEF ANDROID}
+  LDialog.Close;
+  TThread.ForceQueue(nil,
+    procedure
+    begin
+      LDialog.Free;
+    end);
+  {$ENDIF}
+end;
+
+procedure TfrmMain.ProgressStatus(const AText: string);
+begin
+  TThread.Queue(nil,
+    procedure
+    begin
+      if FProgress <> nil then
+        FProgress.SetStatus(AText);
+    end);
+end;
+
+procedure TfrmMain.ProgressOverall(ADone, ATotal: Integer; const AText: string);
+begin
+  TThread.Queue(nil,
+    procedure
+    begin
+      if FProgress <> nil then
+        FProgress.SetOverall(ADone, ATotal, AText);
+    end);
+end;
+
+procedure TfrmMain.ProgressItemText(ADone, ATotal: Int64; const AText: string);
+begin
+  TThread.Queue(nil,
+    procedure
+    begin
+      if FProgress <> nil then
+        FProgress.SetItemProgress(ADone, ATotal, AText);
+    end);
+end;
+
+class function TfrmMain.FormatDuration(ASeconds: Double): string;
+var
+  LSeconds, LMinutes, LHours: Int64;
+begin
+  LSeconds := Round(ASeconds);
+  LHours := LSeconds div 3600;
+  LMinutes := (LSeconds mod 3600) div 60;
+  if LHours > 0 then
+    Result := Format('%d h %d min', [LHours, LMinutes])
+  else if LMinutes > 0 then
+    Result := Format('%d min', [LMinutes])
+  else
+    Result := Format('%d s', [LSeconds]);
+end;
+
+procedure TfrmMain.ProgressItem(AReceived, ATotal: Int64);
+begin
+  TThread.Queue(nil,
+    procedure
+    begin
+      if FProgress <> nil then
+      begin
+        if AReceived = 0 then
+          FProgress.ClearItem
+        else
+          FProgress.SetItem(AReceived, ATotal);
+      end;
     end);
 end;
 
@@ -893,7 +1165,7 @@ end;
 
 { Data folder }
 
-procedure TfrmMain.OpenStore;
+procedure TfrmMain.OpenStore(APromptIfMissing: Boolean);
 begin
   FreeAndNil(FStore);
   FStore := TGDEMStore.Create(FSettings.DataFolder);
@@ -909,12 +1181,12 @@ begin
   else if FSettings.DataFolderUsed then
   begin
     AddLog('WARNING: the data folder ' + FStore.Root + ' is not connected.');
-    // Ask once the window is showing
-    TThread.ForceQueue(nil,
-      procedure
-      begin
-        WithStore(nil);
-      end);
+    if APromptIfMissing then
+      TThread.ForceQueue(nil,
+        procedure
+        begin
+          WithStore(nil);
+        end);
   end;
   RefreshStorageStatus;
 end;
@@ -1132,11 +1404,43 @@ begin
     procedure(AToken: TCancelToken)
     var
       LResult: TImportResult;
+      LClock: TStopwatch;
     begin
+      ProgressStatus('Looking for ASTER GDEM tiles in ' + LSource + ' ...');
+      ProgressOverall(0, 0, 'This can take a while for a large folder');
+      LClock := TStopwatch.StartNew;
       LResult := LStore.ImportFrom(LSource, LReserve, AToken,
-        procedure(ADone, ATotal: Integer)
+        procedure(const AProgress: TImportProgress)
+        var
+          LBytesText: string;
+          LSeconds, LRate: Double;
         begin
-          ShowProgress(ADone, ATotal);
+          ShowProgress(AProgress.FilesDone, AProgress.FilesTotal);
+
+          if AProgress.CurrentFile <> '' then
+            ProgressStatus('Copying ' + AProgress.CurrentFile)
+          else if AProgress.FilesDone >= AProgress.FilesTotal then
+            ProgressStatus('Finishing...')
+          else
+            ProgressStatus(Format('Found %d tile file(s); copying...',
+              [AProgress.FilesTotal]));
+          ProgressOverall(AProgress.FilesDone, AProgress.FilesTotal,
+            Format('File %d of %d', [AProgress.FilesDone, AProgress.FilesTotal]));
+
+          // The bytes bar measures what actually has to be copied, so files
+          // already in the data folder do not make it jump ahead
+          LBytesText := Format('%s of %s copied',
+            [FormatByteSize(AProgress.BytesCopied), FormatByteSize(AProgress.BytesToCopy)]);
+          LSeconds := LClock.Elapsed.TotalSeconds;
+          if (LSeconds >= 10) and (AProgress.BytesCopied > 0) and
+             (AProgress.BytesCopied < AProgress.BytesToCopy) then
+          begin
+            LRate := AProgress.BytesCopied / LSeconds;
+            LBytesText := LBytesText + Format(', %s/s, about %s left',
+              [FormatByteSize(Round(LRate)),
+               FormatDuration((AProgress.BytesToCopy - AProgress.BytesCopied) / LRate)]);
+          end;
+          ProgressItemText(AProgress.BytesCopied, AProgress.BytesToCopy, LBytesText);
         end);
       AddLog(Format('Import finished: %d file(s) copied (%s), %d already present, ' +
         '%d replaced, %d ignored.',
@@ -1148,7 +1452,8 @@ begin
       // Even a cancelled or failed import may have copied complete tiles,
       // so bring the map up to date either way
       StartRescan(nil);
-    end);
+    end,
+    'Importing tiles');
 end;
 
 procedure TfrmMain.MarkDownloaded(ASouth, AWest: Integer);
@@ -1483,10 +1788,16 @@ begin
       LDownloader := TGDEMDownloader.Create(LToken);
       try
         LDownloader.CancelToken := AToken;
-        LDownloader.OnLog := AddLog;
+        LDownloader.OnLog :=
+          procedure(const Msg: string)
+          begin
+            AddLog(Msg);
+            ProgressStatus(Trim(Msg));
+          end;
         LDownloader.OnProgress :=
           procedure(const FileName: string; Received, Total: Int64)
           begin
+            ProgressItem(Received, Total);
             if Total > 0 then
               TThread.Queue(nil,
                 procedure
@@ -1501,6 +1812,9 @@ begin
           LTile := LTiles[LIndex];
           if Length(LTiles) > 1 then
             AddLog(Format('[%d/%d] %s', [LIndex + 1, Length(LTiles), LTile]));
+          ProgressOverall(LIndex, Length(LTiles),
+            Format('Tile %d of %d: %s', [LIndex + 1, Length(LTiles), LTile]));
+          ProgressItem(0, 0);
 
           // Validates the name, raising a clear error if it is wrong
           TGDEMDownloader.TileGranuleName(LTile);
@@ -1538,12 +1852,14 @@ begin
             LStore.PruneEmptyFolders(LFolder);
           end;
         end;
+        ProgressOverall(Length(LTiles), Length(LTiles), 'Finished');
         AddLog(Format('Done: %d tile(s) downloaded, %d without data.', [LFound, LEmpty]));
       finally
         LDownloader.Free;
       end;
     end,
-    nil);
+    nil,
+    'Downloading tiles');
 end;
 
 end.
