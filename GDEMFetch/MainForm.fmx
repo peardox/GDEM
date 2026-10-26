@@ -32,6 +32,21 @@ object frmMain: TfrmMain
         OnClick = mnuExitClick
       end
     end
+    object mnuData: TMenuItem
+      Text = 'Data'
+      object mnuImport: TMenuItem
+        Text = 'Import Existing Tiles...'
+        OnClick = mnuImportClick
+      end
+      object mnuRescan: TMenuItem
+        Text = 'Rescan Data Folder'
+        OnClick = mnuRescanClick
+      end
+      object mnuDeleteSelected: TMenuItem
+        Text = 'Delete Selected Downloads...'
+        OnClick = mnuDeleteSelectedClick
+      end
+    end
     object mnuView: TMenuItem
       Text = 'View'
       object mnuZoomIn: TMenuItem
@@ -59,7 +74,20 @@ object frmMain: TfrmMain
         Text = 'Show Available Tiles'
         OnClick = mnuShowTilesClick
       end
+      object mnuShowDownloaded: TMenuItem
+        AutoCheck = True
+        IsChecked = True
+        Text = 'Show Downloaded Tiles'
+        OnClick = mnuShowDownloadedClick
+      end
     end
+  end
+  object tmrStorage: TTimer
+    Enabled = False
+    Interval = 60000
+    OnTimer = tmrStorageTimer
+    Left = 1016
+    Top = 72
   end
   object layTop: TLayout
     Align = Top
@@ -141,14 +169,14 @@ object frmMain: TfrmMain
       Size.Height = 24.000000000000000000
       Size.PlatformDefault = False
     end
-    object lblFolder: TLabel
+    object lblStorage: TLabel
       Align = Client
       Size.Width = 704.000000000000000000
       Size.Height = 24.000000000000000000
       Size.PlatformDefault = False
       TextSettings.HorzAlign = Trailing
       TextSettings.Trimming = Character
-      Text = 'Save to:'
+      Text = ''
     end
   end
   object pbDownload: TProgressBar

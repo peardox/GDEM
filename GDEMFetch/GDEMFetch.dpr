@@ -14,6 +14,8 @@
     @item(@link(GDEMTiles) names and selects tiles on the 1 degree grid.)
     @item(@link(GDEMTileIndex) records which tiles exist, built from CMR.)
     @item(@link(GDEMDownloader) finds and downloads tiles.)
+    @item(@link(GDEMStore) keeps downloaded tiles in the data folder.)
+    @item(@link(GDEMCancel) lets the user cancel background work.)
     @item(@link(GDEMCMR) models and parses NASA CMR search results with the
       Neon JSON library.)
   ) }
@@ -30,7 +32,9 @@ uses
   SettingsForm in 'SettingsForm.pas' {frmSettings},
   GDEMTiles in 'GDEMTiles.pas',
   GDEMWorldMap in 'GDEMWorldMap.pas',
-  GDEMTileIndex in 'GDEMTileIndex.pas';
+  GDEMTileIndex in 'GDEMTileIndex.pas',
+  GDEMCancel in 'GDEMCancel.pas',
+  GDEMStore in 'GDEMStore.pas';
 
 {$R *.res}
 { The world map image, built from the RcItem in the project file. }

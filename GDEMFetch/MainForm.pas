@@ -2,35 +2,44 @@
 
   Shows a world map (@link(TWorldMapView)) on which the user selects ASTER
   GDEM V3 tiles by dragging a box, then downloads them with
-  @link(TGDEMDownloader). A single tile can also be typed in by name.
+  @link(TGDEMDownloader) into the data folder (@link(TGDEMStore)). A single
+  tile can also be typed in by name.
 
   The window has three tabs: @bold(Map) holds the world map, @bold(3D) is
   reserved for a 3D view to come, and @bold(Debug) holds the log. The
   toolbar, progress bar and status bar stay visible on every tab.
 
-  Serious problems, such as a failed download, a failed tile index build,
-  unreadable settings or a missing world map, are written to the log and
-  also shown in a modal error dialog (see @link(TfrmMain.ReportError)), so
-  they are noticed even when the Debug tab is not open. Cancelling is not
-  treated as an error.
+  @bold(Tile bitmaps.) Two @link(TTileIndex) bitmaps are shown on the map:
+  @unorderedList(
+    @item(tiles that have data, built from NASA CMR and kept in the
+      settings folder (@bold(File > Refresh Tile Index) rebuilds it);)
+    @item(tiles already downloaded, kept in the data folder itself
+      (@bold(Data > Rescan Data Folder) rebuilds it from the files).)
+  )
+  @bold(Fetch selection) downloads only tiles that have data and are not
+  yet downloaded.
+
+  @bold(Data folder.) Chosen in @bold(File > Settings) and may be on a
+  removable drive. When the user picks a new folder and the old one holds
+  data, they are asked whether to move it. Once a folder has been used, a
+  missing folder means its drive is not connected, and the user is asked to
+  connect it. Free space is shown in the status bar, checked every minute
+  and before every tile; downloads stop rather than go below the reserve
+  set in Settings.
+
+  @bold(Jobs.) Work on the data folder (downloading, rescanning, moving,
+  deleting) runs one job at a time on a background task, through
+  @link(TfrmMain.RunJob); the Cancel button stops it. Building the tile
+  index from CMR runs separately. All updates to controls are queued back
+  to the main thread.
+
+  Serious problems are written to the log and also shown in a modal error
+  dialog (see @link(TfrmMain.ReportError)). Cancelling is not treated as an
+  error.
 
   The world map image is linked into the program as the @code(WORLDMAP)
   RCDATA resource, so nothing has to be deployed alongside the program on
-  any platform.
-
-  Which tiles have data is held in a @link(TTileIndex), loaded from the
-  settings folder at start-up. If there is no index yet, one is built from
-  NASA CMR in the background; @bold(File > Refresh Tile Index) rebuilds it.
-  With an index, the map tints tiles that have data and
-  @bold(Fetch selection) skips the rest without asking CMR about each one.
-
-  The Earthdata Login bearer token comes from @link(TGDEMSettings) and is
-  edited through @bold(File > Settings), which opens
-  @link(TfrmSettings). If no settings file exists when the program starts,
-  the settings dialog is shown automatically.
-
-  Downloads run on a background task so the window stays responsive; all
-  updates to controls are queued back to the main thread. }
+  any platform. }
 unit MainForm;
 
 interface
@@ -40,7 +49,8 @@ uses
   System.Threading, FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   FMX.StdCtrls, FMX.Edit, FMX.Memo, FMX.Memo.Types, FMX.ScrollBox, FMX.Layouts,
   FMX.Controls.Presentation, FMX.Menus, FMX.TabControl,
-  GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex;
+  GDEMCancel, GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex,
+  GDEMStore;
 
 const
   { Name of the RCDATA resource holding the world map image. }
@@ -50,7 +60,20 @@ const
     downloading. }
   CONFIRM_TILE_COUNT = 10;
 
+  { How often the data folder and its free space are checked, in
+    milliseconds. }
+  STORAGE_CHECK_INTERVAL = 60000;
+
 type
+  { The work done by a job, run on a background thread.
+    @param(AToken Check this at safe points; cancelling the job sets it.) }
+  TJobWork = reference to procedure(AToken: TCancelToken);
+
+  { Called on the main thread when a job has finished.
+    @param(ASucceeded @true if the work ran to the end; @false if it failed
+      or was cancelled.) }
+  TJobDone = reference to procedure(ASucceeded: Boolean);
+
   { @abstract(The application's main form.) }
   TfrmMain = class(TForm)
     { Application menu. On macOS this becomes the system menu bar. }
@@ -65,6 +88,17 @@ type
     mnuFileSep: TMenuItem;
     { File > Exit. Hidden on macOS, where Quit is in the application menu. }
     mnuExit: TMenuItem;
+    { The Data menu. }
+    mnuData: TMenuItem;
+    { Data > Import Existing Tiles: copies tiles from another folder into
+      the data folder. }
+    mnuImport: TMenuItem;
+    { Data > Rescan Data Folder: rebuilds the downloaded-tiles bitmap from
+      the files and tidies the folder. }
+    mnuRescan: TMenuItem;
+    { Data > Delete Selected Downloads: removes downloaded tiles in the
+      map selection. }
+    mnuDeleteSelected: TMenuItem;
     { The View menu. }
     mnuView: TMenuItem;
     { View > Zoom In. }
@@ -75,11 +109,13 @@ type
     mnuZoomFit: TMenuItem;
     { View > Zoom to Selection. }
     mnuZoomSelection: TMenuItem;
-    { Separator above @link(mnuShowTiles). }
+    { Separator above the tint options. }
     mnuViewSep: TMenuItem;
     { View > Show Available Tiles: toggles the tint on tiles with data. }
     mnuShowTiles: TMenuItem;
-    { Toolbar above the map. }
+    { View > Show Downloaded Tiles: toggles the tint on downloaded tiles. }
+    mnuShowDownloaded: TMenuItem;
+    { Toolbar above the tabs. }
     layTop: TLayout;
     { Caption for @link(edtTile). }
     lblTile: TLabel;
@@ -88,9 +124,10 @@ type
     edtTile: TEdit;
     { Fetches the tile named in @link(edtTile). }
     btnFetch: TButton;
-    { Fetches every tile in the map selection. }
+    { Fetches every tile in the map selection that has data and is not
+      downloaded yet. }
     btnFetchSelection: TButton;
-    { Stops the current download. Enabled only while one is running. }
+    { Stops the running job. Enabled only while one is running. }
     btnCancel: TButton;
     { Describes the map selection. }
     lblSelection: TLabel;
@@ -106,40 +143,45 @@ type
     tabDebug: TTabItem;
     { Read-only log of what the program is doing. }
     memLog: TMemo;
-    { Progress of the current file, from 0 to 100. }
+    { Progress of the current file or job, from 0 to 100. }
     pbDownload: TProgressBar;
-    { Status bar under the log. }
+    { Status bar under the tabs. }
     layStatus: TLayout;
     { Shows the position and tile under the mouse pointer. }
     lblHover: TLabel;
-    { Shows the folder files are saved to. }
-    lblFolder: TLabel;
+    { Shows the data folder, its free space and how many tiles it holds,
+      or that it is not connected. }
+    lblStorage: TLabel;
+    { Checks the data folder and its free space every
+      @link(STORAGE_CHECK_INTERVAL) milliseconds. }
+    tmrStorage: TTimer;
 
-    { Creates the map, loads the settings, and queues the settings dialog
-      if there are none.
+    { Creates the map, loads the settings and both tile bitmaps, and queues
+      the settings dialog if there are no settings.
       @param(Sender The form.) }
     procedure FormCreate(Sender: TObject);
 
-    { Frees the settings.
+    { Frees what the form owns.
       @param(Sender The form.) }
     procedure FormDestroy(Sender: TObject);
 
-    { Lets the window close only when no download is running. If one is,
+    { Lets the window close only when nothing is running. If something is,
       it is cancelled and the window closes once it has stopped, so no
       queued update can reach a freed form.
       @param(Sender The form.)
-      @param(CanClose Set to @false while a download is still stopping.) }
+      @param(CanClose Set to @false while work is still stopping.) }
     procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
 
     { Fetches the tile named in @link(edtTile).
       @param(Sender The button.) }
     procedure btnFetchClick(Sender: TObject);
 
-    { Fetches every tile in the map selection, confirming large ones.
+    { Fetches the tiles in the map selection that still need downloading,
+      confirming large or space-hungry batches.
       @param(Sender The button.) }
     procedure btnFetchSelectionClick(Sender: TObject);
 
-    { Asks the running download to stop.
+    { Asks the running job to stop.
       @param(Sender The button.) }
     procedure btnCancelClick(Sender: TObject);
 
@@ -150,6 +192,19 @@ type
     { Closes the application.
       @param(Sender The menu item.) }
     procedure mnuExitClick(Sender: TObject);
+
+    { Asks for a folder of existing tile files and copies them into the
+      data folder, leaving the originals untouched.
+      @param(Sender The menu item.) }
+    procedure mnuImportClick(Sender: TObject);
+
+    { Rebuilds the downloaded-tiles bitmap from the data folder.
+      @param(Sender The menu item.) }
+    procedure mnuRescanClick(Sender: TObject);
+
+    { Deletes the downloaded tiles in the map selection, after asking.
+      @param(Sender The menu item.) }
+    procedure mnuDeleteSelectedClick(Sender: TObject);
 
     { Zooms the map in.
       @param(Sender The menu item.) }
@@ -174,17 +229,20 @@ type
     { Shows or hides the tint on tiles with data.
       @param(Sender The menu item, which checks itself.) }
     procedure mnuShowTilesClick(Sender: TObject);
+
+    { Shows or hides the tint on downloaded tiles.
+      @param(Sender The menu item, which checks itself.) }
+    procedure mnuShowDownloadedClick(Sender: TObject);
+
+    { Periodic check of the data folder and its free space.
+      @param(Sender The timer.) }
+    procedure tmrStorageTimer(Sender: TObject);
   private
     { The user's saved settings, loaded at start-up. }
     FSettings: TGDEMSettings;
 
     { The world map, created in @link(FormCreate). }
     FMap: TWorldMapView;
-
-    { The downloader for the batch in progress, or @nil when idle. Created
-      and freed on the main thread, so @link(btnCancelClick) can safely
-      reach it. }
-    FDownloader: TGDEMDownloader;
 
     { Which tiles have data. Owned by the form and shown on @link(FMap).
       Empty until loaded or built. Only touched on the main thread. }
@@ -194,12 +252,29 @@ type
       on the main thread. }
     FIndexBuilder: TTileIndexBuilder;
 
-    { Folder downloaded tiles are saved to: an @code(ASTGTM) folder inside
-      the user's documents folder on every platform. }
-    FDestFolder: string;
+    { The current data folder. Replaced only while no job is running. }
+    FStore: TGDEMStore;
 
-    { Set when the user tries to close the window during a download, so it
-      closes once the download has stopped. }
+    { Which tiles are fully downloaded in @link(FStore). Owned by the form
+      and shown on @link(FMap). Only touched on the main thread. }
+    FDownloaded: TTileIndex;
+
+    { @true once @link(FDownloaded) has been loaded or rebuilt for the
+      current data folder. Cleared when the folder becomes unavailable, so
+      it is reloaded when the drive is connected again. }
+    FStoreOpen: Boolean;
+
+    { Whether the data folder was available at the last check, so that
+      its bitmap is reloaded only when the folder appears, not retried after
+      every failure. }
+    FStoreWasAvailable: Boolean;
+
+    { Cancellation token of the running job, or @nil when no job is
+      running. Created and freed on the main thread. }
+    FJob: TCancelToken;
+
+    { Set when the user tries to close the window while work is running, so
+      it closes once the work has stopped. }
     FCloseWhenIdle: Boolean;
 
     { Adds a line to @link(memLog). Safe to call from any thread.
@@ -214,12 +289,33 @@ type
       @param(AMessage Description of the problem.) }
     procedure ReportError(const AMessage: string);
 
+    { Shows job progress on the progress bar. Safe to call from any thread.
+      @param(ADone Items processed so far.)
+      @param(ATotal Total items; nothing is shown when 0.) }
+    procedure ShowProgress(ADone, ATotal: Integer);
+
+    { Formats a number of bytes for display, such as @code(12.3 GB); see
+      @link(FormatByteSize).
+      @param(ABytes The size; negative means unknown.)
+      @returns(The formatted size.) }
+    class function FormatBytes(ABytes: Int64): string; static;
+
+    { Starts a job that imports tiles from a folder, then rescans the data
+      folder so the map shows them.
+      @param(ASourceFolder The folder to import from.) }
+    procedure StartImport(const ASourceFolder: string);
+
+    { The free-space reserve from the settings.
+      @returns(Bytes that must be left free.) }
+    function ReserveBytes: Int64;
+
     { Loads the world map image from the @link(WORLD_MAP_RESOURCE)
-      resource into @link(FMap), logging any failure. }
+      resource into @link(FMap), reporting any failure. }
     procedure LoadWorldMap;
 
-    { Updates the selection label and buttons after the map selection
-      changes, and copies a single selected tile into @link(edtTile).
+    { Updates the selection label and buttons after the map selection or a
+      tile bitmap changes, and copies a single selected tile into
+      @link(edtTile).
       @param(Sender The map view.) }
     procedure MapSelectionChanged(Sender: TObject);
 
@@ -230,9 +326,13 @@ type
       @param(AOnMap @false when the pointer is off the map.) }
     procedure MapHover(Sender: TObject; ALat, ALon: Double; AOnMap: Boolean);
 
-    { Enables and disables controls to match whether a download is
-      running. }
+    { Enables and disables controls to match what is running. }
     procedure UpdateButtons;
+
+    { Shows the data folder's state in @link(lblStorage), and loads the
+      downloaded-tiles bitmap if the folder has become available since the
+      last check, for example because its drive was connected. }
+    procedure RefreshStorageStatus;
 
     { Opens the settings dialog.
       @param(AOnSaved Called after the dialog closes, only if new settings
@@ -252,13 +352,81 @@ type
       more. }
     procedure CloseIfIdle;
 
-    { Downloads tiles, asking for a bearer token first if none is saved.
+    { Runs work on the data folder as a background job. Only one job runs
+      at a time. Cancellation is logged; any other failure is reported
+      with @link(ReportError).
+      @param(AName Short name of the job, used in messages.)
+      @param(AWork The work, run on a background thread.)
+      @param(AOnDone Called on the main thread when the job has finished,
+        whether or not it succeeded. May be @nil.)
+      @returns(@false if another job is already running.) }
+    function RunJob(const AName: string; const AWork: TJobWork;
+      const AOnDone: TJobDone): Boolean;
+
+    { Replaces @link(FStore) with the folder from the settings, and loads
+      its downloaded-tiles bitmap if the folder is available. If a folder
+      that has been used before is missing, asks the user to connect it.
+      Must only be called while no job is running. }
+    procedure OpenStore;
+
+    { Loads @link(FDownloaded) for the current data folder, rebuilding it
+      with a rescan if its file is missing or damaged.
+      @param(AThen Called once the bitmap is ready. May be @nil.) }
+    procedure LoadDownloaded(const AThen: TProc);
+
+    { Makes sure the data folder can be used, then runs AAction. Creates a
+      new folder if needed. If a folder that has been used before is
+      missing, asks the user to connect its drive and try again.
+      @param(AAction What to do once the folder is ready. May be @nil.) }
+    procedure WithStore(const AAction: TProc);
+
+    { Records in the settings that the data folder has been set up. }
+    procedure MarkStoreUsed;
+
+    { Starts a job that rescans the data folder and rebuilds
+      @link(FDownloaded).
+      @param(AThen Called after a successful rescan. May be @nil.) }
+    procedure StartRescan(const AThen: TProc);
+
+    { Records that a tile is fully downloaded and saves the bitmap. Main
+      thread only.
+      @param(ASouth Latitude of the tile's southern edge.)
+      @param(AWest Longitude of the tile's western edge.) }
+    procedure MarkDownloaded(ASouth, AWest: Integer);
+
+    { Queues @link(MarkDownloaded) on the main thread. Safe to call from
+      any thread. The tile is passed as parameters, so each call keeps its
+      own values; an anonymous method in a loop would otherwise see the
+      loop variables' later values.
+      @param(ASouth Latitude of the tile's southern edge.)
+      @param(AWest Longitude of the tile's western edge.) }
+    procedure QueueMarkDownloaded(ASouth, AWest: Integer);
+
+    { Handles the user choosing a different data folder in the settings:
+      offers to move existing data, or switches straight away.
+      @param(ANewFolder The folder chosen.) }
+    procedure ChangeDataFolder(const ANewFolder: string);
+
+    { Starts using a different data folder without moving anything.
+      @param(ANewFolder The folder to use.)
+      @param(AForceRescan @true to rebuild the downloaded-tiles bitmap even
+        if the folder has one, for example after data was moved into it.) }
+    procedure SwitchDataFolder(const ANewFolder: string; AForceRescan: Boolean);
+
+    { Starts a job that moves all downloaded data to another folder, then
+      switches to it.
+      @param(ANewFolder The destination folder.) }
+    procedure StartMove(const ANewFolder: string);
+
+    { Downloads tiles, asking for a bearer token first if none is saved,
+      and making sure the data folder is available.
       @param(ATiles Tile names such as @code(N50W002).) }
     procedure FetchTiles(const ATiles: TArray<string>);
 
-    { Downloads tiles one after another on a background task, using the
-      saved bearer token. Tiles with no data are logged and skipped. The
-      batch stops at the first error or when cancelled.
+    { Starts a job that downloads tiles one after another into the data
+      folder. Tiles with no data are logged and skipped, and so are tiles
+      already downloaded. The job stops at the first error, when cancelled,
+      or before free space would fall below the reserve.
       @param(ATiles Tile names such as @code(N50W002).) }
     procedure StartFetch(const ATiles: TArray<string>);
   end;
@@ -278,6 +446,8 @@ uses
   {$ENDIF}
   GDEMTiles, SettingsForm;
 
+{ TfrmMain }
+
 procedure TfrmMain.FormCreate(Sender: TObject);
 var
   LHaveSettings: Boolean;
@@ -287,8 +457,6 @@ begin
   mnuExit.Visible := False;
   {$ENDIF}
 
-  FDestFolder := TPath.Combine(TPath.GetDocumentsPath, 'ASTGTM');
-  lblFolder.Text := 'Save to: ' + FDestFolder;
   edtTile.Text := 'N50W002';
 
   FMap := TWorldMapView.Create(Self);
@@ -299,9 +467,9 @@ begin
   LoadWorldMap;
 
   FTileIndex := TTileIndex.Create;
+  FDownloaded := TTileIndex.Create;
   FMap.TileIndex := FTileIndex;
-  LoadTileIndex;
-  MapSelectionChanged(FMap);
+  FMap.DownloadedIndex := FDownloaded;
 
   FSettings := TGDEMSettings.Create;
   try
@@ -314,6 +482,13 @@ begin
     end;
   end;
 
+  LoadTileIndex;
+  OpenStore;
+  MapSelectionChanged(FMap);
+
+  tmrStorage.Interval := STORAGE_CHECK_INTERVAL;
+  tmrStorage.Enabled := True;
+
   // The form is not visible yet, so show the dialog once it is
   if not LHaveSettings then
     TThread.ForceQueue(nil,
@@ -325,18 +500,21 @@ end;
 
 procedure TfrmMain.FormDestroy(Sender: TObject);
 begin
+  tmrStorage.Enabled := False;
+  FStore.Free;
   FSettings.Free;
   FTileIndex.Free;
+  FDownloaded.Free;
 end;
 
 procedure TfrmMain.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
 begin
-  CanClose := (FDownloader = nil) and (FIndexBuilder = nil);
+  CanClose := (FJob = nil) and (FIndexBuilder = nil);
   if not CanClose then
   begin
     FCloseWhenIdle := True;
-    if FDownloader <> nil then
-      FDownloader.Cancel;
+    if FJob <> nil then
+      FJob.Cancel;
     if FIndexBuilder <> nil then
       FIndexBuilder.Cancel;
     AddLog('Stopping before closing...');
@@ -345,8 +523,209 @@ end;
 
 procedure TfrmMain.CloseIfIdle;
 begin
-  if FCloseWhenIdle and (FDownloader = nil) and (FIndexBuilder = nil) then
+  if FCloseWhenIdle and (FJob = nil) and (FIndexBuilder = nil) then
     Close;
+end;
+
+{ Logging and reporting }
+
+procedure TfrmMain.AddLog(const Msg: string);
+var
+  LMsg: string;
+begin
+  LMsg := Msg;
+  TThread.Queue(nil,
+    procedure
+    begin
+      memLog.Lines.Add(LMsg);
+      memLog.GoToTextEnd;
+    end);
+end;
+
+procedure TfrmMain.ReportError(const AMessage: string);
+var
+  LMsg: string;
+begin
+  LMsg := AMessage;
+  AddLog('ERROR: ' + LMsg);
+  if FCloseWhenIdle then
+    Exit;
+  TThread.ForceQueue(nil,
+    procedure
+    begin
+      if FCloseWhenIdle then
+        Exit;
+      TDialogService.MessageDialog(LMsg, TMsgDlgType.mtError,
+        [TMsgDlgBtn.mbOK], TMsgDlgBtn.mbOK, 0,
+        procedure(const AResult: TModalResult)
+        begin
+          // Nothing to do; the dialog only informs
+        end);
+    end);
+end;
+
+procedure TfrmMain.ShowProgress(ADone, ATotal: Integer);
+begin
+  if ATotal <= 0 then
+    Exit;
+  TThread.Queue(nil,
+    procedure
+    begin
+      pbDownload.Value := ADone * 100 / ATotal;
+    end);
+end;
+
+class function TfrmMain.FormatBytes(ABytes: Int64): string;
+begin
+  Result := FormatByteSize(ABytes);
+end;
+
+function TfrmMain.ReserveBytes: Int64;
+begin
+  Result := Int64(FSettings.MinFreeSpaceMB) * 1024 * 1024;
+end;
+
+{ Map }
+
+procedure TfrmMain.LoadWorldMap;
+var
+  LStream: TResourceStream;
+begin
+  try
+    LStream := TResourceStream.Create(HInstance, WORLD_MAP_RESOURCE, RT_RCDATA);
+    try
+      FMap.LoadMapFromStream(LStream);
+    finally
+      LStream.Free;
+    end;
+  except
+    on E: Exception do
+      ReportError('Could not load the world map: ' + E.Message);
+  end;
+end;
+
+procedure TfrmMain.MapSelectionChanged(Sender: TObject);
+var
+  LSelection: TTileRect;
+  LText: string;
+begin
+  LSelection := FMap.Selection;
+  LText := LSelection.Describe;
+  if not LSelection.IsEmpty then
+  begin
+    if not FTileIndex.IsEmpty then
+      LText := LText + Format(', %d with data', [FTileIndex.CountIn(LSelection)]);
+    LText := LText + Format(', %d downloaded', [FDownloaded.CountIn(LSelection)]);
+  end;
+  lblSelection.Text := LText;
+  if LSelection.Count = 1 then
+    edtTile.Text := TileName(LSelection.South, LSelection.West);
+  UpdateButtons;
+end;
+
+procedure TfrmMain.MapHover(Sender: TObject; ALat, ALon: Double; AOnMap: Boolean);
+var
+  LSouth, LWest: Integer;
+begin
+  if not AOnMap then
+  begin
+    lblHover.Text := '';
+    Exit;
+  end;
+  LSouth := Floor(ALat);
+  LWest := Floor(ALon);
+  lblHover.Text := Format('%s  %s   tile %s',
+    [FormatLat(ALat), FormatLon(ALon), TileNameAt(ALat, ALon)]);
+  if FDownloaded.Has(LSouth, LWest) then
+    lblHover.Text := lblHover.Text + ' (downloaded)'
+  else if not FTileIndex.IsEmpty then
+  begin
+    if FTileIndex.Has(LSouth, LWest) then
+      lblHover.Text := lblHover.Text + ' (data)'
+    else
+      lblHover.Text := lblHover.Text + ' (no data)';
+  end;
+end;
+
+procedure TfrmMain.UpdateButtons;
+var
+  LBusy, LHaveSelection: Boolean;
+begin
+  LBusy := FJob <> nil;
+  LHaveSelection := not FMap.Selection.IsEmpty;
+  btnFetch.Enabled := not LBusy;
+  btnFetchSelection.Enabled := not LBusy and LHaveSelection;
+  btnCancel.Enabled := LBusy;
+  mnuZoomSelection.Enabled := LHaveSelection;
+  mnuRefreshIndex.Enabled := FIndexBuilder = nil;
+  mnuRescan.Enabled := not LBusy;
+  mnuImport.Enabled := not LBusy;
+  mnuDeleteSelected.Enabled := not LBusy and LHaveSelection;
+end;
+
+procedure TfrmMain.mnuSettingsClick(Sender: TObject);
+begin
+  ShowSettings(nil);
+end;
+
+procedure TfrmMain.mnuExitClick(Sender: TObject);
+begin
+  Close;
+end;
+
+procedure TfrmMain.mnuZoomInClick(Sender: TObject);
+begin
+  FMap.ZoomBy(2);
+end;
+
+procedure TfrmMain.mnuZoomOutClick(Sender: TObject);
+begin
+  FMap.ZoomBy(0.5);
+end;
+
+procedure TfrmMain.mnuZoomFitClick(Sender: TObject);
+begin
+  FMap.ZoomToFit;
+end;
+
+procedure TfrmMain.mnuZoomSelectionClick(Sender: TObject);
+begin
+  FMap.ZoomToSelection;
+end;
+
+procedure TfrmMain.mnuShowTilesClick(Sender: TObject);
+begin
+  FMap.ShowAvailableTiles := mnuShowTiles.IsChecked;
+end;
+
+procedure TfrmMain.mnuShowDownloadedClick(Sender: TObject);
+begin
+  FMap.ShowDownloadedTiles := mnuShowDownloaded.IsChecked;
+end;
+
+{ Settings }
+
+procedure TfrmMain.ShowSettings(const AOnSaved: TProc);
+begin
+  TfrmSettings.Edit(FSettings,
+    procedure(ASaved: Boolean; const ADataFolder: string)
+    begin
+      if not ASaved then
+        Exit;
+      AddLog('Settings saved to ' + TGDEMSettings.SettingsFileName);
+      RefreshStorageStatus;
+      if not SameFileName(ADataFolder, FSettings.DataFolder) then
+        ChangeDataFolder(ADataFolder);
+      if Assigned(AOnSaved) then
+        AOnSaved();
+    end);
+end;
+
+{ Tile index (which tiles have data) }
+
+procedure TfrmMain.mnuRefreshIndexClick(Sender: TObject);
+begin
+  StartIndexBuild;
 end;
 
 procedure TfrmMain.LoadTileIndex;
@@ -439,153 +818,557 @@ begin
     end);
 end;
 
-procedure TfrmMain.LoadWorldMap;
-var
-  LStream: TResourceStream;
-begin
-  try
-    LStream := TResourceStream.Create(HInstance, WORLD_MAP_RESOURCE, RT_RCDATA);
-    try
-      FMap.LoadMapFromStream(LStream);
-    finally
-      LStream.Free;
-    end;
-  except
-    on E: Exception do
-      ReportError('Could not load the world map: ' + E.Message);
-  end;
-end;
+{ Jobs }
 
-procedure TfrmMain.MapSelectionChanged(Sender: TObject);
+function TfrmMain.RunJob(const AName: string; const AWork: TJobWork;
+  const AOnDone: TJobDone): Boolean;
 var
-  LSelection: TTileRect;
+  LToken: TCancelToken;
+  LName: string;
+  LWork: TJobWork;
+  LOnDone: TJobDone;
 begin
-  LSelection := FMap.Selection;
-  lblSelection.Text := LSelection.Describe;
-  if not LSelection.IsEmpty and not FTileIndex.IsEmpty then
-    lblSelection.Text := lblSelection.Text +
-      Format(', %d with data', [FTileIndex.CountIn(LSelection)]);
-  if LSelection.Count = 1 then
-    edtTile.Text := TileName(LSelection.South, LSelection.West);
-  UpdateButtons;
-end;
-
-procedure TfrmMain.MapHover(Sender: TObject; ALat, ALon: Double; AOnMap: Boolean);
-const
-  DATA_TEXT: array[Boolean] of string = (' (no data)', ' (data)');
-begin
-  if not AOnMap then
+  Result := FJob = nil;
+  if not Result then
   begin
-    lblHover.Text := '';
+    ReportError('Please wait for the current job to finish, or cancel it, first.');
     Exit;
   end;
-  lblHover.Text := Format('%s  %s   tile %s',
-    [FormatLat(ALat), FormatLon(ALon), TileNameAt(ALat, ALon)]);
-  if not FTileIndex.IsEmpty then
-    lblHover.Text := lblHover.Text +
-      DATA_TEXT[FTileIndex.Has(Floor(ALat), Floor(ALon))];
-end;
 
-procedure TfrmMain.UpdateButtons;
-var
-  LBusy: Boolean;
-begin
-  LBusy := FDownloader <> nil;
-  btnFetch.Enabled := not LBusy;
-  btnFetchSelection.Enabled := not LBusy and not FMap.Selection.IsEmpty;
-  btnCancel.Enabled := LBusy;
-  mnuZoomSelection.Enabled := not FMap.Selection.IsEmpty;
-  mnuRefreshIndex.Enabled := FIndexBuilder = nil;
-end;
+  LName := AName;
+  LWork := AWork;
+  LOnDone := AOnDone;
+  LToken := TCancelToken.Create;
+  FJob := LToken;
+  pbDownload.Value := 0;
+  UpdateButtons;
 
-procedure TfrmMain.mnuSettingsClick(Sender: TObject);
-begin
-  ShowSettings(nil);
-end;
-
-procedure TfrmMain.mnuExitClick(Sender: TObject);
-begin
-  Close;
-end;
-
-procedure TfrmMain.mnuZoomInClick(Sender: TObject);
-begin
-  FMap.ZoomBy(2);
-end;
-
-procedure TfrmMain.mnuZoomOutClick(Sender: TObject);
-begin
-  FMap.ZoomBy(0.5);
-end;
-
-procedure TfrmMain.mnuZoomFitClick(Sender: TObject);
-begin
-  FMap.ZoomToFit;
-end;
-
-procedure TfrmMain.mnuZoomSelectionClick(Sender: TObject);
-begin
-  FMap.ZoomToSelection;
-end;
-
-procedure TfrmMain.mnuRefreshIndexClick(Sender: TObject);
-begin
-  StartIndexBuild;
-end;
-
-procedure TfrmMain.mnuShowTilesClick(Sender: TObject);
-begin
-  FMap.ShowAvailableTiles := mnuShowTiles.IsChecked;
-end;
-
-procedure TfrmMain.ShowSettings(const AOnSaved: TProc);
-begin
-  TfrmSettings.Edit(FSettings,
-    procedure(ASaved: Boolean)
+  TTask.Run(
+    procedure
+    var
+      LError: string;
+      LCancelled: Boolean;
     begin
-      if ASaved then
-      begin
-        AddLog('Settings saved to ' + TGDEMSettings.SettingsFileName);
-        if Assigned(AOnSaved) then
-          AOnSaved();
+      LError := '';
+      LCancelled := False;
+      try
+        LWork(LToken);
+      except
+        on E: EOperationCancelled do
+          LCancelled := True;
+        on E: Exception do
+          LError := E.Message;
       end;
+      if LCancelled then
+        AddLog(LName + ' cancelled.');
+
+      TThread.Queue(nil,
+        procedure
+        begin
+          FJob := nil;
+          LToken.Free;
+          pbDownload.Value := 0;
+          UpdateButtons;
+          if Assigned(LOnDone) then
+            LOnDone((LError = '') and not LCancelled);
+          RefreshStorageStatus;
+          CloseIfIdle;
+        end);
+
+      // Queued after the clean-up above, so the dialog appears once the
+      // buttons are usable again
+      if LError <> '' then
+        ReportError(LName + ' failed: ' + LError);
     end);
 end;
 
-procedure TfrmMain.AddLog(const Msg: string);
-var
-  LMsg: string;
+procedure TfrmMain.btnCancelClick(Sender: TObject);
 begin
-  LMsg := Msg;
+  if FJob <> nil then
+  begin
+    FJob.Cancel;
+    AddLog('Cancelling...');
+  end;
+end;
+
+{ Data folder }
+
+procedure TfrmMain.OpenStore;
+begin
+  FreeAndNil(FStore);
+  FStore := TGDEMStore.Create(FSettings.DataFolder);
+  FStore.OnLog := AddLog;
+  FStoreOpen := False;
+  FStoreWasAvailable := FStore.IsAvailable;
+  FDownloaded.Clear;
+  FMap.TileIndexChanged;
+  MapSelectionChanged(FMap);
+
+  if FStoreWasAvailable then
+    LoadDownloaded(nil)
+  else if FSettings.DataFolderUsed then
+  begin
+    AddLog('WARNING: the data folder ' + FStore.Root + ' is not connected.');
+    // Ask once the window is showing
+    TThread.ForceQueue(nil,
+      procedure
+      begin
+        WithStore(nil);
+      end);
+  end;
+  RefreshStorageStatus;
+end;
+
+procedure TfrmMain.LoadDownloaded(const AThen: TProc);
+var
+  LLoaded: Boolean;
+begin
+  try
+    LLoaded := FStore.LoadDownloadedIndex(FDownloaded);
+  except
+    on E: Exception do
+    begin
+      AddLog('WARNING: ' + E.Message + ' Rescanning the data folder.');
+      LLoaded := False;
+    end;
+  end;
+
+  if LLoaded then
+  begin
+    FStoreOpen := True;
+    FMap.TileIndexChanged;
+    MapSelectionChanged(FMap);
+    AddLog(Format('Data folder %s: %d tile(s) downloaded', [FStore.Root, FDownloaded.Count]));
+    if Assigned(AThen) then
+      AThen();
+  end
+  else
+    // No bitmap yet (a new folder, or one from before this layout): build
+    // it from whatever files are there
+    StartRescan(AThen);
+end;
+
+procedure TfrmMain.MarkStoreUsed;
+begin
+  if FSettings.DataFolderUsed then
+    Exit;
+  FSettings.DataFolderUsed := True;
+  try
+    FSettings.Save;
+  except
+    on E: Exception do
+      AddLog('WARNING: ' + E.Message);
+  end;
+end;
+
+procedure TfrmMain.WithStore(const AAction: TProc);
+var
+  LAction: TProc;
+begin
+  LAction := AAction;
+
+  if FStore.IsAvailable or not FSettings.DataFolderUsed then
+  begin
+    try
+      // Creates a new folder; fails if its drive is not connected
+      FStore.EnsureCreated;
+      MarkStoreUsed;
+      if FStoreOpen then
+      begin
+        if Assigned(LAction) then
+          LAction();
+      end
+      else
+        LoadDownloaded(LAction);
+      Exit;
+    except
+      on E: Exception do
+        AddLog('WARNING: ' + E.Message);
+    end;
+  end;
+
+  TDialogService.MessageDialog(
+    Format('The data folder %s is not available.'#13#10#13#10 +
+      'If it is on a removable drive or a network share, connect it and ' +
+      'press Retry. To use a different folder, press Cancel and choose one ' +
+      'in File > Settings.', [FStore.Root]),
+    TMsgDlgType.mtWarning, [TMsgDlgBtn.mbRetry, TMsgDlgBtn.mbCancel],
+    TMsgDlgBtn.mbRetry, 0,
+    procedure(const AResult: TModalResult)
+    begin
+      if AResult = mrRetry then
+        WithStore(LAction);
+    end);
+end;
+
+procedure TfrmMain.RefreshStorageStatus;
+var
+  LFree: Int64;
+  LText: string;
+  LAvailable: Boolean;
+begin
+  if FStore = nil then
+    Exit;
+
+  LAvailable := FStore.IsAvailable;
+  if LAvailable then
+  begin
+    LFree := FStore.FreeSpace;
+    LText := Format('Data: %s   %s free   %d tile(s) downloaded',
+      [FStore.Root, FormatBytes(LFree), FDownloaded.Count]);
+    if (LFree >= 0) and (LFree < ReserveBytes) then
+      LText := LText + '   LOW ON SPACE';
+    // The drive has just been connected: load what it holds
+    if not FStoreWasAvailable and not FStoreOpen and (FJob = nil) then
+    begin
+      AddLog('The data folder ' + FStore.Root + ' is available again.');
+      LoadDownloaded(nil);
+    end;
+  end
+  else
+  begin
+    if FSettings.DataFolderUsed then
+      LText := 'Data folder not connected: ' + FStore.Root
+    else
+      LText := 'Data: ' + FStore.Root + '   (created on first download)';
+    if FStoreOpen then
+    begin
+      FStoreOpen := False;
+      AddLog('WARNING: the data folder ' + FStore.Root + ' is no longer available.');
+    end;
+  end;
+  FStoreWasAvailable := LAvailable;
+  lblStorage.Text := LText;
+end;
+
+procedure TfrmMain.tmrStorageTimer(Sender: TObject);
+begin
+  RefreshStorageStatus;
+end;
+
+procedure TfrmMain.StartRescan(const AThen: TProc);
+var
+  LStore: TGDEMStore;
+  LNew: TTileIndex;
+  LThen: TProc;
+begin
+  LStore := FStore;
+  LThen := AThen;
+  LNew := TTileIndex.Create;
+  if not RunJob('Rescan',
+    procedure(AToken: TCancelToken)
+    begin
+      LStore.Rescan(LNew, AToken,
+        procedure(ADone, ATotal: Integer)
+        begin
+          ShowProgress(ADone, ATotal);
+        end);
+    end,
+    procedure(ASucceeded: Boolean)
+    begin
+      if ASucceeded then
+      begin
+        FDownloaded.Assign(LNew);
+        FStoreOpen := True;
+        FMap.TileIndexChanged;
+        MapSelectionChanged(FMap);
+      end;
+      LNew.Free;
+      if ASucceeded and Assigned(LThen) then
+        LThen();
+    end) then
+    LNew.Free;
+end;
+
+procedure TfrmMain.mnuRescanClick(Sender: TObject);
+begin
+  if FStore.IsAvailable then
+    StartRescan(nil)
+  else
+    // Asks for the drive; loading the folder once it is connected rescans
+    // it if it has no bitmap
+    WithStore(nil);
+end;
+
+procedure TfrmMain.mnuImportClick(Sender: TObject);
+var
+  LFolder: string;
+begin
+  LFolder := '';
+  if not SelectDirectory('Choose the folder holding existing ASTER GDEM .tif files',
+    '', LFolder) then
+    Exit;
+
+  TDialogService.MessageDialog(
+    Format('Copy the ASTER GDEM tiles found in'#13#10'%s'#13#10'(and any folders ' +
+      'inside it) into the data folder'#13#10'%s?'#13#10#13#10 +
+      'The original files are only read; nothing in that folder is changed. ' +
+      'Tiles already in the data folder are skipped, so an import can be ' +
+      'cancelled and run again later.',
+      [LFolder, FStore.Root]),
+    TMsgDlgType.mtConfirmation, [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo],
+    TMsgDlgBtn.mbYes, 0,
+    procedure(const AResult: TModalResult)
+    begin
+      if AResult = mrYes then
+        WithStore(
+          procedure
+          begin
+            StartImport(LFolder);
+          end);
+    end);
+end;
+
+procedure TfrmMain.StartImport(const ASourceFolder: string);
+var
+  LSource: string;
+  LStore: TGDEMStore;
+  LReserve: Int64;
+begin
+  LSource := ASourceFolder;
+  LStore := FStore;
+  LReserve := ReserveBytes;
+  RunJob('Import',
+    procedure(AToken: TCancelToken)
+    var
+      LResult: TImportResult;
+    begin
+      LResult := LStore.ImportFrom(LSource, LReserve, AToken,
+        procedure(ADone, ATotal: Integer)
+        begin
+          ShowProgress(ADone, ATotal);
+        end);
+      AddLog(Format('Import finished: %d file(s) copied (%s), %d already present, ' +
+        '%d replaced, %d ignored.',
+        [LResult.Copied, FormatByteSize(LResult.Bytes), LResult.AlreadyPresent,
+         LResult.Replaced, LResult.Ignored]));
+    end,
+    procedure(ASucceeded: Boolean)
+    begin
+      // Even a cancelled or failed import may have copied complete tiles,
+      // so bring the map up to date either way
+      StartRescan(nil);
+    end);
+end;
+
+procedure TfrmMain.MarkDownloaded(ASouth, AWest: Integer);
+begin
+  FDownloaded.Add(ASouth, AWest);
+  try
+    FStore.SaveDownloadedIndex(FDownloaded);
+  except
+    on E: Exception do
+      AddLog('WARNING: ' + E.Message);
+  end;
+  FMap.TileIndexChanged;
+  MapSelectionChanged(FMap);
+end;
+
+procedure TfrmMain.QueueMarkDownloaded(ASouth, AWest: Integer);
+begin
   TThread.Queue(nil,
     procedure
     begin
-      memLog.Lines.Add(LMsg);
-      memLog.GoToTextEnd;
+      MarkDownloaded(ASouth, AWest);
     end);
 end;
 
-procedure TfrmMain.ReportError(const AMessage: string);
+procedure TfrmMain.mnuDeleteSelectedClick(Sender: TObject);
 var
-  LMsg: string;
+  LTiles: TArray<string>;
 begin
-  LMsg := AMessage;
-  AddLog('ERROR: ' + LMsg);
-  if FCloseWhenIdle then
+  LTiles := FDownloaded.TileNamesIn(FMap.Selection);
+  if Length(LTiles) = 0 then
+  begin
+    ShowMessage('None of the selected tiles are downloaded.');
     Exit;
-  TThread.ForceQueue(nil,
-    procedure
+  end;
+
+  TDialogService.MessageDialog(
+    Format('Delete %d downloaded tile(s), about %s, from %s?',
+      [Length(LTiles), FormatBytes(Length(LTiles) * ESTIMATED_TILE_BYTES), FStore.Root]),
+    TMsgDlgType.mtConfirmation, [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo],
+    TMsgDlgBtn.mbNo, 0,
+    procedure(const AResult: TModalResult)
     begin
-      if FCloseWhenIdle then
+      if AResult <> mrYes then
         Exit;
-      TDialogService.MessageDialog(LMsg, TMsgDlgType.mtError,
-        [TMsgDlgBtn.mbOK], TMsgDlgBtn.mbOK, 0,
-        procedure(const AResult: TModalResult)
+      WithStore(
+        procedure
+        var
+          LStore: TGDEMStore;
         begin
-          // Nothing to do; the dialog only informs
+          LStore := FStore;
+          RunJob('Delete',
+            procedure(AToken: TCancelToken)
+            begin
+              LStore.DeleteTiles(LTiles, AToken,
+                procedure(ADone, ATotal: Integer)
+                begin
+                  ShowProgress(ADone, ATotal);
+                end);
+            end,
+            procedure(ASucceeded: Boolean)
+            var
+              LTile: string;
+              LSouth, LWest: Integer;
+            begin
+              // Even a cancelled delete may have removed some tiles
+              for LTile in LTiles do
+                if TryParseTileName(LTile, LSouth, LWest) and
+                   not LStore.TileComplete(LSouth, LWest) then
+                  FDownloaded.Remove(LSouth, LWest);
+              try
+                LStore.SaveDownloadedIndex(FDownloaded);
+              except
+                on E: Exception do
+                  AddLog('WARNING: ' + E.Message);
+              end;
+              FMap.TileIndexChanged;
+              MapSelectionChanged(FMap);
+              if ASucceeded then
+                AddLog(Format('Deleted %d tile(s).', [Length(LTiles)]));
+            end);
         end);
     end);
 end;
+
+procedure TfrmMain.ChangeDataFolder(const ANewFolder: string);
+var
+  LNewFolder: string;
+begin
+  LNewFolder := ANewFolder;
+  if FJob <> nil then
+  begin
+    ReportError('The data folder cannot be changed while a job is running. ' +
+      'Wait for it to finish, or cancel it, and try again.');
+    Exit;
+  end;
+
+  if FStore.IsAvailable and FStoreOpen and not FDownloaded.IsEmpty then
+    TDialogService.MessageDialog(
+      Format('The current data folder holds %d downloaded tile(s), about %s.'#13#10#13#10 +
+        'Move them to %s?'#13#10#13#10 +
+        'Yes: move them. This can take a long time; it can be cancelled and ' +
+        'resumed later by choosing the folder again.'#13#10 +
+        'No: switch without moving; the files stay in %s.'#13#10 +
+        'Cancel: keep using the current folder.',
+        [FDownloaded.Count, FormatBytes(FDownloaded.Count * ESTIMATED_TILE_BYTES),
+         LNewFolder, FStore.Root]),
+      TMsgDlgType.mtConfirmation,
+      [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo, TMsgDlgBtn.mbCancel],
+      TMsgDlgBtn.mbCancel, 0,
+      procedure(const AResult: TModalResult)
+      begin
+        case AResult of
+          mrYes: StartMove(LNewFolder);
+          mrNo: SwitchDataFolder(LNewFolder, False);
+        end;
+      end)
+  else
+    SwitchDataFolder(LNewFolder, False);
+end;
+
+procedure TfrmMain.SwitchDataFolder(const ANewFolder: string; AForceRescan: Boolean);
+var
+  LProbe: TGDEMStore;
+begin
+  FSettings.DataFolder := ANewFolder;
+  // A folder that already holds GDEM data counts as used, so it is not
+  // silently recreated if its drive is later disconnected
+  LProbe := TGDEMStore.Create(ANewFolder);
+  try
+    FSettings.DataFolderUsed := LProbe.HasMarker;
+  finally
+    LProbe.Free;
+  end;
+  try
+    FSettings.Save;
+  except
+    on E: Exception do
+      ReportError(E.Message);
+  end;
+  AddLog('Data folder is now ' + FSettings.DataFolder);
+
+  if AForceRescan and TDirectory.Exists(ANewFolder) then
+  begin
+    FreeAndNil(FStore);
+    FStore := TGDEMStore.Create(FSettings.DataFolder);
+    FStore.OnLog := AddLog;
+    FStoreOpen := False;
+    FDownloaded.Clear;
+    FMap.TileIndexChanged;
+    StartRescan(nil);
+  end
+  else
+    OpenStore;
+end;
+
+procedure TfrmMain.StartMove(const ANewFolder: string);
+var
+  LSource: TGDEMStore;
+  LTarget: TGDEMStore;
+  LNewFolder: string;
+  LFree, LNeeded: Int64;
+  LGo: TProc;
+begin
+  LNewFolder := ANewFolder;
+  LSource := FStore;
+  LTarget := TGDEMStore.Create(LNewFolder);
+  LTarget.OnLog := AddLog;
+
+  // Starts the move job once any space warning has been accepted. An
+  // anonymous method, not a nested procedure, because it captures locals.
+  LGo :=
+    procedure
+    begin
+      if not RunJob('Move',
+          procedure(AToken: TCancelToken)
+          var
+            LMoved: Integer;
+          begin
+            LMoved := LSource.MoveAllTo(LTarget, AToken,
+              procedure(ADone, ATotal: Integer)
+              begin
+                ShowProgress(ADone, ATotal);
+              end);
+            AddLog(Format('Moved %d file(s) to %s', [LMoved, LTarget.Root]));
+          end,
+          procedure(ASucceeded: Boolean)
+          begin
+            LTarget.Free;
+            if ASucceeded then
+              SwitchDataFolder(LNewFolder, True)
+            else
+              AddLog('The move did not finish. Files moved so far are in ' + LNewFolder +
+                '; the rest are still in ' + LSource.Root + '. Choose ' + LNewFolder +
+                ' in File > Settings again to finish moving them.');
+          end) then
+        LTarget.Free;
+    end;
+
+  LFree := TGDEMStore.FreeSpaceAt(LNewFolder);
+  LNeeded := FDownloaded.Count * ESTIMATED_TILE_BYTES;
+  if (LFree >= 0) and (LFree - ReserveBytes < LNeeded) then
+    TDialogService.MessageDialog(
+      Format('The destination has %s free, but the data is about %s and %s ' +
+        'must be kept free.'#13#10#13#10 +
+        'A move within the same drive needs no extra space. Move anyway?',
+        [FormatBytes(LFree), FormatBytes(LNeeded), FormatBytes(ReserveBytes)]),
+      TMsgDlgType.mtWarning, [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo],
+      TMsgDlgBtn.mbNo, 0,
+      procedure(const AResult: TModalResult)
+      begin
+        if AResult = mrYes then
+          LGo()
+        else
+          LTarget.Free;
+      end)
+  else
+    LGo();
+end;
+
+{ Downloads }
 
 procedure TfrmMain.btnFetchClick(Sender: TObject);
 begin
@@ -594,33 +1377,56 @@ end;
 
 procedure TfrmMain.btnFetchSelectionClick(Sender: TObject);
 var
-  LTiles: TArray<string>;
-  LQuestion: string;
+  LCandidates, LTiles: TArray<string>;
+  LTile, LQuestion, LSpace: string;
+  LSouth, LWest, LCount: Integer;
+  LFree, LNeeded: Int64;
 begin
+  // Only tiles with data (when that is known) and not yet downloaded
   if FTileIndex.IsEmpty then
-  begin
-    // No index yet: try every tile and let CMR say which have data
-    LTiles := FMap.Selection.TileNames;
-    LQuestion := Format('The selection covers %d tiles. Tiles with no data are ' +
-      'skipped, but each land tile is about 25 MB or more. Download them?',
-      [Length(LTiles)]);
-  end
+    LCandidates := FMap.Selection.TileNames
   else
-  begin
-    LTiles := FTileIndex.TileNamesIn(FMap.Selection);
-    if Length(LTiles) = 0 then
+    LCandidates := FTileIndex.TileNamesIn(FMap.Selection);
+  SetLength(LTiles, Length(LCandidates));
+  LCount := 0;
+  for LTile in LCandidates do
+    if TryParseTileName(LTile, LSouth, LWest) and not FDownloaded.Has(LSouth, LWest) then
     begin
-      ShowMessage('None of the selected tiles have ASTER GDEM data.');
-      Exit;
+      LTiles[LCount] := LTile;
+      Inc(LCount);
     end;
-    LQuestion := Format('%d of the selected tiles have data, about 25 MB or more ' +
-      'each. Download them?', [Length(LTiles)]);
+  SetLength(LTiles, LCount);
+
+  if LCount = 0 then
+  begin
+    if Length(LCandidates) = 0 then
+      ShowMessage('None of the selected tiles have ASTER GDEM data.')
+    else
+      ShowMessage('All the selected tiles with data are already downloaded.');
+    Exit;
   end;
 
-  if Length(LTiles) <= CONFIRM_TILE_COUNT then
+  LNeeded := LCount * ESTIMATED_TILE_BYTES;
+  LFree := -1;
+  if FStore.IsAvailable then
+    LFree := FStore.FreeSpace;
+  LSpace := '';
+  if (LFree >= 0) and (LFree - ReserveBytes < LNeeded) then
+    LSpace := Format(#13#10#13#10'Only %s is free on the data drive and %s must be ' +
+      'kept free, so downloading will stop after about %d tile(s).',
+      [FormatBytes(LFree), FormatBytes(ReserveBytes),
+       Max(0, (LFree - ReserveBytes) div ESTIMATED_TILE_BYTES)]);
+
+  if FTileIndex.IsEmpty then
+    LQuestion := Format('Download up to %d tile(s), about %s? Tiles with no data ' +
+      'are skipped.', [LCount, FormatBytes(LNeeded)])
+  else
+    LQuestion := Format('Download %d tile(s), about %s?', [LCount, FormatBytes(LNeeded)]);
+
+  if (LCount <= CONFIRM_TILE_COUNT) and (LSpace = '') then
     FetchTiles(LTiles)
   else
-    TDialogService.MessageDialog(LQuestion,
+    TDialogService.MessageDialog(LQuestion + LSpace,
       TMsgDlgType.mtConfirmation, [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo],
       TMsgDlgBtn.mbNo, 0,
       procedure(const AResult: TModalResult)
@@ -628,15 +1434,6 @@ begin
         if AResult = mrYes then
           FetchTiles(LTiles);
       end);
-end;
-
-procedure TfrmMain.btnCancelClick(Sender: TObject);
-begin
-  if FDownloader <> nil then
-  begin
-    FDownloader.Cancel;
-    AddLog('Cancelling...');
-  end;
 end;
 
 procedure TfrmMain.FetchTiles(const ATiles: TArray<string>);
@@ -648,91 +1445,105 @@ begin
     ShowSettings(
       procedure
       begin
-        StartFetch(LTiles);
+        FetchTiles(LTiles);
       end)
   else
-    StartFetch(LTiles);
+    WithStore(
+      procedure
+      begin
+        StartFetch(LTiles);
+      end);
 end;
 
 procedure TfrmMain.StartFetch(const ATiles: TArray<string>);
 var
   LTiles: TArray<string>;
-  LFolder: string;
-  LDownloader: TGDEMDownloader;
+  LToken: string;
+  LStore: TGDEMStore;
+  LReserve: Int64;
 begin
-  if (FDownloader <> nil) or (FSettings.BearerToken = '') or (Length(ATiles) = 0) then
+  if (FSettings.BearerToken = '') or (Length(ATiles) = 0) then
     Exit;
 
   LTiles := ATiles;
-  LFolder := FDestFolder;
-  LDownloader := TGDEMDownloader.Create(FSettings.BearerToken);
-  LDownloader.OnLog := AddLog;
-  LDownloader.OnProgress :=
-    procedure(const FileName: string; Received, Total: Int64)
-    begin
-      TThread.Queue(nil,
-        procedure
-        begin
-          if Total > 0 then
-            pbDownload.Value := Received * 100 / Total;
-        end);
-    end;
-  FDownloader := LDownloader;
-  pbDownload.Value := 0;
-  UpdateButtons;
+  LToken := FSettings.BearerToken;
+  LStore := FStore;
+  LReserve := ReserveBytes;
 
-  TTask.Run(
-    procedure
+  RunJob('Download',
+    procedure(AToken: TCancelToken)
     var
-      LIndex, LFound, LEmpty: Integer;
-      LError: string;
-      LCancelled: Boolean;
+      LDownloader: TGDEMDownloader;
+      LIndex, LFound, LEmpty, LSouth, LWest: Integer;
+      LFree: Int64;
+      LTile, LFolder: string;
     begin
-      LCancelled := False;
       LFound := 0;
       LEmpty := 0;
-      LError := '';
+      LDownloader := TGDEMDownloader.Create(LToken);
       try
+        LDownloader.CancelToken := AToken;
+        LDownloader.OnLog := AddLog;
+        LDownloader.OnProgress :=
+          procedure(const FileName: string; Received, Total: Int64)
+          begin
+            if Total > 0 then
+              TThread.Queue(nil,
+                procedure
+                begin
+                  pbDownload.Value := Received * 100 / Total;
+                end);
+          end;
+
         for LIndex := 0 to High(LTiles) do
         begin
+          AToken.Check;
+          LTile := LTiles[LIndex];
           if Length(LTiles) > 1 then
-            AddLog(Format('[%d/%d] %s', [LIndex + 1, Length(LTiles), LTiles[LIndex]]));
-          if LDownloader.DownloadTileIfExists(LTiles[LIndex], LFolder) then
-            Inc(LFound)
-          else
+            AddLog(Format('[%d/%d] %s', [LIndex + 1, Length(LTiles), LTile]));
+
+          // Validates the name, raising a clear error if it is wrong
+          TGDEMDownloader.TileGranuleName(LTile);
+          TryParseTileName(LTile, LSouth, LWest);
+
+          if LStore.TileComplete(LSouth, LWest) then
           begin
-            Inc(LEmpty);
-            AddLog('  no data for ' + LTiles[LIndex] + ' (ocean or outside coverage)');
+            AddLog('  already downloaded');
+            QueueMarkDownloaded(LSouth, LWest);
+            Continue;
+          end;
+
+          LFree := LStore.FreeSpace;
+          if (LFree >= 0) and (LFree - ESTIMATED_TILE_BYTES < LReserve) then
+            raise EStoreError.CreateFmt('Stopped: only %s is free on the data drive, ' +
+              'and %s must be kept free. Free some space or change the reserve in ' +
+              'File > Settings.', [FormatBytes(LFree), FormatBytes(LReserve)]);
+
+          LFolder := LStore.TileFolder(LSouth, LWest);
+          try
+            if LDownloader.DownloadTileIfExists(LTile, LFolder) then
+            begin
+              Inc(LFound);
+              if LStore.TileComplete(LSouth, LWest) then
+                QueueMarkDownloaded(LSouth, LWest);
+            end
+            else
+            begin
+              Inc(LEmpty);
+              AddLog('  no data for ' + LTile + ' (ocean or outside coverage)');
+            end;
+          finally
+            // A tile with no data, or a failed download, may leave an
+            // empty block folder behind
+            LStore.PruneEmptyFolders(LFolder);
           end;
         end;
-      except
-        on E: EGDEMCancelled do
-          LCancelled := True;
-        on E: Exception do
-          LError := E.Message;
+        AddLog(Format('Done: %d tile(s) downloaded, %d without data.', [LFound, LEmpty]));
+      finally
+        LDownloader.Free;
       end;
-
-      if LCancelled then
-        AddLog(Format('Cancelled after %d tile(s) with data, %d without.',
-          [LFound, LEmpty]))
-      else if LError = '' then
-        AddLog(Format('Done: %d tile(s) with data, %d without.', [LFound, LEmpty]));
-
-      // Free the downloader on the main thread, where FDownloader lives
-      TThread.Queue(nil,
-        procedure
-        begin
-          FDownloader := nil;
-          LDownloader.Free;
-          UpdateButtons;
-          CloseIfIdle;
-        end);
-
-      // Queued after the clean-up above, so the dialog appears once the
-      // buttons are usable again
-      if LError <> '' then
-        ReportError('Download failed: ' + LError);
-    end);
+    end,
+    nil);
 end;
 
 end.

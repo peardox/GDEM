@@ -3,8 +3,8 @@ object frmSettings: TfrmSettings
   Top = 0
   BorderIcons = [biSystemMenu]
   Caption = 'Settings'
-  ClientHeight = 320
-  ClientWidth = 520
+  ClientHeight = 440
+  ClientWidth = 560
   Position = MainFormCenter
   FormFactor.Width = 320
   FormFactor.Height = 480
@@ -19,7 +19,7 @@ object frmSettings: TfrmSettings
     Margins.Right = 12.000000000000000000
     Position.X = 12.000000000000000000
     Position.Y = 12.000000000000000000
-    Size.Width = 496.000000000000000000
+    Size.Width = 536.000000000000000000
     Size.Height = 20.000000000000000000
     Size.PlatformDefault = False
     Text = 'Earthdata Login bearer token'
@@ -30,10 +30,10 @@ object frmSettings: TfrmSettings
     Margins.Right = 12.000000000000000000
     Position.X = 12.000000000000000000
     Position.Y = 32.000000000000000000
-    Size.Width = 496.000000000000000000
+    Size.Width = 536.000000000000000000
     Size.Height = 24.000000000000000000
     Size.PlatformDefault = False
-    TabOrder = 3
+    TabOrder = 4
     object lblHelp: TLabel
       Align = Left
       AutoSize = True
@@ -59,53 +59,23 @@ object frmSettings: TfrmSettings
       OnClick = lblLinkClick
     end
   end
-  object memToken: TMemo
-    Touch.InteractiveGestures = [Pan, LongTap, DoubleTap]
-    DataDetectorTypes = []
-    TextSettings.WordWrap = True
-    OnChangeTracking = memTokenChangeTracking
-    Align = Client
-    Margins.Left = 12.000000000000000000
-    Margins.Top = 4.000000000000000000
-    Margins.Right = 12.000000000000000000
-    Margins.Bottom = 4.000000000000000000
-    Size.Width = 496.000000000000000000
-    Size.Height = 180.000000000000000000
-    Size.PlatformDefault = False
-    TabOrder = 0
-  end
-  object lblLocation: TLabel
-    Align = Bottom
-    StyledSettings = [Family, Style]
-    Margins.Left = 12.000000000000000000
-    Margins.Right = 12.000000000000000000
-    Position.X = 12.000000000000000000
-    Position.Y = 248.000000000000000000
-    Size.Width = 496.000000000000000000
-    Size.Height = 20.000000000000000000
-    Size.PlatformDefault = False
-    TextSettings.Font.Size = 11.000000000000000000
-    TextSettings.FontColor = claGray
-    TextSettings.Trimming = Character
-    Text = 'Saved to:'
-  end
   object layButtons: TLayout
     Align = Bottom
     Margins.Left = 12.000000000000000000
     Margins.Right = 12.000000000000000000
     Margins.Bottom = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 272.000000000000000000
-    Size.Width = 496.000000000000000000
+    Position.Y = 392.000000000000000000
+    Size.Width = 536.000000000000000000
     Size.Height = 36.000000000000000000
     Size.PlatformDefault = False
-    TabOrder = 1
+    TabOrder = 3
     object btnCancel: TButton
       Align = Right
       Cancel = True
       ModalResult = 2
       Margins.Top = 4.000000000000000000
-      Position.X = 416.000000000000000000
+      Position.X = 456.000000000000000000
       Position.Y = 4.000000000000000000
       Size.Width = 80.000000000000000000
       Size.Height = 32.000000000000000000
@@ -119,7 +89,7 @@ object frmSettings: TfrmSettings
       ModalResult = 1
       Margins.Top = 4.000000000000000000
       Margins.Right = 8.000000000000000000
-      Position.X = 328.000000000000000000
+      Position.X = 368.000000000000000000
       Position.Y = 4.000000000000000000
       Size.Width = 80.000000000000000000
       Size.Height = 32.000000000000000000
@@ -127,5 +97,101 @@ object frmSettings: TfrmSettings
       TabOrder = 0
       Text = 'OK'
     end
+  end
+  object lblLocation: TLabel
+    Align = Bottom
+    StyledSettings = [Family, Style]
+    Margins.Left = 12.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Position.X = 12.000000000000000000
+    Position.Y = 372.000000000000000000
+    Size.Width = 536.000000000000000000
+    Size.Height = 20.000000000000000000
+    Size.PlatformDefault = False
+    TextSettings.Font.Size = 11.000000000000000000
+    TextSettings.FontColor = claGray
+    TextSettings.Trimming = Character
+    Text = 'Settings are saved to:'
+  end
+  object layData: TLayout
+    Align = Bottom
+    Margins.Left = 12.000000000000000000
+    Margins.Top = 8.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Position.X = 12.000000000000000000
+    Position.Y = 272.000000000000000000
+    Size.Width = 536.000000000000000000
+    Size.Height = 96.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 2
+    object lblDataFolder: TLabel
+      StyledSettings = [Family, Size, FontColor]
+      Position.Y = 4.000000000000000000
+      Size.Width = 400.000000000000000000
+      Size.Height = 20.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Folder for downloaded tiles (may be on a removable drive)'
+    end
+    object edtDataFolder: TEdit
+      Touch.InteractiveGestures = [LongTap, DoubleTap]
+      Anchors = [akLeft, akTop, akRight]
+      TabOrder = 0
+      Position.Y = 28.000000000000000000
+      Size.Width = 444.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      OnChangeTracking = InputChangeTracking
+    end
+    object btnBrowse: TButton
+      Anchors = [akTop, akRight]
+      Position.X = 452.000000000000000000
+      Position.Y = 27.000000000000000000
+      Size.Width = 84.000000000000000000
+      Size.Height = 26.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 1
+      Text = 'Browse...'
+      OnClick = btnBrowseClick
+    end
+    object lblMinFree: TLabel
+      Position.Y = 64.000000000000000000
+      Size.Width = 200.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Always leave at least this much free:'
+    end
+    object nbMinFree: TNumberBox
+      Touch.InteractiveGestures = [LongTap, DoubleTap]
+      TabOrder = 2
+      Cursor = crIBeam
+      Position.X = 208.000000000000000000
+      Position.Y = 63.000000000000000000
+      Size.Width = 100.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+    end
+    object lblMinFreeUnit: TLabel
+      Position.X = 316.000000000000000000
+      Position.Y = 64.000000000000000000
+      Size.Width = 40.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'MB'
+    end
+  end
+  object memToken: TMemo
+    Touch.InteractiveGestures = [Pan, LongTap, DoubleTap]
+    DataDetectorTypes = []
+    TextSettings.WordWrap = True
+    OnChangeTracking = InputChangeTracking
+    Align = Client
+    Margins.Left = 12.000000000000000000
+    Margins.Top = 4.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Margins.Bottom = 4.000000000000000000
+    Size.Width = 536.000000000000000000
+    Size.Height = 204.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 0
   end
 end

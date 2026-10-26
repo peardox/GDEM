@@ -61,7 +61,9 @@ GDEM on 3 December 2025, so older scripts that use it no longer work.
   project; macOS is set up but switched off until a PAServer and SDK are
   ready.
   - Linux builds need FMX for Linux, and use `xdg-open` to open web links.
-- **Disk space:** about 25 MB or more for each land tile.
+- **Disk space:** about 18 MB per tile on average; the whole world is
+  roughly 400 GB in about 46,000 files. The data folder can be anywhere,
+  including a removable drive, and can be moved later.
 
 ## Getting started
 
@@ -73,8 +75,8 @@ If you already cloned without submodules, run
 `git submodule update --init`.
 
 1. Open `GDEM.groupproj` in Delphi 13 and build **GDEMFetch**.
-2. On first run the Settings dialog opens. Paste your bearer token and
-   press OK.
+2. On first run the Settings dialog opens. Paste your bearer token, choose
+   where downloaded tiles should go (or keep the default), and press OK.
 3. At the same time the tile index is built from CMR in the background.
    This takes about a dozen requests and needs no token.
 4. Select tiles on the map and press **Fetch selection**, or type a tile
@@ -84,10 +86,11 @@ If you already cloned without submodules, run
 
 | Action | Control |
 |--------|---------|
-| Select a block of tiles | Left-drag. A left click selects one tile. |
-| Move the map | Right-drag, middle-drag, or Shift + left-drag |
+| Select a block of tiles | Left-drag. A left click selects one tile. To reach beyond the screen, drag towards an edge and the map scrolls that way, or use the mouse wheel to zoom while still dragging. |
+| Move the map | Right-drag, middle-drag, or Shift + left-drag. The map wraps east to west, so you can keep going past 180°, and selections can cross it (for example around Fiji or the Bering Strait). It stops at the poles, since the world does not wrap north to south. |
 | Zoom | Mouse wheel, or the View menu |
-| Show or hide tiles that have data | View > Show Available Tiles |
+| Show or hide tiles that have data (cyan) | View > Show Available Tiles |
+| Show or hide downloaded tiles (green) | View > Show Downloaded Tiles |
 
 The status bar shows the position and tile under the pointer, and whether
 that tile has data. Progress messages and errors appear in the log on the
@@ -95,13 +98,29 @@ that tile has data. Progress messages and errors appear in the log on the
 unreadable settings, a missing world map) are also shown in a dialog. The
 **3D** tab is reserved for a later stage.
 
+### Menus
+
+| Menu | Item | Does |
+|------|------|------|
+| File | Settings... | Bearer token, data folder, free-space reserve |
+| File | Refresh Tile Index | Rebuilds the list of tiles that exist, from CMR |
+| Data | Import Existing Tiles... | Copies tiles you already have, from any folder, into the data folder. The originals are not changed. |
+| Data | Rescan Data Folder | Rebuilds the downloaded-tiles bitmap from the files, files any misplaced downloads into place, and removes leftovers and empty folders |
+| Data | Delete Selected Downloads... | Deletes the downloaded tiles inside the map selection |
+| View | Zoom In / Zoom Out / Whole World / Zoom to Selection | Map view |
+
+**Fetch selection** downloads only tiles that have data and are not yet
+downloaded. Free space is checked before every tile, and downloading stops
+rather than go below the reserve set in Settings (2 GB by default). The
+**Cancel** button stops whatever job is running.
+
 ## Where files are kept
 
 | What | Where |
 |------|-------|
 | Settings (`settings.json`, holds the bearer token) | Windows: `%APPDATA%\GDEM`<br>macOS: `~/Library/Application Support/GDEM`<br>Linux: `$XDG_CONFIG_HOME/GDEM` or `~/.config/GDEM`<br>Android and iOS: `GDEM` in the app's documents folder |
 | Tile index (`tileindex.bin`) | Same folder as the settings |
-| Downloaded tiles | `ASTGTM` in your documents folder |
+| Downloaded tiles | The **data folder**, chosen in File > Settings. Default: `ASTGTM` in your documents folder. |
 
 On macOS and Linux `settings.json` is readable by its owner only, because
 it contains a credential.
@@ -109,6 +128,65 @@ it contains a credential.
 `tileindex.bin` is 14 bytes of header followed by 8,100 bytes: one bit per
 tile. The layout is documented in `GDEMTileIndex.pas`. Use **File >
 Refresh Tile Index** to rebuild it.
+
+### The data folder
+
+Tiles are grouped into folders by 10 x 10 degree block, named after the
+block's south-west corner the same way tiles are:
+
+```
+<data folder>/
+  gdem-store.json       marks this as a GDEM data folder
+  downloaded.bin        bitmap of fully downloaded tiles
+  N50/
+    W010/
+      ASTGTMV003_N50W002_dem.tif
+      ASTGTMV003_N50W002_num.tif
+      ...
+```
+
+Each block folder holds at most 200 files, and the whole world needs about
+600 of them. Neighbouring tiles share a folder, so a selection on the map
+touches only a few. Folders are created as needed and removed when they
+become empty.
+
+The folder describes itself, so it can be moved or copied freely:
+
+- **Changing folder in Settings:** if the old folder holds data, you are
+  asked whether to move it. Moving runs in the background, can be
+  cancelled, and picks up where it left off if you choose the same folder
+  again.
+- **Moving or copying it yourself** (for example to another drive): point
+  Settings at the new location, then use **Data > Rescan Data Folder** if
+  the map does not show your downloads.
+- **Removable drives:** once a folder has been used, if it is missing the
+  program asks you to connect the drive and press Retry, at start-up and
+  before downloading. The status bar shows whether the folder is
+  connected and how much space is free, and is refreshed every minute.
+- **Downloads from older versions** of GDEMFetch were saved flat in
+  `Documents/ASTGTM`. The first rescan of that folder files them into
+  blocks.
+
+### Importing tiles you already have
+
+If you already have ASTER GDEM V3 `.tif` files, for example from another
+download tool that puts everything in one folder, use **Data > Import
+Existing Tiles...** and choose that folder.
+
+- Every `ASTGTMV003_<tile>_dem.tif` and `_num.tif` file in the folder, and
+  in any folders inside it, is **copied** into the data folder's blocks.
+  The source is only read; nothing in it is changed, moved or deleted.
+- Other files are ignored, and so are files that do not start like a TIFF.
+- The space needed is worked out first, and the import does not start if
+  it would leave less than the reserve set in Settings. Space is checked
+  again before every file.
+- Each file is copied under a temporary name and size-checked before it
+  takes its real name, so a cancelled import leaves no partial tiles.
+  Files the data folder already has are skipped, so an import can be
+  cancelled and run again to finish.
+- When it finishes (or is cancelled) the data folder is rescanned and the
+  map shows the imported tiles in green.
+- The source folder must not be inside the data folder, or contain it.
 
 ## Repository layout
 
@@ -134,6 +212,8 @@ Refresh Tile Index** to rebuild it.
 | `GDEMTileIndex` | `TTileIndex` bitmap of which tiles exist, and its CMR builder |
 | `GDEMCMR` | Neon models for CMR search results; no networking |
 | `GDEMDownloader` | Finds and downloads tiles |
+| `GDEMStore` | The data folder: block layout, downloaded-tiles bitmap, rescanning, moving, deleting, free space |
+| `GDEMCancel` | `TCancelToken`, shared by the Cancel button and background jobs |
 
 The world map image `maps/world_1080x540.jpg` is linked into GDEMFetch as
 the `WORLDMAP` RCDATA resource, so nothing needs deploying beside the
@@ -211,3 +291,11 @@ before starting work.
 - Get download URLs from CMR; do not guess Earthdata Cloud paths. Send
   the bearer token only to `*.earthdata.nasa.gov` and
   `*.earthdatacloud.nasa.gov`.
+- All access to downloaded files goes through `TGDEMStore`; never build
+  data-folder paths by hand. The folder may be missing (an unplugged
+  drive), so check it with `WithStore` before use.
+- Work on the data folder runs as a job through `TfrmMain.RunJob`, one at
+  a time, cancellable with a `TCancelToken`.
+- Anonymous methods capture variables, not values. When queuing work from
+  inside a loop, pass the loop's values to a method as parameters (as
+  `QueueMarkDownloaded` does) rather than capturing the loop variables.

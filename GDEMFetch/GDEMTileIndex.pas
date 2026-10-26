@@ -69,7 +69,9 @@ type
 
     { Position of a tile's bit.
       @param(ASouth Latitude of the tile's southern edge.)
-      @param(AWest Longitude of the tile's western edge.)
+      @param(AWest Longitude of the tile's western edge. Values outside
+        -180 to 179 are wrapped round, so blocks that cross the 180 degree
+        meridian can be looked up directly.)
       @param(AIndex Receives the bit number.)
       @returns(@false if the tile is outside the world.) }
     class function BitIndex(ASouth, AWest: Integer; out AIndex: Integer): Boolean; static;
@@ -94,6 +96,11 @@ type
       @param(ASouth Latitude of the tile's southern edge.)
       @param(AWest Longitude of the tile's western edge.) }
     procedure Add(ASouth, AWest: Integer);
+
+    { Marks a tile as having no data. Tiles outside the world are ignored.
+      @param(ASouth Latitude of the tile's southern edge.)
+      @param(AWest Longitude of the tile's western edge.) }
+    procedure Remove(ASouth, AWest: Integer);
 
     { Checks whether a tile has data.
       @param(ASouth Latitude of the tile's southern edge.)
@@ -237,7 +244,8 @@ end;
 
 class function TTileIndex.BitIndex(ASouth, AWest: Integer; out AIndex: Integer): Boolean;
 begin
-  Result := InRange(ASouth, -90, 89) and InRange(AWest, -180, 179);
+  AWest := NormalizeLon(AWest);
+  Result := InRange(ASouth, -90, 89);
   if Result then
     AIndex := (ASouth + 90) * TILE_INDEX_WIDTH + (AWest + 180)
   else
@@ -268,6 +276,21 @@ begin
   begin
     FBits[LIndex shr 3] := FBits[LIndex shr 3] or LMask;
     Inc(FCount);
+  end;
+end;
+
+procedure TTileIndex.Remove(ASouth, AWest: Integer);
+var
+  LIndex: Integer;
+  LMask: Byte;
+begin
+  if not BitIndex(ASouth, AWest, LIndex) then
+    Exit;
+  LMask := 1 shl (LIndex and 7);
+  if FBits[LIndex shr 3] and LMask <> 0 then
+  begin
+    FBits[LIndex shr 3] := FBits[LIndex shr 3] and not LMask;
+    Dec(FCount);
   end;
 end;
 

@@ -24,7 +24,8 @@ unit GDEMDownloader;
 interface
 
 uses
-  System.SysUtils, System.Classes, System.Net.HttpClient, System.Net.URLClient;
+  System.SysUtils, System.Classes, System.Net.HttpClient, System.Net.URLClient,
+  GDEMCancel;
 
 type
   { Called with a line of progress text for the user.
@@ -41,9 +42,13 @@ type
   { @abstract(Raised for any failure while finding or downloading a tile.) }
   EGDEMError = class(Exception);
 
-  { @abstract(Raised when a download stops because @link(TGDEMDownloader.Cancel)
-    was called.) }
-  EGDEMCancelled = class(EGDEMError);
+  { @abstract(Raised when a download stops because
+    @link(TGDEMDownloader.Cancel) was called or its
+    @link(TGDEMDownloader.CancelToken) was cancelled.)
+
+    It descends from @link(EOperationCancelled), like every other
+    cancellation in the program, so callers can treat all of them alike. }
+  EGDEMCancelled = class(EOperationCancelled);
 
   { @abstract(Finds and downloads ASTER GDEM V3 tiles.)
 
@@ -68,6 +73,12 @@ type
     { Set by @link(Cancel) from any thread; checked between requests and
       while data arrives. }
     FCancelled: Boolean;
+    { Backing field for @link(CancelToken). Not owned. }
+    FCancelToken: TCancelToken;
+
+    { Checks whether this downloader or its token has been cancelled.
+      @returns(@true if work should stop.) }
+    function IsCancelled: Boolean;
 
     { Raises @link(EGDEMCancelled) if @link(Cancel) has been called. }
     procedure CheckCancelled;
@@ -179,8 +190,14 @@ type
       @link(EGDEMCancelled), and no partly downloaded file is kept. }
     procedure Cancel;
 
-    { @true once @link(Cancel) has been called. }
-    property Cancelled: Boolean read FCancelled;
+    { @true once @link(Cancel) has been called or @link(CancelToken) has
+      been cancelled. }
+    property Cancelled: Boolean read IsCancelled;
+
+    { An optional token shared with other work in the same job. Cancelling
+      it stops the downloader just like @link(Cancel). Not owned; may be
+      @nil. }
+    property CancelToken: TCancelToken read FCancelToken write FCancelToken;
 
     { Receives progress text. Called on the downloading thread. }
     property OnLog: TGDEMLogEvent read FOnLog write FOnLog;
@@ -236,16 +253,21 @@ begin
   FCancelled := True;
 end;
 
+function TGDEMDownloader.IsCancelled: Boolean;
+begin
+  Result := FCancelled or ((FCancelToken <> nil) and FCancelToken.Cancelled);
+end;
+
 procedure TGDEMDownloader.CheckCancelled;
 begin
-  if FCancelled then
+  if IsCancelled then
     raise EGDEMCancelled.Create('Cancelled.');
 end;
 
 procedure TGDEMDownloader.HandleReceiveData(const Sender: TObject; AContentLength,
   AReadCount: Int64; var AAbort: Boolean);
 begin
-  if FCancelled then
+  if IsCancelled then
   begin
     AAbort := True;
     Exit;
@@ -367,7 +389,6 @@ begin
   FCurrentFile := TPath.GetFileName(ADestFile);
   LURL := AURL;
   LHops := 0;
-  LCode := 0;
   LResp := nil;
   try
     LStream := TFileStream.Create(LTempFile, fmCreate);

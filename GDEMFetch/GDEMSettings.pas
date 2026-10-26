@@ -34,6 +34,9 @@ const
   { Name of the settings file inside @link(SETTINGS_FOLDER_NAME). }
   SETTINGS_FILE_NAME = 'settings.json';
 
+  { Default for @link(TGDEMSettings.MinFreeSpaceMB): keep 2 GB free. }
+  DEFAULT_MIN_FREE_SPACE_MB = 2048;
+
 type
   { @abstract(Raised when settings cannot be read or written.) }
   ESettingsError = class(Exception);
@@ -49,11 +52,32 @@ type
   private
     { Backing field for @link(BearerToken). }
     FBearerToken: string;
+    { Backing field for @link(DataFolder). }
+    FDataFolder: string;
+    { Backing field for @link(DataFolderUsed). }
+    FDataFolderUsed: Boolean;
+    { Backing field for @link(MinFreeSpaceMB). }
+    FMinFreeSpaceMB: Integer;
+
+    { Writer for @link(DataFolder); trims spaces and any trailing path
+      separator. It has no other side effects, because Neon may set
+      properties in any order when loading.
+      @param(AValue The folder.) }
+    procedure SetDataFolder(const AValue: string);
 
     { Writer for @link(BearerToken); stores the cleaned-up token.
       @param(AValue The token as entered.) }
     procedure SetBearerToken(const AValue: string);
   public
+    { Creates settings with default values, which are kept for any
+      setting missing from the file when it is loaded. }
+    constructor Create;
+
+    { Default folder for downloaded tiles: an @code(ASTGTM) folder in the
+      user's documents folder.
+      @returns(Full path of the folder.) }
+    class function DefaultDataFolder: string; static;
+
     { Folder settings are stored in for the current user and platform.
       The folder is not created by this call.
       @returns(Full path of the folder.) }
@@ -92,6 +116,23 @@ type
       Whitespace and a leading @code(Bearer) word are removed when it is
       set; see @link(CleanToken). Empty when no token has been entered. }
     property BearerToken: string read FBearerToken write SetBearerToken;
+
+    { Folder downloaded tiles are kept in; see @link(TGDEMStore). May be
+      on a removable drive. Defaults to @link(DefaultDataFolder). When
+      changing it, also set @link(DataFolderUsed) to match the new
+      folder. }
+    property DataFolder: string read FDataFolder write SetDataFolder;
+
+    { @true once the program has set up @link(DataFolder). If the folder
+      is then missing, it is taken to be on a drive that is not connected,
+      and the user is asked to connect it rather than it being created
+      again somewhere unexpected. }
+    property DataFolderUsed: Boolean read FDataFolderUsed write FDataFolderUsed;
+
+    { Free space, in megabytes, that downloads must leave on the drive
+      holding @link(DataFolder). A batch of downloads stops before going
+      below it. Defaults to @link(DEFAULT_MIN_FREE_SPACE_MB). }
+    property MinFreeSpaceMB: Integer read FMinFreeSpaceMB write FMinFreeSpaceMB;
   end;
 
 implementation
@@ -115,6 +156,23 @@ begin
 end;
 
 { TGDEMSettings }
+
+constructor TGDEMSettings.Create;
+begin
+  inherited Create;
+  FDataFolder := DefaultDataFolder;
+  FMinFreeSpaceMB := DEFAULT_MIN_FREE_SPACE_MB;
+end;
+
+class function TGDEMSettings.DefaultDataFolder: string;
+begin
+  Result := TPath.Combine(TPath.GetDocumentsPath, 'ASTGTM');
+end;
+
+procedure TGDEMSettings.SetDataFolder(const AValue: string);
+begin
+  FDataFolder := ExcludeTrailingPathDelimiter(Trim(AValue));
+end;
 
 procedure TGDEMSettings.SetBearerToken(const AValue: string);
 begin
