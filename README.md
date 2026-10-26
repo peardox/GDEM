@@ -116,7 +116,7 @@ Refresh Tile Index** to rebuild it.
 |------|----------|
 | `GDEM.groupproj` | Project group |
 | `GDEMFetch/` | The GDEMFetch application |
-| `maps/` | World map images, linked into programs as resources |
+| `maps/` | World map images. `world_1080x540.jpg` is linked into GDEMFetch as a resource. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository. |
 | `delphi-neon/` | Neon JSON library (git submodule) |
 | `docs/` | Ignored for development |
 | `models/` | Ignored for development |
@@ -147,8 +147,11 @@ longitude -180 at the left and latitude 90 at the top.
   <https://github.com/peardox/volatile> can be reused. That project uses a
   Windows-only libtiff binding, so only its logic carries over, not the
   binding.
-- **High-resolution map:** a 10800 x 5400 world map cut into tiles,
-  loaded as the user zooms in.
+- **High-resolution map:** `maps/8081_earthmap10k.jpg`, a 10800 x 5400
+  world map (30 pixels per degree, so each GDEM tile is 30 x 30 pixels),
+  cut into tiles that are loaded as the user zooms in. The image is
+  gitignored because of its size, so the tiling step must not assume it is
+  in a fresh clone.
 
 ## Notes for Claude
 
