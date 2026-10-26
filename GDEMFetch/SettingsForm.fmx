@@ -1,0 +1,131 @@
+object frmSettings: TfrmSettings
+  Left = 0
+  Top = 0
+  BorderIcons = [biSystemMenu]
+  Caption = 'Settings'
+  ClientHeight = 320
+  ClientWidth = 520
+  Position = MainFormCenter
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [Desktop]
+  OnCreate = FormCreate
+  DesignerMasterStyle = 0
+  object lblToken: TLabel
+    Align = Top
+    StyledSettings = [Family, Size, FontColor]
+    Margins.Left = 12.000000000000000000
+    Margins.Top = 12.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Position.X = 12.000000000000000000
+    Position.Y = 12.000000000000000000
+    Size.Width = 496.000000000000000000
+    Size.Height = 20.000000000000000000
+    Size.PlatformDefault = False
+    Text = 'Earthdata Login bearer token'
+  end
+  object layHelp: TLayout
+    Align = Top
+    Margins.Left = 12.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Position.X = 12.000000000000000000
+    Position.Y = 32.000000000000000000
+    Size.Width = 496.000000000000000000
+    Size.Height = 24.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 3
+    object lblHelp: TLabel
+      Align = Left
+      AutoSize = True
+      Size.Width = 191.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.WordWrap = False
+      Text = 'You can generate a bearer token at '
+    end
+    object lblLink: TLabel
+      Align = Left
+      AutoSize = True
+      Cursor = crHandPoint
+      StyledSettings = [Family, Size]
+      HitTest = True
+      Position.X = 191.000000000000000000
+      Size.Width = 180.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.FontColor = claRoyalblue
+      TextSettings.WordWrap = False
+      Text = 'https://urs.earthdata.nasa.gov'
+      OnClick = lblLinkClick
+    end
+  end
+  object memToken: TMemo
+    Touch.InteractiveGestures = [Pan, LongTap, DoubleTap]
+    DataDetectorTypes = []
+    TextSettings.WordWrap = True
+    OnChangeTracking = memTokenChangeTracking
+    Align = Client
+    Margins.Left = 12.000000000000000000
+    Margins.Top = 4.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Margins.Bottom = 4.000000000000000000
+    Size.Width = 496.000000000000000000
+    Size.Height = 180.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 0
+  end
+  object lblLocation: TLabel
+    Align = Bottom
+    StyledSettings = [Family, Style]
+    Margins.Left = 12.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Position.X = 12.000000000000000000
+    Position.Y = 248.000000000000000000
+    Size.Width = 496.000000000000000000
+    Size.Height = 20.000000000000000000
+    Size.PlatformDefault = False
+    TextSettings.Font.Size = 11.000000000000000000
+    TextSettings.FontColor = claGray
+    TextSettings.Trimming = Character
+    Text = 'Saved to:'
+  end
+  object layButtons: TLayout
+    Align = Bottom
+    Margins.Left = 12.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Margins.Bottom = 12.000000000000000000
+    Position.X = 12.000000000000000000
+    Position.Y = 272.000000000000000000
+    Size.Width = 496.000000000000000000
+    Size.Height = 36.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 1
+    object btnCancel: TButton
+      Align = Right
+      Cancel = True
+      ModalResult = 2
+      Margins.Top = 4.000000000000000000
+      Position.X = 416.000000000000000000
+      Position.Y = 4.000000000000000000
+      Size.Width = 80.000000000000000000
+      Size.Height = 32.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 1
+      Text = 'Cancel'
+    end
+    object btnOK: TButton
+      Align = Right
+      Default = True
+      ModalResult = 1
+      Margins.Top = 4.000000000000000000
+      Margins.Right = 8.000000000000000000
+      Position.X = 328.000000000000000000
+      Position.Y = 4.000000000000000000
+      Size.Width = 80.000000000000000000
+      Size.Height = 32.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 0
+      Text = 'OK'
+    end
+  end
+end

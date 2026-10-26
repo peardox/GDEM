@@ -74,6 +74,7 @@
         <DCC_F>false</DCC_F>
         <DCC_K>false</DCC_K>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
+        <DCC_UnitSearchPath>..\delphi-neon\Source;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <VerInfo_Locale>2057</VerInfo_Locale>
         <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=0.1.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductName=$(MSBuildProjectName);ProductVersion=0.1.0.0;Comments=</VerInfo_Keys>
         <AUP_ACCESS_COARSE_LOCATION>true</AUP_ACCESS_COARSE_LOCATION>
@@ -226,6 +227,20 @@
             <FormType>fmx</FormType>
         </DCCReference>
         <DCCReference Include="GDEMDownloader.pas"/>
+        <DCCReference Include="GDEMCMR.pas"/>
+        <DCCReference Include="GDEMSettings.pas"/>
+        <DCCReference Include="GDEMBrowser.pas"/>
+        <DCCReference Include="SettingsForm.pas">
+            <Form>frmSettings</Form>
+            <FormType>fmx</FormType>
+        </DCCReference>
+        <DCCReference Include="GDEMTiles.pas"/>
+        <DCCReference Include="GDEMWorldMap.pas"/>
+        <DCCReference Include="GDEMTileIndex.pas"/>
+        <RcItem Include="..\maps\world_1080x540.jpg">
+            <ResourceType>RCDATA</ResourceType>
+            <ResourceId>WORLDMAP</ResourceId>
+        </RcItem>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
@@ -246,6 +261,8 @@
                 <Source>
                     <Source Name="MainSource">GDEMFetch.dpr</Source>
                 </Source>
+                <WelcomePageFile Path="..\README.md"/>
+                <WelcomePageFolder/>
             </Delphi.Personality>
             <Platforms>
                 <Platform value="Android">False</Platform>

@@ -1,12 +1,40 @@
+{ @abstract(GDEMFetch: downloads ASTER GDEM V3 elevation tiles.)
+
+  A small cross-platform FMX application that fetches the @code(_dem.tif)
+  and @code(_num.tif) GeoTIFF files of an ASTER Global Digital Elevation
+  Model V3 tile from NASA Earthdata Cloud, using an Earthdata Login bearer
+  token. It is the first step of the GDEM project.
+
+  @unorderedList(
+    @item(@link(MainForm) holds the main window.)
+    @item(@link(SettingsForm) is the modal settings dialog.)
+    @item(@link(GDEMSettings) stores settings as JSON in a per-user folder.)
+    @item(@link(GDEMBrowser) opens web pages in the default browser.)
+    @item(@link(GDEMWorldMap) is the zoomable map used to select tiles.)
+    @item(@link(GDEMTiles) names and selects tiles on the 1 degree grid.)
+    @item(@link(GDEMTileIndex) records which tiles exist, built from CMR.)
+    @item(@link(GDEMDownloader) finds and downloads tiles.)
+    @item(@link(GDEMCMR) models and parses NASA CMR search results with the
+      Neon JSON library.)
+  ) }
 program GDEMFetch;
 
 uses
   System.StartUpCopy,
   FMX.Forms,
   MainForm in 'MainForm.pas' {frmMain},
-  GDEMDownloader in 'GDEMDownloader.pas';
+  GDEMDownloader in 'GDEMDownloader.pas',
+  GDEMCMR in 'GDEMCMR.pas',
+  GDEMSettings in 'GDEMSettings.pas',
+  GDEMBrowser in 'GDEMBrowser.pas',
+  SettingsForm in 'SettingsForm.pas' {frmSettings},
+  GDEMTiles in 'GDEMTiles.pas',
+  GDEMWorldMap in 'GDEMWorldMap.pas',
+  GDEMTileIndex in 'GDEMTileIndex.pas';
 
 {$R *.res}
+{ The world map image, built from the RcItem in the project file. }
+{$R *.dres}
 
 begin
   Application.Initialize;
