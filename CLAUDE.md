@@ -67,53 +67,42 @@ The 3D tab is empty, waiting for the next stage.
 
 ### What is on GitHub
 
-Everything to date is on GitHub as of commit `52a9106` ("The world
-overnight"), including the work of the last session:
+Everything to date is on GitHub as of commit `23b8d68` ("Borders and
+countries - right click to select country"), which the owner built and
+pushed. The session of 26 October 2026 added, in order:
 
 - Download speed setting (Slow 1 to 4, Medium 2 to 8, Fast 4 to 16)
-  replacing a number of downloads at once; `TDownloadThrottle` now starts
-  low and climbs (slow start, then additive increase after a cut).
-- Token expiry read from the bearer token (a JWT, `exp` claim) and shown
-  in Settings, logged, warned about, and checked before fetching.
+  replacing a number of downloads at once; `TDownloadThrottle` starts low
+  and climbs (slow start, then additive increase after a cut).
+- Token expiry read from the bearer token (a JWT, `exp` claim): shown in
+  Settings, logged, warned about, and checked before fetching.
 - Live selection counts while dragging (`OnSelectionChanging`).
 - `GDEMReport` (`TDownloadReport`): per-file download detail goes to
   `<settings folder>/Reports/download-yyyymmdd-hhnnss.log`, not the Debug
   tab.
 - Downloads stop only after 10 failures in a row, not 10 in total.
 - `GDEMAwake` (`TKeepAwake`), used by `RunJob`.
-- `CLAUDE.md` (this file) and `tools/pasdoc_check.py`.
-
-Delivered after that commit, in `GDEM-fast-lookup.zip` and the zip that
-updated these notes:
-
 - Faster tile lookup: `LookUpTiles` lists the selected block with
   `TCMRGranuleSearch.BoxURL` (`bounding_box`) instead of 230 wildcard
   name searches for the whole world, and stops paging at a short page.
-  Changed `GDEMCMR.pas`, `GDEMDownloader.pas`, `MainForm.pas` (progress
-  text), `README.md` and this file.
+- Borders, coastlines and country names from Natural Earth:
+  `GDEMVectors.pas`, `tools/build_vectors.py`, `maps/world_vectors.bin`
+  (the `WORLDVECTORS` resource), drawing in `GDEMWorldMap.pas`, View menu
+  items and the status bar name in `MainForm`.
+- Right-click country selection: `TGeoLayer.AddFeatureTiles` and
+  `TWorldVectors.CountryIndexAt`, `AddCountryTiles` and `CountryName`;
+  `TTileIndex.BoundingRect` (takes the short way round, so Russia gives
+  19E to 169W, not the whole world); `SelectTiles`, `SelectionMask`,
+  `SelectionName` and `OnRightClick` on the map; `MapRightClick`,
+  `SelectedTileNames` and `SelectedTileCount` in `MainForm`, which Fetch
+  and Delete use. The tile algorithm was checked by porting it to Python
+  on the real data: Germany 68 tiles, United Kingdom 70, France 116 (with
+  overseas parts), Lesotho 8, Luxembourg 4, Vatican 1, Fiji 20, Russia
+  3473.
+- `CLAUDE.md` (this file), `tools/pasdoc_check.py`.
 
-- Borders, coastlines and country names (`GDEM-borders.zip`): new
-  `GDEMVectors.pas`, `tools/build_vectors.py` and `maps/world_vectors.bin`;
-  changed `GDEMWorldMap.pas` (drawing), `MainForm.pas` and `.fmx` (View
-  menu items, status bar name, loading), `GDEMFetch.dpr` and `.dproj`
-  (unit, `WORLDVECTORS` RcItem, disabled deploy entries), `README.md` and
-  this file. It also carries the fast-lookup files, as both changed
-  `MainForm.pas`.
-
-- Right-click country selection (`GDEM-country-select.zip`, which also
-  carries everything in `GDEM-borders.zip`): `TGeoLayer.AddFeatureTiles`
-  and `TWorldVectors.CountryIndexAt`/`AddCountryTiles`/`CountryName` in
-  `GDEMVectors.pas`; `TTileIndex.BoundingRect` in `GDEMTileIndex.pas`
-  (takes the short way round, so Russia gives 19E to 169W, not the whole
-  world); `SelectTiles`, `SelectionMask`, `SelectionName`, `OnRightClick`
-  in `GDEMWorldMap.pas`; `MapRightClick`, `SelectedTileNames` and
-  `SelectedTileCount` in `MainForm.pas`, which Fetch and Delete now use.
-  Checked by porting the tile algorithm to Python on the real data:
-  Germany 68 tiles, United Kingdom 70, France 116 (with overseas parts),
-  Lesotho 8, Luxembourg 4, Vatican 1, Fiji 20, Russia 3473.
-
-Anything delivered later still is in the conversation, not here: ask the
-owner whether it has been applied before changing the same units.
+Anything delivered after that commit is in the conversation, not here:
+ask the owner whether it has been applied before changing the same units.
 
 ### Next, as far as is known
 
@@ -128,13 +117,14 @@ owner whether it has been applied before changing the same units.
    lines, and the Debug tab "Looked up ... in ...: N have data" should
    take seconds, not minutes. If it falls back to "asking by name
    instead", the bounding box query needs looking at.
-3. **First run of the borders.** Written without a compiler. Check they
-   line up with the map, that panning and zooming stay smooth (the 1:50m
-   coastline is 60,000 points; only lines on screen are drawn, and points
-   under a pixel apart are skipped), and the country name in the status
-   bar. Colours: borders pink `$FFFF80AB`, coastlines white at 55%.
-   Also check right-click country selection, including a country across
-   180 degrees (Fiji, Russia) and that right-drag still pans.
+3. **Borders and country selection in use.** Built and pushed; nothing
+   reported wrong yet. Things to watch: that the lines match the map,
+   that panning and zooming stay smooth (the 1:50m coastline is 60,000
+   points; only lines on screen are drawn, and points under a pixel apart
+   are skipped), the country name in the status bar, right-click
+   selection of a country across 180 degrees (Fiji, Russia), and that
+   right-drag still pans. Colours: borders pink `$FFFF80AB`, coastlines
+   white at 55%.
 4. **GeoTIFF reader** in pure Pascal for the `_dem` and `_num` files
    (LZW, 256 x 256 tiles, Int16 and UInt8, 3601 x 3601, 8 overviews).
    <https://github.com/peardox/volatile> has older decoding logic to
@@ -228,6 +218,13 @@ reasons are here.
   script in `tools/` into a compact binary resource, rather than parsing
   JSON at start-up; the JSON-uses-Neon rule is about JSON the program
   itself reads.
+- Delphi requires every field of a class section before its first method
+  or property (E2169). New private methods were once inserted among the
+  fields; `tools/pasdoc_check.py` now reports that.
+- Delphi's flow analysis is unreliable around `try`/`except`: removing a
+  starting value it called unused (H2077) produced "might not have been
+  initialized" (W1036). The fix in `DownloadFile` sets the value at the
+  top of the loop and lets one path rely on it.
 - On macOS, `NSProcessInfo` `beginActivityWithOptions:reason:` with
   `NSActivityUserInitiated` prevents idle sleep and App Nap; the returned
   activity is retained until `endActivity:`.
