@@ -106,11 +106,13 @@ ask the owner whether it has been applied before changing the same units.
 
 ### Next, as far as is known
 
-1. **Whole-world download on the Mac overnight**, at Fast, started on
-   26 October 2026 with the old, slow lookup (it was at 73 of 230 name
-   batches after a while). Look at the Debug tab summary and the report
-   file (`~/Library/Application Support/GDEM/Reports/`) afterwards:
-   speed, cut-backs, failures, and whether App Nap or sleep interfered.
+1. **One tile missing from the whole-world download.** The Mac run (see
+   below) got 22,911 tiles, but the index lists 22,912 and the summary
+   said 0 had no data, so one was outside the selection, probably at its
+   edge (the 180 degree column or the 83 degree rows). Fetching a
+   whole-world selection again downloads just that tile and names it; if
+   it was inside a whole-world drag, check how the selection is clipped
+   there.
 2. **First real run of the block lookup.** It was written without being
    able to reach CMR from the sandbox. The report should show
    "Asking NASA CMR for every tile from ... to ..." then "page N of M"
@@ -170,6 +172,11 @@ ask the owner whether it has been applied before changing the same units.
   when the **same files are downloaded again and again** in a short time,
   as happens when deleting and re-fetching while testing. Fresh areas
   download in parallel without trouble. Always test on a new area.
+- **Whole world, 26 October 2026, on the Mac at Fast** (old name lookup,
+  which alone took many minutes): `Downloaded 22911 tile(s), 383.1 GB, in
+  1 h 46 min at 62 MB/s, up to 16 at a time; 0 were already here, 0 have
+  no data, 0 failed.` No cut-backs or failures; keep-awake and App Nap
+  handling held for the whole run.
 - Measured on the owner's line: 1 at a time about 3 MB/s; 3 about
   12 MB/s; 6 about 15 MB/s; 12 about 26 MB/s (36 tiles); 16 about
   56 MB/s (100 tiles, 2.1 GB in 38 s, no errors, no cut-backs). With the
