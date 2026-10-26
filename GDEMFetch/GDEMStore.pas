@@ -55,6 +55,18 @@ const
   { Average size of one tile's two files, used for estimates. The whole
     world is about 400 GB over about 23,000 tiles. }
   ESTIMATED_TILE_BYTES = Int64(18) * 1024 * 1024;
+  { Most files @link(TGDEMStore.ImportFrom) copies at once. The default,
+    1, is @code(DEFAULT_IMPORT_WORKERS) in @code(GDEMSettings). }
+  MAX_IMPORT_WORKERS = 16;
+  { How many times @link(TGDEMStore.ImportFrom) tries each file before
+    skipping it. }
+  IMPORT_ATTEMPTS = 3;
+  { Pause after a failed try, in milliseconds, multiplied by the number of
+    tries so far. }
+  IMPORT_RETRY_DELAY_MS = 1000;
+  { Once this many files have been skipped, the import stops: something is
+    badly wrong. }
+  MAX_IMPORT_FAILURES = 20;
 
 type
   { @abstract(Raised when the data folder cannot be used.) }
@@ -74,6 +86,10 @@ type
     Ignored: Integer;
     { Bytes copied. }
     Bytes: Int64;
+    { Files skipped because they could not be copied, even after
+      @link(IMPORT_ATTEMPTS) tries. Each is listed in the log; running the
+      import again tries them again. }
+    Failed: Integer;
   end;
 
   { @abstract(Contents of @link(STORE_MARKER_FILE).) }
@@ -293,6 +309,21 @@ type
       a temporary name, its size checked, and only then renamed, so a
       cancelled or failed import never leaves a partial tile behind.
 
+      Several files are copied at once, by AWorkers threads taking files
+      from a shared list. Copying one file at a time leaves fast drives
+      idle while each file is opened, flushed, checked and renamed (and, on
+      Windows, often scanned for viruses); overlapping files hides that.
+      Use 1 for a spinning hard disk, where several files at once make the
+      heads jump between them.
+
+      A file that cannot be copied is tried @link(IMPORT_ATTEMPTS) times,
+      which rides out brief problems such as a virus scanner holding the new
+      file or a drive resetting for a moment. If it still fails it is
+      logged, counted in @link(TImportResult.Failed) and skipped, and the
+      import carries on. Only these stop the whole import: free space
+      falling below AReserve, the data folder disappearing (a removable
+      drive unplugged), or @link(MAX_IMPORT_FAILURES) files failing.
+
       Before copying, the space needed is worked out; the import does not
       start if it would leave less than AReserve free, and it stops if free
       space falls below AReserve along the way.
@@ -300,15 +331,19 @@ type
       @param(ASourceFolder The folder to import from. It must not be inside
         the store, nor contain it.)
       @param(AReserve Bytes that must be left free on the store's drive.)
+      @param(AWorkers How many files to copy at once, from 1 to
+        @link(MAX_IMPORT_WORKERS).)
       @param(AToken Checked between files.)
       @param(AOnProgress Called before each file is copied and after each
-        file is dealt with. May be @nil.)
+        file is dealt with, from the worker threads, possibly from several
+        at once. May be @nil.)
       @returns(What was copied and skipped.)
-      @raises(EStoreError if the folders overlap, space is short, or a file
-        cannot be copied.)
+      @raises(EStoreError if the folders overlap, space is short, the data
+        folder disappears, or too many files cannot be copied.)
       @raises(EOperationCancelled if AToken is cancelled.) }
     function ImportFrom(const ASourceFolder: string; AReserve: Int64;
-      AToken: TCancelToken; const AOnProgress: TImportProgressEvent): TImportResult;
+      AWorkers: Integer; AToken: TCancelToken;
+      const AOnProgress: TImportProgressEvent): TImportResult;
 
     { Total size of all tile files.
       @param(AToken Checked between files. May be @nil.)
@@ -332,14 +367,15 @@ implementation
 
 uses
   System.IOUtils, System.Types, System.Math, System.StrUtils,
-  System.Generics.Collections, System.RegularExpressions,
+  System.Generics.Collections, System.RegularExpressions, System.SyncObjs,
   {$IFDEF MSWINDOWS}
   Winapi.Windows,
   {$ENDIF}
   {$IFDEF POSIX}
   Posix.SysStatvfs,
   {$ENDIF}
-  Neon.Core.Types, Neon.Core.Persistence, Neon.Core.Persistence.JSON;
+  Neon.Core.Types, Neon.Core.Persistence, Neon.Core.Persistence.JSON,
+  GDEMSettings;
 
 function FormatByteSize(ABytes: Int64): string;
 const
@@ -356,6 +392,23 @@ begin
   else
     Result := FormatFloat('0', ABytes / MB) + ' MB';
 end;
+
+type
+  { One file for @link(TGDEMStore.ImportFrom) to copy. }
+  TImportItem = record
+    { Where the file is now. }
+    Source: string;
+    { Where it goes in the store. }
+    Dest: string;
+    { Its size in bytes. }
+    Size: Int64;
+  end;
+
+  { Passes import progress on; see @link(TGDEMStore.ImportFrom).
+    @param(AFilesDone Files dealt with so far.)
+    @param(ACurrentFile The file about to be copied or just dealt with.) }
+  TImportReportProc = reference to procedure(AFilesDone: Integer;
+    const ACurrentFile: string);
 
 { Checks whether a file starts like a TIFF: @code(II) (little-endian) or
   @code(MM) (big-endian).
@@ -386,7 +439,8 @@ end;
 constructor TGDEMStore.Create(const ARoot: string);
 begin
   inherited Create;
-  FRoot := ExcludeTrailingPathDelimiter(ARoot);
+  // Keeps a drive root as F:\ rather than F:, which means something else
+  FRoot := NormalizeFolder(ARoot);
 end;
 
 procedure TGDEMStore.Log(const Msg: string);
@@ -533,12 +587,12 @@ var
 begin
   Result := -1;
   // Walk up to the nearest folder that exists
-  LPath := ExcludeTrailingPathDelimiter(APath);
+  LPath := NormalizeFolder(APath);
   while (LPath <> '') and not TDirectory.Exists(LPath) do
   begin
-    if TPath.GetDirectoryName(LPath) = LPath then
+    if NormalizeFolder(TPath.GetDirectoryName(LPath)) = LPath then
       Exit;
-    LPath := ExcludeTrailingPathDelimiter(TPath.GetDirectoryName(LPath));
+    LPath := NormalizeFolder(TPath.GetDirectoryName(LPath));
   end;
   if LPath = '' then
     Exit;
@@ -791,42 +845,37 @@ begin
 end;
 
 function TGDEMStore.ImportFrom(const ASourceFolder: string; AReserve: Int64;
-  AToken: TCancelToken; const AOnProgress: TImportProgressEvent): TImportResult;
-type
-  { One file to import. }
-  TImportItem = record
-    Source, Dest: string;
-    Size: Int64;
-  end;
+  AWorkers: Integer; AToken: TCancelToken;
+  const AOnProgress: TImportProgressEvent): TImportResult;
 var
-  LSource, LSourceDir, LRootDir, LTemp: string;
+  LSource, LSourceDir, LRootDir: string;
   LFiles: TArray<string>;
-  LItems: TList<TImportItem>;
+  LTodo: TList<TImportItem>;
   LItem: TImportItem;
-  LIndex, LSouth, LWest: Integer;
-  LNeeded, LFree, LCopiedBytes: Int64;
-  LProgress: TImportProgress;
-
-  { Passes the progress on, if anyone is listening.
-    @param(AFilesDone Files dealt with so far.)
-    @param(ACurrentFile The file about to be copied or just dealt with.) }
-  procedure Report(AFilesDone: Integer; const ACurrentFile: string);
-  begin
-    if not Assigned(AOnProgress) then
-      Exit;
-    LProgress.FilesDone := AFilesDone;
-    LProgress.FilesTotal := LItems.Count;
-    LProgress.BytesCopied := LCopiedBytes;
-    LProgress.BytesToCopy := LNeeded;
-    LProgress.CurrentFile := ACurrentFile;
-    AOnProgress(LProgress);
-  end;
-
+  LIndex, LSouth, LWest, LTotal, LPresent, LIgnored, LWorkerCount: Integer;
+  LNeeded, LFree, LReserve: Int64;
+  LToken: TCancelToken;
+  LOnProgress: TImportProgressEvent;
+  // Shared by the workers; counters change only through TInterlocked
+  LNext, LDone, LCopied, LReplaced, LIgnoredCopy, LFailedCount: Integer;
+  LCopiedBytes: Int64;
+  LError: string;
+  LStop: Boolean;
+  LLock: TObject;
+  LFailedFolders: TList<string>;
+  LReport: TImportReportProc;
+  LWorker: TProc;
+  LThreads: TArray<TThread>;
+  LFolder: string;
 begin
   Result := Default(TImportResult);
-  LNeeded := 0;
-  LCopiedBytes := 0;
-  LSource := ExcludeTrailingPathDelimiter(TPath.GetFullPath(ASourceFolder));
+  // Parameters are copied so the workers' anonymous methods can use them
+  LToken := AToken;
+  LOnProgress := AOnProgress;
+  LReserve := AReserve;
+  LWorkerCount := EnsureRange(AWorkers, 1, MAX_IMPORT_WORKERS);
+
+  LSource := NormalizeFolder(TPath.GetFullPath(NormalizeFolder(ASourceFolder)));
   if not TDirectory.Exists(LSource) then
     raise EStoreError.CreateFmt('The folder %s does not exist.', [LSource]);
 
@@ -841,88 +890,269 @@ begin
   Log('Looking for ASTER GDEM tiles in ' + LSource + ' ...');
   LFiles := TDirectory.GetFiles(LSource, '*.tif', TSearchOption.soAllDirectories);
 
-  LItems := TList<TImportItem>.Create;
+  LTodo := TList<TImportItem>.Create;
+  LFailedFolders := TList<string>.Create;
+  LLock := TObject.Create;
   try
-    // Work out what needs copying and how much space it takes
+    // Work out what needs copying and how much space it takes. Files the
+    // store already has are counted now, so the workers only see real work.
+    LTotal := 0;
+    LPresent := 0;
+    LIgnored := 0;
+    LNeeded := 0;
     for LIndex := 0 to High(LFiles) do
     begin
-      AToken.Check;
+      LToken.Check;
       if not TryParseFileName(LFiles[LIndex], LSouth, LWest) then
       begin
-        Inc(Result.Ignored);
+        Inc(LIgnored);
         Continue;
       end;
+      Inc(LTotal);
       LItem.Source := LFiles[LIndex];
       LItem.Dest := PathForFile(LFiles[LIndex]);
       LItem.Size := TFile.GetSize(LItem.Source);
-      LItems.Add(LItem);
-      if not (TFile.Exists(LItem.Dest) and (TFile.GetSize(LItem.Dest) = LItem.Size)) then
+      if TFile.Exists(LItem.Dest) and (TFile.GetSize(LItem.Dest) = LItem.Size) then
+        Inc(LPresent)
+      else
+      begin
+        LTodo.Add(LItem);
         Inc(LNeeded, LItem.Size);
+      end;
     end;
-    Log(Format('  found %d tile file(s); %s to copy', [LItems.Count, FormatByteSize(LNeeded)]));
+    Log(Format('  found %d tile file(s): %d already in the data folder, %d to copy (%s), ' +
+      '%d at a time', [LTotal, LPresent, LTodo.Count, FormatByteSize(LNeeded), LWorkerCount]));
 
     LFree := FreeSpace;
-    if (LFree >= 0) and (LFree - LNeeded < AReserve) then
+    if (LFree >= 0) and (LFree - LNeeded < LReserve) then
       raise EStoreError.CreateFmt('Importing needs about %s, but the data drive has %s ' +
         'free and %s must be kept free. Free some space, choose a larger drive, or ' +
         'lower the reserve in File > Settings.',
-        [FormatByteSize(LNeeded), FormatByteSize(LFree), FormatByteSize(AReserve)]);
-    Report(0, '');
+        [FormatByteSize(LNeeded), FormatByteSize(LFree), FormatByteSize(LReserve)]);
 
-    for LIndex := 0 to LItems.Count - 1 do
-    begin
-      AToken.Check;
-      LItem := LItems[LIndex];
+    LNext := -1;
+    LDone := LPresent;
+    LCopied := 0;
+    LReplaced := 0;
+    LIgnoredCopy := 0;
+    LFailedCount := 0;
+    LCopiedBytes := 0;
+    LError := '';
+    LStop := False;
 
-      if TFile.Exists(LItem.Dest) and (TFile.GetSize(LItem.Dest) = LItem.Size) then
-        Inc(Result.AlreadyPresent)
-      else if (LItem.Size = 0) or not StartsLikeTIFF(LItem.Source) then
+    LReport :=
+      procedure(AFilesDone: Integer; const ACurrentFile: string)
+      var
+        LProgress: TImportProgress;
       begin
-        Inc(Result.Ignored);
-        Log('  skipped ' + LItem.Source + ': not a TIFF file');
-      end
-      else
-      begin
-        LFree := FreeSpace;
-        if (LFree >= 0) and (LFree - LItem.Size < AReserve) then
-          raise EStoreError.CreateFmt('Import stopped: only %s is free on the data drive, ' +
-            'and %s must be kept free.', [FormatByteSize(LFree), FormatByteSize(AReserve)]);
+        if not Assigned(LOnProgress) then
+          Exit;
+        LProgress.FilesDone := AFilesDone;
+        LProgress.FilesTotal := LTotal;
+        LProgress.BytesCopied := TInterlocked.Read(LCopiedBytes);
+        LProgress.BytesToCopy := LNeeded;
+        LProgress.CurrentFile := ACurrentFile;
+        LOnProgress(LProgress);
+      end;
+    LReport(LDone, '');
 
-        Report(LIndex, ExtractFileName(LItem.Source));
-        LTemp := LItem.Dest + '.tmp';
-        try
-          ForceDirectories(TPath.GetDirectoryName(LItem.Dest));
-          TFile.Copy(LItem.Source, LTemp, True);
-          if TFile.GetSize(LTemp) <> LItem.Size then
-            raise EStoreError.Create('the copy is incomplete');
-          if TFile.Exists(LItem.Dest) then
+    // Each worker takes the next file from the list until none are left,
+    // the import is cancelled, or another worker has failed
+    LWorker :=
+      procedure
+      var
+        LIdx, LCount, LAttempt, LFailures: Integer;
+        LJob: TImportItem;
+        LTempName, LDestDir, LMessage: string;
+        LSpace: Int64;
+        LWasThere, LCopiedOk, LFatal: Boolean;
+      begin
+        while not LStop and not LToken.Cancelled do
+        begin
+          LIdx := TInterlocked.Increment(LNext);
+          if LIdx >= LTodo.Count then
+            Exit;
+          LJob := LTodo[LIdx];
+          LTempName := LJob.Dest + '.tmp';
+          LDestDir := TPath.GetDirectoryName(LJob.Dest);
+          LMessage := '';
+          LFatal := False;
+
+          if (LJob.Size = 0) or not StartsLikeTIFF(LJob.Source) then
           begin
-            TFile.Delete(LItem.Dest);
-            Inc(Result.Replaced);
-          end;
-          TFile.Move(LTemp, LItem.Dest);
-        except
-          on E: Exception do
+            TInterlocked.Increment(LIgnoredCopy);
+            Log('  skipped ' + LJob.Source + ': not a TIFF file');
+          end
+          else if not TDirectory.Exists(FRoot) then
           begin
-            if TFile.Exists(LTemp) then
-              TFile.Delete(LTemp);
-            PruneEmptyFolders(TPath.GetDirectoryName(LItem.Dest));
-            raise EStoreError.CreateFmt('Could not copy %s: %s', [LItem.Source, E.Message]);
+            LFatal := True;
+            LMessage := Format('Import stopped: the data folder %s is no longer ' +
+              'available. If it is on a removable drive, check that it is still ' +
+              'connected, then run the import again.', [FRoot]);
+          end
+          else
+          begin
+            // Every worker may be about to write a file of about this size
+            LSpace := FreeSpace;
+            if (LSpace >= 0) and (LSpace - LJob.Size * LWorkerCount < LReserve) then
+            begin
+              LFatal := True;
+              LMessage := Format('Import stopped: only %s is free on the data drive, ' +
+                'and %s must be kept free.', [FormatByteSize(LSpace), FormatByteSize(LReserve)]);
+            end
+            else
+            begin
+              LReport(LDone, ExtractFileName(LJob.Source));
+              // A brief failure, such as a virus scanner still holding the
+              // new file, or a drive resetting for a moment, is tried again
+              LCopiedOk := False;
+              for LAttempt := 1 to IMPORT_ATTEMPTS do
+              begin
+                if LToken.Cancelled then
+                  Break;
+                try
+                  // A tile's two files sit next to each other in the list,
+                  // so two workers often need a new block folder at the same
+                  // moment. ForceDirectories is not safe for that: when
+                  // another thread wins the race for the parent it gives up
+                  // without making the child. Folders are therefore made
+                  // one worker at a time.
+                  TMonitor.Enter(LLock);
+                  try
+                    if not TDirectory.Exists(LDestDir) then
+                      ForceDirectories(LDestDir);
+                  finally
+                    TMonitor.Exit(LLock);
+                  end;
+                  if not TDirectory.Exists(LDestDir) then
+                    raise Exception.Create('the folder ' + LDestDir + ' could not be created');
+                  TFile.Copy(LJob.Source, LTempName, True);
+                  if TFile.GetSize(LTempName) <> LJob.Size then
+                    raise Exception.Create('the copy is incomplete');
+                  LWasThere := TFile.Exists(LJob.Dest);
+                  if LWasThere then
+                    TFile.Delete(LJob.Dest);
+                  TFile.Move(LTempName, LJob.Dest);
+                  if LWasThere then
+                    TInterlocked.Increment(LReplaced);
+                  TInterlocked.Increment(LCopied);
+                  TInterlocked.Add(LCopiedBytes, LJob.Size);
+                  LCopiedOk := True;
+                  Break;
+                except
+                  on E: Exception do
+                  begin
+                    LMessage := E.Message;
+                    try
+                      if TFile.Exists(LTempName) then
+                        TFile.Delete(LTempName);
+                    except
+                      // A rescan removes it later
+                    end;
+                    if LAttempt < IMPORT_ATTEMPTS then
+                      Sleep(IMPORT_RETRY_DELAY_MS * LAttempt);
+                  end;
+                end;
+              end;
+
+              if not LCopiedOk and not LToken.Cancelled then
+              begin
+                if not TDirectory.Exists(FRoot) then
+                begin
+                  // The drive went while this file was being tried
+                  LFatal := True;
+                  LMessage := Format('Import stopped: the data folder %s is no ' +
+                    'longer available. If it is on a removable drive, check that it ' +
+                    'is still connected, then run the import again.', [FRoot]);
+                end
+                else
+                begin
+                  // Skip it and carry on; running the import again retries it
+                  LFailures := TInterlocked.Increment(LFailedCount);
+                  Log(Format('  FAILED to copy %s after %d tries: %s',
+                    [LJob.Source, IMPORT_ATTEMPTS, LMessage]));
+                  TMonitor.Enter(LLock);
+                  try
+                    if not LFailedFolders.Contains(LDestDir) then
+                      LFailedFolders.Add(LDestDir);
+                  finally
+                    TMonitor.Exit(LLock);
+                  end;
+                  if LFailures >= MAX_IMPORT_FAILURES then
+                  begin
+                    LFatal := True;
+                    LMessage := Format('Import stopped after %d files could not be ' +
+                      'copied; the last failed with: %s. The Debug tab lists them.',
+                      [LFailures, LMessage.TrimRight(['.'])]);
+                  end;
+                end;
+              end;
+            end;
           end;
+
+          if LFatal then
+          begin
+            TMonitor.Enter(LLock);
+            try
+              // The first fatal problem is the one reported
+              if LError = '' then
+                LError := LMessage;
+              LStop := True;
+              if not LFailedFolders.Contains(LDestDir) then
+                LFailedFolders.Add(LDestDir);
+            finally
+              TMonitor.Exit(LLock);
+            end;
+            Exit;
+          end;
+          if LToken.Cancelled then
+            Exit;
+
+          LCount := TInterlocked.Increment(LDone);
+          if LCount mod 250 = 0 then
+            Log(Format('  %d of %d file(s) done, %s copied',
+              [LCount, LTotal, FormatByteSize(TInterlocked.Read(LCopiedBytes))]));
+          LReport(LCount, ExtractFileName(LJob.Source));
         end;
-        Inc(Result.Copied);
-        Inc(Result.Bytes, LItem.Size);
-        Inc(LCopiedBytes, LItem.Size);
       end;
 
-      if (LIndex + 1) mod 250 = 0 then
-        Log(Format('  %d of %d file(s) checked, %s copied',
-          [LIndex + 1, LItems.Count, FormatByteSize(Result.Bytes)]));
-      Report(LIndex + 1, ExtractFileName(LItem.Source));
+    // Plain threads rather than the task pool, as this already runs on a
+    // pool thread and must wait for the workers
+    SetLength(LThreads, Min(LWorkerCount, Max(1, LTodo.Count)));
+    for LIndex := 0 to High(LThreads) do
+    begin
+      LThreads[LIndex] := TThread.CreateAnonymousThread(LWorker);
+      LThreads[LIndex].FreeOnTerminate := False;
     end;
-    Report(LItems.Count, '');
+    try
+      for LIndex := 0 to High(LThreads) do
+        LThreads[LIndex].Start;
+      for LIndex := 0 to High(LThreads) do
+        LThreads[LIndex].WaitFor;
+    finally
+      for LIndex := 0 to High(LThreads) do
+        LThreads[LIndex].Free;
+    end;
+
+    // Only now that no worker is writing can empty folders be removed
+    for LFolder in LFailedFolders do
+      PruneEmptyFolders(LFolder);
+
+    Result.Copied := LCopied;
+    Result.AlreadyPresent := LPresent;
+    Result.Replaced := LReplaced;
+    Result.Ignored := LIgnored + LIgnoredCopy;
+    Result.Bytes := LCopiedBytes;
+    Result.Failed := LFailedCount;
+
+    if LError <> '' then
+      raise EStoreError.Create(LError);
+    LToken.Check;
+    LReport(LTotal, '');
   finally
-    LItems.Free;
+    LLock.Free;
+    LFailedFolders.Free;
+    LTodo.Free;
   end;
 end;
 

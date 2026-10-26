@@ -37,6 +37,83 @@ const
   { Default for @link(TGDEMSettings.MinFreeSpaceMB): keep 2 GB free. }
   DEFAULT_MIN_FREE_SPACE_MB = 2048;
 
+  { Default for @link(TGDEMSettings.ImportWorkers): one file at a time,
+    which suits every kind of drive. }
+  DEFAULT_IMPORT_WORKERS = 1;
+
+  { Most files downloaded at once at any speed. NASA does not publish a
+    limit, but cuts off or refuses downloads when it has had enough; the
+    downloads then back off by themselves (see @code(TDownloadThrottle)). }
+  MAX_DOWNLOAD_WORKERS = 16;
+
+type
+  {$SCOPEDENUMS ON}
+  { @abstract(How hard downloads push NASA's servers.)
+
+    Each speed sets how many files download at once to begin with
+    (@link(DOWNLOAD_SPEED_START)) and the most they may climb to
+    (@link(DOWNLOAD_SPEED_MAX)). Downloads climb towards the most while
+    they go well and halve when NASA objects, the way TCP shares a network
+    (additive increase, multiplicative decrease; see
+    @code(TDownloadThrottle)). }
+  TDownloadSpeed = (
+    { Suits a slow or shared connection: starts at 1, at most 4. }
+    Slow,
+    { The default: starts at 2, at most 8. }
+    Medium,
+    { Suits a fast connection: starts at 4, at most 16. }
+    Fast);
+  {$SCOPEDENUMS OFF}
+
+const
+  { Files downloaded at once when a batch starts, for each speed. }
+  DOWNLOAD_SPEED_START: array[TDownloadSpeed] of Integer = (1, 2, 4);
+
+  { Most files downloaded at once, for each speed. None is above
+    @link(MAX_DOWNLOAD_WORKERS). }
+  DOWNLOAD_SPEED_MAX: array[TDownloadSpeed] of Integer = (4, 8, MAX_DOWNLOAD_WORKERS);
+
+  { How each speed is stored in the settings file and shown to the user. }
+  DOWNLOAD_SPEED_KEYS: array[TDownloadSpeed] of string = ('Slow', 'Medium', 'Fast');
+
+  { Default for @link(TGDEMSettings.DownloadSpeed). }
+  DEFAULT_DOWNLOAD_SPEED = TDownloadSpeed.Medium;
+
+  { A token with fewer days than this left gets a warning. }
+  TOKEN_WARN_DAYS = 7;
+
+{ Reads when an Earthdata Login bearer token stops working. The token is a
+  JSON Web Token: three parts separated by full stops, the middle one
+  holding its claims, including @code(exp), the expiry time in seconds
+  since 1970 (UTC). The token is not checked with NASA, only read.
+  @param(AToken The token.)
+  @param(AExpires Receives the expiry time, in local time.)
+  @returns(@true if the token held an expiry time; @false if it is empty
+    or not a token this can read.) }
+function TokenExpiry(const AToken: string; out AExpires: TDateTime): Boolean;
+
+{ Describes when a bearer token expires, for the user.
+  @param(AToken The token.)
+  @returns(Such as "Token expires 25 Dec 2026 20:13 (59 days left)",
+    "Token expired on ...", "Token expiry not known", or an empty string
+    if AToken is empty.) }
+function DescribeTokenExpiry(const AToken: string): string;
+
+{ Turns a stored download speed back into a speed.
+  @param(AKey A key from @link(DOWNLOAD_SPEED_KEYS), in any case.)
+  @returns(The matching speed, or @link(DEFAULT_DOWNLOAD_SPEED) if AKey
+    is not one of them.) }
+function DownloadSpeedFromKey(const AKey: string): TDownloadSpeed;
+
+{ Tidies a folder path: removes surrounding spaces and any trailing path
+  separator, except where the separator is part of a root. A drive root
+  stays @code(F:\) (and a bare @code(F:) becomes @code(F:\)), because
+  @code(F:) on its own means the current folder on drive F, not its root;
+  the POSIX root stays @code(/).
+  @param(APath The folder as typed or chosen.)
+  @returns(The tidied folder, or an empty string if APath is blank.) }
+function NormalizeFolder(const APath: string): string;
+
 type
   { @abstract(Raised when settings cannot be read or written.) }
   ESettingsError = class(Exception);
@@ -60,6 +137,10 @@ type
     FMinFreeSpaceMB: Integer;
     { Backing field for @link(Theme). }
     FTheme: string;
+    { Backing field for @link(ImportWorkers). }
+    FImportWorkers: Integer;
+    { Backing field for @link(DownloadSpeed). }
+    FDownloadSpeed: string;
 
     { Writer for @link(DataFolder); trims spaces and any trailing path
       separator. It has no other side effects, because Neon may set
@@ -142,16 +223,125 @@ type
       the settings loading; use @code(ThemeFromKey) in @code(GDEMThemes) to
       turn it into a theme. Defaults to @code(Default). }
     property Theme: string read FTheme write FTheme;
+
+    { How many files an import copies at once. 1 suits a spinning hard
+      disk, where copying several files at once makes the heads jump
+      between them; on SSDs, a higher number (such as 4) can be several
+      times faster, by hiding the time each file takes to open, flush,
+      check and rename. Defaults to @link(DEFAULT_IMPORT_WORKERS). }
+    property ImportWorkers: Integer read FImportWorkers write FImportWorkers;
+
+    { How hard downloads push NASA's servers, stored by key:
+      @code(Slow), @code(Medium) or @code(Fast); see @link(TDownloadSpeed).
+      A single download often uses only part of a fast connection, because
+      of the distance to NASA's servers in the USA, so several at once can
+      be much faster. Kept as text so that a value this version does not
+      know can never stop the settings loading; use
+      @link(DownloadSpeedFromKey) to turn it into a speed. Defaults to
+      @code(Medium). }
+    property DownloadSpeed: string read FDownloadSpeed write FDownloadSpeed;
   end;
 
 implementation
 
 uses
-  System.IOUtils, System.Character,
+  System.IOUtils, System.Character, System.NetEncoding, System.DateUtils, System.Math,
   {$IFDEF POSIX}
   Posix.SysStat,
   {$ENDIF}
   Neon.Core.Persistence, Neon.Core.Persistence.JSON;
+
+function NormalizeFolder(const APath: string): string;
+begin
+  Result := Trim(APath);
+  if Result = '' then
+    Exit;
+  {$IFDEF MSWINDOWS}
+  // A drive letter alone, or a drive root
+  if (Length(Result) = 2) and (Result[2] = ':') then
+    Exit(Result + PathDelim);
+  if (Length(Result) = 3) and (Result[2] = ':') and IsPathDelimiter(Result, 3) then
+    Exit;
+  {$ENDIF}
+  if Result = PathDelim then
+    Exit;
+  Result := ExcludeTrailingPathDelimiter(Result);
+end;
+
+type
+  { The one claim read from a bearer token by @link(TokenExpiry). Other
+    claims in the token are ignored. }
+  TTokenClaims = class
+  private
+    { Backing field for @link(Exp). }
+    FExp: Int64;
+  public
+    { Expiry time, in seconds since 1970 (UTC); 0 if the token has none. }
+    property Exp: Int64 read FExp write FExp;
+  end;
+
+function TokenExpiry(const AToken: string; out AExpires: TDateTime): Boolean;
+var
+  LParts: TArray<string>;
+  LPayload, LJSON: string;
+  LClaims: TTokenClaims;
+begin
+  Result := False;
+  AExpires := 0;
+  LParts := AToken.Trim.Split(['.']);
+  if Length(LParts) <> 3 then
+    Exit;
+  // Base64url: '-' and '_' for '+' and '/', and no padding
+  LPayload := LParts[1].Replace('-', '+').Replace('_', '/');
+  while Length(LPayload) mod 4 <> 0 do
+    LPayload := LPayload + '=';
+  LClaims := TTokenClaims.Create;
+  try
+    try
+      LJSON := TEncoding.UTF8.GetString(TNetEncoding.Base64.DecodeStringToBytes(LPayload));
+      TNeon.JSONToObject(LClaims, LJSON, TNeonConfiguration.Camel);
+    except
+      // Not a token this can read; the caller says the expiry is unknown
+      Exit;
+    end;
+    if LClaims.Exp <= 0 then
+      Exit;
+    AExpires := UnixToDateTime(LClaims.Exp, False);
+    Result := True;
+  finally
+    LClaims.Free;
+  end;
+end;
+
+function DescribeTokenExpiry(const AToken: string): string;
+var
+  LExpires: TDateTime;
+  LDays: Double;
+begin
+  if AToken.Trim = '' then
+    Exit('');
+  if not TokenExpiry(AToken, LExpires) then
+    Exit('Token expiry not known');
+  LDays := LExpires - Now;
+  if LDays <= 0 then
+    Result := 'Token expired on ' + FormatDateTime('d mmm yyyy hh:nn', LExpires)
+  else if LDays < 1 then
+    Result := Format('Token expires %s (in %d hours)',
+      [FormatDateTime('d mmm yyyy hh:nn', LExpires), Max(1, Trunc(LDays * 24))])
+  else
+    Result := Format('Token expires %s (%d days left)',
+      [FormatDateTime('d mmm yyyy hh:nn', LExpires), Trunc(LDays)]);
+end;
+
+function DownloadSpeedFromKey(const AKey: string): TDownloadSpeed;
+var
+  LSpeed: TDownloadSpeed;
+begin
+  for LSpeed := Low(TDownloadSpeed) to High(TDownloadSpeed) do
+    if SameText(AKey.Trim, DOWNLOAD_SPEED_KEYS[LSpeed]) then
+      Exit(LSpeed);
+  Result := DEFAULT_DOWNLOAD_SPEED;
+end;
 
 { Returns the Neon configuration used for both reading and writing, so the
   two always agree on member names.
@@ -172,6 +362,8 @@ begin
   FDataFolder := DefaultDataFolder;
   FMinFreeSpaceMB := DEFAULT_MIN_FREE_SPACE_MB;
   FTheme := 'Default';
+  FImportWorkers := DEFAULT_IMPORT_WORKERS;
+  FDownloadSpeed := DOWNLOAD_SPEED_KEYS[DEFAULT_DOWNLOAD_SPEED];
 end;
 
 class function TGDEMSettings.DefaultDataFolder: string;
@@ -181,7 +373,7 @@ end;
 
 procedure TGDEMSettings.SetDataFolder(const AValue: string);
 begin
-  FDataFolder := ExcludeTrailingPathDelimiter(Trim(AValue));
+  FDataFolder := NormalizeFolder(AValue);
 end;
 
 procedure TGDEMSettings.SetBearerToken(const AValue: string);

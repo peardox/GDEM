@@ -8,6 +8,8 @@
     @item(the data folder that downloaded tiles are kept in, with a Browse
       button;)
     @item(how much free space downloads must leave on that drive;)
+    @item(how many files an import copies at once, and how fast tiles are
+      downloaded: Slow, Medium or Fast, see @link(TDownloadSpeed);)
     @item(the theme, the program's look; see @link(GDEMThemes).)
   )
 
@@ -34,6 +36,9 @@ uses
   GDEMSettings;
 
 const
+  { The choices offered for how many files an import copies at once. }
+  IMPORT_WORKER_CHOICES: array[0..7] of Integer = (1, 2, 4, 6, 8, 10, 12, 16);
+
   { Page where an Earthdata Login user generates a bearer token. }
   EARTHDATA_TOKEN_URL = 'https://urs.earthdata.nasa.gov';
 
@@ -63,6 +68,8 @@ type
     lblLink: TLabel;
     { Holds the explanatory text and link above the token box. }
     layHelp: TLayout;
+    { When the token entered expires; see @code(DescribeTokenExpiry). }
+    lblTokenExpiry: TLabel;
     { Multi-line box for the bearer token. }
     memToken: TMemo;
     { Holds the data folder and free-space controls. }
@@ -79,6 +86,20 @@ type
     nbMinFree: TNumberBox;
     { Unit shown after @link(nbMinFree). }
     lblMinFreeUnit: TLabel;
+    { Caption for @link(cbImportWorkers). }
+    lblImportWorkers: TLabel;
+    { How many files an import copies at once, one of
+      @link(IMPORT_WORKER_CHOICES). }
+    cbImportWorkers: TComboBox;
+    { Advice shown after @link(cbImportWorkers). }
+    lblImportWorkersHint: TLabel;
+    { Caption for @link(cbDownloadSpeed). }
+    lblDownloadSpeed: TLabel;
+    { How fast tiles are downloaded, in the order of
+      @link(TDownloadSpeed). }
+    cbDownloadSpeed: TComboBox;
+    { Advice shown after @link(cbDownloadSpeed). }
+    lblDownloadSpeedHint: TLabel;
     { Holds the theme controls. }
     layTheme: TLayout;
     { Caption for @link(cbTheme). }
@@ -117,17 +138,43 @@ type
     function GetToken: string;
 
     { The data folder as entered.
-      @returns(The folder, trimmed and without a trailing separator.) }
+      @returns(The folder, tidied by @link(NormalizeFolder).) }
     function GetDataFolder: string;
 
     { Enables @link(btnOK) only when a token and a data folder have been
-      entered. }
+      entered, and shows when the token expires. }
     procedure UpdateOK;
+
+    { Selects the choice in @link(cbImportWorkers) for a number of files.
+      A number that is not one of the choices, perhaps edited into the
+      settings file by hand, selects the largest choice not above it.
+      @param(AWorkers The number of files.) }
+    procedure SetImportWorkers(AWorkers: Integer);
+
+    { The number of files chosen in @link(cbImportWorkers).
+      @returns(One of @link(IMPORT_WORKER_CHOICES).) }
+    function GetImportWorkers: Integer;
+
+    { Selects an entry in a drop-down of numbers: the largest choice not
+      above AValue, or the first if none is.
+      @param(ACombo The drop-down, listing AChoices in order.)
+      @param(AChoices The numbers it lists.)
+      @param(AValue The number to select.) }
+    class procedure SelectChoice(ACombo: TComboBox; const AChoices: array of Integer;
+      AValue: Integer); static;
+
+    { The number chosen in a drop-down of numbers.
+      @param(ACombo The drop-down, listing AChoices in order.)
+      @param(AChoices The numbers it lists.)
+      @param(ADefault The number to return if nothing is chosen.)
+      @returns(The chosen number.) }
+    class function ChosenValue(ACombo: TComboBox; const AChoices: array of Integer;
+      ADefault: Integer): Integer; static;
   public
     { Shows the settings dialog modally for ASettings.
 
-      If the user presses OK, the token, free-space setting and theme are
-      stored in ASettings and saved to disk, and the chosen data folder is passed to
+      If the user presses OK, the token, free-space, import, download speed
+      and theme settings are stored in ASettings and saved to disk, and the chosen data folder is passed to
       AOnClosed. If saving fails, the error is shown and AOnClosed is told
       nothing was saved. The form is freed before AOnClosed is called, so
       AOnClosed may safely open other dialogs.
@@ -149,13 +196,15 @@ implementation
 {$R *.fmx}
 
 uses
-  System.IOUtils, GDEMBrowser, GDEMThemes;
+  System.IOUtils, System.Math, GDEMBrowser, GDEMThemes;
 
 { TfrmSettings }
 
 procedure TfrmSettings.FormCreate(Sender: TObject);
 var
   LTheme: TGDEMTheme;
+  LWorkers: Integer;
+  LSpeed: TDownloadSpeed;
 begin
   lblToken.TextSettings.Font.Style := [TFontStyle.fsBold];
   lblDataFolder.TextSettings.Font.Style := [TFontStyle.fsBold];
@@ -170,6 +219,12 @@ begin
   nbMinFree.Max := MIN_FREE_SPACE_UPPER_MB;
   // Whole megabytes only
   nbMinFree.DecimalDigits := 0;
+  cbImportWorkers.Items.Clear;
+  for LWorkers in IMPORT_WORKER_CHOICES do
+    cbImportWorkers.Items.Add(IntToStr(LWorkers));
+  cbDownloadSpeed.Items.Clear;
+  for LSpeed := Low(TDownloadSpeed) to High(TDownloadSpeed) do
+    cbDownloadSpeed.Items.Add(DOWNLOAD_SPEED_KEYS[LSpeed]);
 end;
 
 function TfrmSettings.GetToken: string;
@@ -179,13 +234,44 @@ end;
 
 function TfrmSettings.GetDataFolder: string;
 begin
-  Result := ExcludeTrailingPathDelimiter(Trim(edtDataFolder.Text));
+  Result := NormalizeFolder(edtDataFolder.Text);
 end;
 
 procedure TfrmSettings.UpdateOK;
 begin
+  lblTokenExpiry.Text := DescribeTokenExpiry(Token);
   btnOK.Enabled := (Token <> '') and (DataFolder <> '') and
     TPath.IsPathRooted(DataFolder);
+end;
+
+class procedure TfrmSettings.SelectChoice(ACombo: TComboBox;
+  const AChoices: array of Integer; AValue: Integer);
+var
+  LIndex: Integer;
+begin
+  ACombo.ItemIndex := 0;
+  for LIndex := 0 to High(AChoices) do
+    if AChoices[LIndex] <= AValue then
+      ACombo.ItemIndex := LIndex;
+end;
+
+class function TfrmSettings.ChosenValue(ACombo: TComboBox;
+  const AChoices: array of Integer; ADefault: Integer): Integer;
+begin
+  if InRange(ACombo.ItemIndex, 0, High(AChoices)) then
+    Result := AChoices[ACombo.ItemIndex]
+  else
+    Result := ADefault;
+end;
+
+procedure TfrmSettings.SetImportWorkers(AWorkers: Integer);
+begin
+  SelectChoice(cbImportWorkers, IMPORT_WORKER_CHOICES, AWorkers);
+end;
+
+function TfrmSettings.GetImportWorkers: Integer;
+begin
+  Result := ChosenValue(cbImportWorkers, IMPORT_WORKER_CHOICES, DEFAULT_IMPORT_WORKERS);
 end;
 
 procedure TfrmSettings.InputChangeTracking(Sender: TObject);
@@ -231,6 +317,8 @@ begin
   LForm.memToken.Text := ASettings.BearerToken;
   LForm.edtDataFolder.Text := ASettings.DataFolder;
   LForm.nbMinFree.Value := ASettings.MinFreeSpaceMB;
+  LForm.SetImportWorkers(ASettings.ImportWorkers);
+  LForm.cbDownloadSpeed.ItemIndex := Ord(DownloadSpeedFromKey(ASettings.DownloadSpeed));
   LForm.cbTheme.ItemIndex := Ord(ThemeFromKey(ASettings.Theme));
   LForm.UpdateOK;
 
@@ -244,6 +332,10 @@ begin
       begin
         ASettings.BearerToken := LForm.Token;
         ASettings.MinFreeSpaceMB := Round(LForm.nbMinFree.Value);
+        ASettings.ImportWorkers := LForm.GetImportWorkers;
+        if LForm.cbDownloadSpeed.ItemIndex >= 0 then
+          ASettings.DownloadSpeed :=
+            DOWNLOAD_SPEED_KEYS[TDownloadSpeed(LForm.cbDownloadSpeed.ItemIndex)];
         if LForm.cbTheme.ItemIndex >= 0 then
           ASettings.Theme := ThemeKey(TGDEMTheme(LForm.cbTheme.ItemIndex));
         try

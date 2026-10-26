@@ -14,7 +14,7 @@
   )
 
   The dialog does no work itself. The caller starts the work on a
-  background task, shows the dialog with @link(TfrmProgress.ShowModal),
+  background task, shows the dialog with @code(ShowModal),
   sends updates through the @code(Set...) methods (on the main thread), and
   calls @link(TfrmProgress.Finish) when the work has stopped. Cancel, the
   Escape key and the window's close button all call

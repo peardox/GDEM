@@ -23,8 +23,8 @@ A tile is named after the **south-west corner** of the area it covers, so
 `N50W002` covers latitudes 50°N to 51°N and longitudes 2°W to 1°W. The
 edge rows and columns overlap the neighbouring tiles.
 
-The world has 360 x 180 = 64,800 possible tiles, but only about 23,000
-exist: there are none over open ocean.
+The world has 360 x 180 = 64,800 possible tiles, but only 22,912 exist:
+there are none over open ocean.
 
 The files are LZW-compressed, tiled (256 x 256), little-endian GeoTIFFs
 with 8 lower-resolution overview images, in the WGS 84 coordinate system.
@@ -37,9 +37,10 @@ The NASA user guide (`ASTGTM_User_Guide_V3.pdf`) has the full details.
    - build the **tile index**, a record of which tiles exist, by listing
      the whole ASTGTM collection; and
    - look up the download links for each tile.
-2. Each file is downloaded from **NASA Earthdata Cloud** using an
-   **Earthdata Login bearer token**. NASA redirects to a pre-signed Amazon
-   S3 link, and the token is sent only to NASA hosts, never to S3.
+2. Each file is requested from **NASA Earthdata Cloud** using an
+   **Earthdata Login bearer token**. NASA answers with a redirect (303) to
+   a short-lived CloudFront download link, which is fetched without the
+   token: the token is sent only to NASA hosts.
 
 The old LP DAAC Data Pool (`e4ftl01.cr.usgs.gov`) stopped serving ASTER
 GDEM on 3 December 2025, so older scripts that use it no longer work.
@@ -54,10 +55,15 @@ GDEM on 3 December 2025, so older scripts that use it no longer work.
   points at `..\delphi-neon\Source`.
 - **A free NASA Earthdata Login account**, from
   <https://urs.earthdata.nasa.gov>, and a **bearer token** generated
-  there. Tokens expire, so a new one is needed from time to time.
+  there. Tokens last 60 days, so a new one is needed from time to time.
+  The token itself records when it expires: Settings shows the date and
+  days left as you paste it, the Debug tab logs it at start-up, and a
+  dialog warns when fewer than 7 days are left. Fetching is refused once
+  it has expired.
 - **Internet access** to:
   - `cmr.earthdata.nasa.gov` (tile index and download links)
-  - `data.lpdaac.earthdatacloud.nasa.gov` (the files)
+  - `data.lpdaac.earthdatacloud.nasa.gov` (the files), which redirects
+    to `*.cloudfront.net` for the download itself
   - `urs.earthdata.nasa.gov` (Earthdata Login)
 - **Platforms:** Windows 32 and 64-bit, Linux 64-bit, and macOS on Intel
   (OSX64) and Apple silicon (OSXARM64). See [Deploying](#deploying) for
@@ -87,7 +93,7 @@ If you already cloned without submodules, run
 
 | Action | Control |
 |--------|---------|
-| Select a block of tiles | Left-drag. A left click selects one tile. To reach beyond the screen, drag towards an edge and the map scrolls that way, or use the mouse wheel to zoom while still dragging. |
+| Select a block of tiles | Left-drag. The size and tile counts update as you drag. A left click selects one tile. To reach beyond the screen, drag towards an edge and the map scrolls that way, or use the mouse wheel to zoom while still dragging. |
 | Move the map | Right-drag, middle-drag, or Shift + left-drag. The map wraps east to west, so you can keep going past 180°, and selections can cross it (for example around Fiji or the Bering Strait). It stops at the poles, since the world does not wrap north to south. |
 | Zoom | Mouse wheel, or the View menu |
 | Show or hide tiles that have data (cyan) | View > Show Available Tiles |
@@ -95,7 +101,8 @@ If you already cloned without submodules, run
 
 The status bar shows the position and tile under the pointer, and whether
 that tile has data. Progress messages and errors appear in the log on the
-**Debug** tab, and serious errors (a failed download or tile index build,
+**Debug** tab (the file-by-file detail of downloads goes to a
+[report file](#how-downloads-work) instead), and serious errors (a failed download or tile index build,
 unreadable settings, a missing world map) are also shown in a dialog. The
 **3D** tab is reserved for a later stage.
 
@@ -103,17 +110,87 @@ unreadable settings, a missing world map) are also shown in a dialog. The
 
 | Menu | Item | Does |
 |------|------|------|
-| File | Settings... | Bearer token, data folder, free-space reserve, theme |
+| File | Settings... | Bearer token, data folder, free-space reserve, files copied at once when importing, download speed, theme |
 | File | Refresh Tile Index | Rebuilds the list of tiles that exist, from CMR |
 | Data | Import Existing Tiles... | Copies tiles you already have, from any folder, into the data folder. The originals are not changed. |
 | Data | Rescan Data Folder | Rebuilds the downloaded-tiles bitmap from the files, files any misplaced downloads into place, and removes leftovers and empty folders |
 | Data | Delete Selected Downloads... | Deletes the downloaded tiles inside the map selection |
 | View | Zoom In / Zoom Out / Whole World / Zoom to Selection | Map view |
+| View | Copy Log / Clear Log | Copy the Debug tab's log to the clipboard, or empty it |
 
 **Fetch selection** downloads only tiles that have data and are not yet
 downloaded. Free space is checked before every tile, and downloading stops
 rather than go below the reserve set in Settings (2 GB by default). The
 **Cancel** button stops whatever job is running.
+
+#### How downloads work
+
+1. Tiles already in the data folder are skipped.
+2. NASA CMR is asked where the rest are, up to 100 tiles in each request,
+   rather than once per tile. Tiles with no data (ocean) are left out.
+3. The tiles are downloaded, several files at once. A single download
+   uses only a small part of a fast connection, so more at once is much
+   faster. On a 1 Gbit/s line in the UK, 1 at a time gave about 3 MB/s,
+   12 about 26 MB/s and 16 about 56 MB/s (100 tiles, 2.1 GB in 38 s; the
+   whole world would take about 2 hours at that rate).
+
+**Download speed** in Settings sets how hard GDEMFetch pushes:
+
+| Speed | Starts at | At most | Suits |
+|-------|-----------|---------|-------|
+| Slow | 1 | 4 | A slow or shared connection |
+| Medium (default) | 2 | 8 | Most connections |
+| Fast | 4 | 16 | A fast connection |
+
+NASA does not publish a speed limit. When it has had enough it cuts off or
+refuses downloads, or answers "Too Many Requests". GDEMFetch copes with
+this:
+
+- **Feeling its way.** All downloads in a batch share one limit, which
+  works the way TCP shares a network: additive increase, multiplicative
+  decrease. It starts at the speed's starting number, and until NASA
+  objects each good file allows one more at once, up to the speed's most.
+  If downloads are cut off or refused three times within 30 seconds, the
+  number at once is halved (down to 1) and everything pauses for 5
+  seconds. After that it climbs back carefully: one more after 20 good
+  files in a row and a minute without trouble. "Too Many Requests" pauses
+  everything for as long as NASA asks. Reaching the most, and every cut or
+  raise after a cut, is logged, and the summary says if it had to cut
+  back.
+- **Resuming.** A file cut off part-way carries on from where it stopped,
+  rather than starting again, and such a try is not counted as a failure.
+- **Retrying.** Other passing problems are tried three times. A tile that
+  still fails is listed on the Debug tab and skipped, and a dialog at the
+  end says how many; fetching the same selection again retries them.
+
+A batch only stops early if the bearer token is rejected, free space runs
+low, the data folder disappears, or 10 tiles in a row have failed. Failures
+with good tiles in between only skip those tiles, so one bad patch in a
+long batch does not end it.
+
+**Report file.** Each batch writes everything (every request, redirect
+and saved file, with times) to a report file, so the Debug tab stays
+short: it shows the report's path, the lookup, the start, any failures or
+cut-backs, and the summary. Reports are kept in a `Reports` folder beside
+the settings file, named by when the batch started (such as
+`download-20261026-231500.log`), and only the newest 50 are kept. The file
+is written as the batch goes, so it is complete up to the moment even if
+the program stops.
+
+**Staying awake.** While any job runs, GDEMFetch asks the system not to
+sleep: `SetThreadExecutionState` on Windows, an `NSProcessInfo` activity on
+macOS (which also keeps App Nap from slowing it down when the window is
+hidden), and `systemd-inhibit` on Linux where it is installed. The screen
+may still turn off. The request ends with the job, or with the program if
+it closes or crashes.
+
+Downloading the same tiles again and again in a short time (deleting and
+re-fetching them while testing, say) seems to make NASA cut connections
+off much sooner. Test on a different area each time.
+
+The summary at the end gives the size saved, the time taken, the speed
+and the most downloads at once reached, for example: `Downloaded 100
+tile(s), 2.1 GB, in 38 s at 56 MB/s, up to 16 at a time; ...`.
 
 Whenever data is downloaded (tiles, or the tile index from NASA CMR) a
 progress dialog shows the step in progress, overall progress, and progress
@@ -167,7 +244,9 @@ anything in the app's `Resources/StartUp` folder is copied out to the
 user's folders by `System.StartUpCopy`. If the Deployment Manager ever
 shows them ticked again, untick them.
 
-**Windows:** the executable on its own.
+**Windows:** the executable on its own. Its icon, `GDEMFetch/gdem.ico`
+(16 to 256 pixels), is compiled into it, set as the project's main icon
+for both Windows targets.
 
 **macOS:** deployed as an app bundle through PAServer.
 - The bundle identifier is `com.peardox.GDEMFetch`.
@@ -199,6 +278,7 @@ Removable drives are normally mounted under `/media/<user>/` or
 |------|-------|
 | Settings (`settings.json`, holds the bearer token) | Windows: `%APPDATA%\GDEM`<br>macOS: `~/Library/Application Support/GDEM`<br>Linux: `$XDG_CONFIG_HOME/GDEM` or `~/.config/GDEM`<br>Android and iOS: `GDEM` in the app's documents folder |
 | Tile index (`tileindex.bin`) | Same folder as the settings |
+| Download reports (`Reports/download-*.log`) | Same folder as the settings |
 | Downloaded tiles | The **data folder**, chosen in File > Settings. Default: `ASTGTM` in your documents folder. |
 
 On macOS and Linux `settings.json` is readable by its owner only, because
@@ -263,12 +343,27 @@ Existing Tiles...** and choose that folder.
   takes its real name, so a cancelled import leaves no partial tiles.
   Files the data folder already has are skipped, so an import can be
   cancelled and run again to finish.
+- Files are copied one at a time by default. On SSDs, choosing a higher
+  number (2, 4, 6, 8, 10, 12 or 16) for **Files copied at once when
+  importing** in Settings can be several times faster, because the time
+  each file takes to open, flush, check and rename then overlaps. Keep it at 1 for a spinning hard disk, where
+  several files at once make the heads jump between them.
 - A progress dialog shows the file being copied, how many files have been
   dealt with, and how much has been copied out of the total, with the
   copying speed and an estimate of the time left. Its Cancel button stops
   the import after the file in progress.
+- A file that cannot be copied is tried three times, which rides out
+  brief problems such as a virus scanner still holding the new file or the
+  drive resetting for a moment. If it still fails it is listed on the
+  Debug tab and skipped, and the import carries on; a dialog at the end
+  says how many were skipped, and running the import again retries them.
+  The import only stops early if free space runs low, the data folder
+  disappears (a removable drive unplugged), or 20 files have failed.
 - When it finishes (or is cancelled) the data folder is rescanned and the
   map shows the imported tiles in green.
+- External SSDs often slow down late in a long import: their fast write
+  cache fills, or the enclosure gets hot and throttles. That is the drive,
+  not the program.
 - The source folder must not be inside the data folder, or contain it.
 
 ## Repository layout
@@ -280,6 +375,8 @@ Existing Tiles...** and choose that folder.
 | `styles/` | FMX styles for the themes, with the resource script and the pre-build script that builds them; see [Themes](#themes) |
 | `maps/` | World map images. `world_1080x540.jpg` is linked into GDEMFetch as a resource. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository. |
 | `delphi-neon/` | Neon JSON library (git submodule) |
+| `tools/pasdoc_check.py` | Checks the units follow the PasDoc rules; see [Notes for Claude](#notes-for-claude) |
+| `CLAUDE.md` | Handover notes: the project's current state, test results and lessons learned, for picking the work up in a new conversation |
 | `docs/` | Ignored for development |
 | `models/` | Ignored for development |
 
@@ -299,6 +396,8 @@ Existing Tiles...** and choose that folder.
 | `GDEMTiles` | Tile names and `TTileRect`, a block of tiles; no FMX |
 | `GDEMTileIndex` | `TTileIndex` bitmap of which tiles exist, and its CMR builder |
 | `GDEMCMR` | Neon models for CMR search results; no networking |
+| `GDEMReport` | `TDownloadReport`, the report file for each batch of downloads |
+| `GDEMAwake` | `TKeepAwake`, which keeps the computer from sleeping while a job runs |
 | `GDEMDownloader` | Finds and downloads tiles |
 | `GDEMStore` | The data folder: block layout, downloaded-tiles bitmap, rescanning, moving, deleting, free space |
 | `GDEMCancel` | `TCancelToken`, shared by the Cancel button and background jobs |
@@ -324,7 +423,8 @@ longitude -180 at the left and latitude 90 at the top.
 ## Notes for Claude
 
 These are the working rules for this project. Read this whole README
-before starting work.
+before starting work, then `CLAUDE.md`, which records where the work has
+got to, what has been tested and what was learned along the way.
 
 ### Delivering work
 
@@ -360,6 +460,17 @@ before starting work.
   every unit, type, field (private ones included), method, property and
   constant, using `@abstract`, `@param`, `@returns`, `@raises` and
   `@link`.
+  - The comment goes immediately before the item. Attributes such as
+    `[NeonProperty('...')]` may sit between them; PasDoc skips them.
+  - `@link` only to items declared in this project. Inherited or library
+    items (`ShowModal`, `TThread`) are written with `@code` instead, as
+    PasDoc cannot resolve them.
+  - Things declared only in an implementation section are not in the
+    generated docs, but are documented anyway.
+  - Before delivering, run `python3 tools/pasdoc_check.py GDEMFetch`. It
+    reports undocumented interface items, `@link` targets that do not
+    exist and unbalanced `@tag(...)` brackets, and prints
+    `No problems found` when all is well.
 - **Source files are ASCII only.** Delphi reads files without a byte
   order mark as ANSI, so write characters such as the degree sign as
   character codes (`#$00B0`).
@@ -407,10 +518,28 @@ before starting work.
   the bearer token only to `*.earthdata.nasa.gov` and
   `*.earthdatacloud.nasa.gov`.
 - All access to downloaded files goes through `TGDEMStore`; never build
-  data-folder paths by hand. The folder may be missing (an unplugged
+  data-folder paths by hand.
+- Tidy folder paths from the user with `NormalizeFolder` (in
+  `GDEMSettings`), never `ExcludeTrailingPathDelimiter` alone: that turns
+  the drive root `F:\` into `F:`, which Windows reads as the current
+  folder on drive F.
+- When several threads may create the same folder, create it under a lock:
+  `ForceDirectories` gives up without making the folder if another thread
+  wins the race to create its parent. The folder may be missing (an unplugged
   drive), so check it with `WithStore` before use.
 - Work on the data folder runs as a job through `TfrmMain.RunJob`, one at
-  a time, cancellable with a `TCancelToken`.
+  a time, cancellable with a `TCancelToken`. `RunJob` also keeps the
+  computer awake (`TKeepAwake`) for as long as the job runs.
+- A batch that produces a line per file (downloads) writes that detail to
+  a `TDownloadReport`, and sends only the start, problems and summary to
+  the Debug tab, which would otherwise grow too large to use.
+- Calls into the Objective-C runtime on macOS go through `objc_msgSend`
+  declared with the exact argument types of each call (see
+  `GDEMTitleBar` and `GDEMAwake`); Apple silicon requires it, so never
+  call it through a variadic declaration.
+- FMX lays out controls with the same `Align` (all `Bottom`, say) in the
+  order of their positions. When resizing one in a `.fmx`, adjust the
+  positions of its neighbours to match, or they change order.
 - Anonymous methods capture variables, not values. When queuing work from
   inside a loop, pass the loop's values to a method as parameters (as
   `QueueMarkDownloaded` does) rather than capturing the loop variables.

@@ -102,6 +102,8 @@ type
     FScrollTimer: TTimer;
     { Backing field for @link(OnSelectionChanged). }
     FOnSelectionChanged: TNotifyEvent;
+    { Backing field for @link(OnSelectionChanging). }
+    FOnSelectionChanging: TNotifyEvent;
     { Backing field for @link(OnHover). }
     FOnHover: TMapHoverEvent;
     { Backing field for @link(TileIndex). Not owned. }
@@ -213,7 +215,8 @@ type
     procedure DoHover(const APoint: TPointF);
 
     { Recalculates the selection being dragged from the anchor and the
-      current pointer position. }
+      current pointer position, firing @link(OnSelectionChanging) if it now
+      covers different tiles. }
     procedure UpdateDragSelection;
 
     { How far to move the map for one auto-scroll step, given where the
@@ -339,6 +342,13 @@ type
 
     { Fired when a selection drag finishes or the selection is cleared. }
     property OnSelectionChanged: TNotifyEvent read FOnSelectionChanged write FOnSelectionChanged;
+
+    { Fired during a selection drag each time the selection grows or
+      shrinks to cover different tiles, including when the map scrolls by
+      itself at an edge or is zoomed mid-drag. Fired often, so a handler
+      should be quick; @link(OnSelectionChanged) still fires when the drag
+      ends. }
+    property OnSelectionChanging: TNotifyEvent read FOnSelectionChanging write FOnSelectionChanging;
 
     { Fired as the pointer moves over the control. }
     property OnHover: TMapHoverEvent read FOnHover write FOnHover;
@@ -873,9 +883,16 @@ end;
 procedure TWorldMapView.UpdateDragSelection;
 var
   LLat, LLon: Double;
+  LOld: TTileRect;
 begin
+  LOld := FSelection;
   ScreenToGeoClamped(FMousePos, LLat, LLon);
   FSelection := TTileRect.FromPoints(FAnchorLon, FAnchorLat, LLon, LLat);
+  // Only when the tiles covered change, not on every pixel of movement
+  if Assigned(FOnSelectionChanging) and
+     ((FSelection.West <> LOld.West) or (FSelection.South <> LOld.South) or
+      (FSelection.East <> LOld.East) or (FSelection.North <> LOld.North)) then
+    FOnSelectionChanging(Self);
 end;
 
 function TWorldMapView.EdgeScrollStep: TPointF;
@@ -949,6 +966,8 @@ begin
     FDragMode := mdSelect;
     ScreenToGeoClamped(FMousePos, FAnchorLat, FAnchorLon);
     FSelection := TTileRect.FromPoints(FAnchorLon, FAnchorLat, FAnchorLon, FAnchorLat);
+    if Assigned(FOnSelectionChanging) then
+      FOnSelectionChanging(Self);
   end
   else
   begin

@@ -80,6 +80,17 @@ object frmMain: TfrmMain
         Text = 'Show Downloaded Tiles'
         OnClick = mnuShowDownloadedClick
       end
+      object mnuLogSep: TMenuItem
+        Text = '-'
+      end
+      object mnuCopyLog: TMenuItem
+        Text = 'Copy Log'
+        OnClick = mnuCopyLogClick
+      end
+      object mnuClearLog: TMenuItem
+        Text = 'Clear Log'
+        OnClick = mnuClearLogClick
+      end
     end
   end
   object tmrStorage: TTimer

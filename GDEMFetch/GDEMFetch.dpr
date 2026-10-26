@@ -21,6 +21,10 @@
       the program its chosen look.)
     @item(@link(GDEMCMR) models and parses NASA CMR search results with the
       Neon JSON library.)
+    @item(@link(GDEMReport) writes the full record of each batch of
+      downloads to a report file.)
+    @item(@link(GDEMAwake) keeps the computer from sleeping while a job
+      runs.)
   ) }
 program GDEMFetch;
 
@@ -41,7 +45,9 @@ uses
   ProgressForm in 'ProgressForm.pas' {frmProgress},
   GDEMStyles in 'GDEMStyles.pas',
   GDEMTitleBar in 'GDEMTitleBar.pas',
-  GDEMThemes in 'GDEMThemes.pas';
+  GDEMThemes in 'GDEMThemes.pas',
+  GDEMReport in 'GDEMReport.pas',
+  GDEMAwake in 'GDEMAwake.pas';
 
 {$R *.res}
 { The world map image, built from the RcItem in the project file. }

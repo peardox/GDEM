@@ -101,6 +101,14 @@ type
     { All links attached to the granule. }
     [NeonProperty('links')]
     Links: TCMRLinkArray;
+
+    { Lists this granule's https links whose file names end with one of the
+      given suffixes. Matching is case-insensitive; the result is sorted
+      and has no duplicates.
+      @param(ASuffixes File name endings to accept, for example
+        @code(['_dem.tif', '_num.tif']).)
+      @returns(The matching URLs; empty if none match.) }
+    function DataFileURLs(const ASuffixes: array of string): TArray<string>;
   end;
 
   { Dynamic array of @link(TCMRGranule). }
@@ -137,6 +145,16 @@ type
       @returns(The search URL.) }
     class function CollectionURL(APageSize: Integer = CMR_MAX_PAGE_SIZE): string; static;
 
+    { Builds the URL that searches CMR for several ASTER GDEM V3 granules at
+      once, by name. Each name gets a trailing wildcard, as in
+      @link(SearchURL).
+      @param(AGranules Granule names such as @code(ASTGTMV003_N50W002).
+        Keep to about 100 per call, so the URL stays well under the length
+        CMR accepts.)
+      @returns(The search URL, asking for up to @link(CMR_MAX_PAGE_SIZE)
+        results.) }
+    class function NamesURL(const AGranules: array of string): string; static;
+
     { Deserialises a CMR granule search response.
 
       @param(AJSON The response body as returned by
@@ -165,6 +183,36 @@ uses
   System.Generics.Collections, System.NetEncoding,
   Neon.Core.Types, Neon.Core.Persistence, Neon.Core.Persistence.JSON;
 
+{ TCMRGranule }
+
+function TCMRGranule.DataFileURLs(const ASuffixes: array of string): TArray<string>;
+var
+  LFound: TList<string>;
+  LLink: TCMRLink;
+  LLower, LSuffix: string;
+begin
+  LFound := TList<string>.Create;
+  try
+    for LLink in Links do
+    begin
+      LLower := LowerCase(LLink.Href);
+      if not LLower.StartsWith('https://') then
+        Continue;
+      for LSuffix in ASuffixes do
+        if LLower.EndsWith(LowerCase(LSuffix)) then
+        begin
+          if not LFound.Contains(LLink.Href) then
+            LFound.Add(LLink.Href);
+          Break;
+        end;
+    end;
+    LFound.Sort;
+    Result := LFound.ToArray;
+  finally
+    LFound.Free;
+  end;
+end;
+
 { TCMRGranuleSearch }
 
 class function TCMRGranuleSearch.SearchURL(const AGranule: string): string;
@@ -175,6 +223,20 @@ begin
     '&page_size=20' +
     '&options%5Breadable_granule_name%5D%5Bpattern%5D=true' +
     '&readable_granule_name=' + TNetEncoding.URL.Encode(AGranule) + '*';
+end;
+
+class function TCMRGranuleSearch.NamesURL(const AGranules: array of string): string;
+var
+  LGranule: string;
+begin
+  Result := CMR_GRANULE_SEARCH_URL +
+    '?short_name=' + ASTGTM_SHORT_NAME +
+    '&version=' + ASTGTM_VERSION +
+    '&page_size=' + IntToStr(CMR_MAX_PAGE_SIZE) +
+    '&options%5Breadable_granule_name%5D%5Bpattern%5D=true';
+  for LGranule in AGranules do
+    Result := Result + '&readable_granule_name%5B%5D=' +
+      TNetEncoding.URL.Encode(LGranule) + '*';
 end;
 
 class function TCMRGranuleSearch.CollectionURL(APageSize: Integer): string;

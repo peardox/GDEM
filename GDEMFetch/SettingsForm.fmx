@@ -3,7 +3,7 @@ object frmSettings: TfrmSettings
   Top = 0
   BorderIcons = [biSystemMenu]
   Caption = 'Settings'
-  ClientHeight = 488
+  ClientHeight = 552
   ClientWidth = 560
   Position = MainFormCenter
   FormFactor.Width = 320
@@ -23,6 +23,18 @@ object frmSettings: TfrmSettings
     Size.Height = 20.000000000000000000
     Size.PlatformDefault = False
     Text = 'Earthdata Login bearer token'
+    object lblTokenExpiry: TLabel
+      Align = Right
+      StyledSettings = [Family, Style, FontColor]
+      Position.X = 236.000000000000000000
+      Size.Width = 300.000000000000000000
+      Size.Height = 20.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.Font.Size = 11.000000000000000000
+      TextSettings.HorzAlign = Trailing
+      TextSettings.WordWrap = False
+      TextSettings.Trimming = Character
+    end
   end
   object layHelp: TLayout
     Align = Top
@@ -65,17 +77,16 @@ object frmSettings: TfrmSettings
     Margins.Right = 12.000000000000000000
     Margins.Bottom = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 392.000000000000000000
+    Position.Y = 504.000000000000000000
     Size.Width = 536.000000000000000000
     Size.Height = 36.000000000000000000
     Size.PlatformDefault = False
     TabOrder = 3
     object btnCancel: TButton
-      Align = Right
+      Align = Left
       Cancel = True
       ModalResult = 2
       Margins.Top = 4.000000000000000000
-      Position.X = 456.000000000000000000
       Position.Y = 4.000000000000000000
       Size.Width = 80.000000000000000000
       Size.Height = 32.000000000000000000
@@ -88,8 +99,7 @@ object frmSettings: TfrmSettings
       Default = True
       ModalResult = 1
       Margins.Top = 4.000000000000000000
-      Margins.Right = 8.000000000000000000
-      Position.X = 368.000000000000000000
+      Position.X = 456.000000000000000000
       Position.Y = 4.000000000000000000
       Size.Width = 80.000000000000000000
       Size.Height = 32.000000000000000000
@@ -104,7 +114,7 @@ object frmSettings: TfrmSettings
     Margins.Left = 12.000000000000000000
     Margins.Right = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 372.000000000000000000
+    Position.Y = 484.000000000000000000
     Size.Width = 536.000000000000000000
     Size.Height = 20.000000000000000000
     Size.PlatformDefault = False
@@ -119,9 +129,9 @@ object frmSettings: TfrmSettings
     Margins.Top = 8.000000000000000000
     Margins.Right = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 272.000000000000000000
+    Position.Y = 324.000000000000000000
     Size.Width = 536.000000000000000000
-    Size.Height = 96.000000000000000000
+    Size.Height = 160.000000000000000000
     Size.PlatformDefault = False
     TabOrder = 2
     object lblDataFolder: TLabel
@@ -178,6 +188,60 @@ object frmSettings: TfrmSettings
       Size.PlatformDefault = False
       Text = 'MB'
     end
+    object lblImportWorkers: TLabel
+      Position.Y = 98.000000000000000000
+      Size.Width = 200.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Files copied at once when importing:'
+    end
+    object cbImportWorkers: TComboBox
+      TabOrder = 3
+      Position.X = 208.000000000000000000
+      Position.Y = 97.000000000000000000
+      Size.Width = 100.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+    end
+    object lblImportWorkersHint: TLabel
+      Anchors = [akLeft, akTop, akRight]
+      StyledSettings = [Family, Style, FontColor]
+      Position.X = 316.000000000000000000
+      Position.Y = 98.000000000000000000
+      Size.Width = 220.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.Font.Size = 11.000000000000000000
+      TextSettings.Trimming = Character
+      Text = '1 for hard disks; try 4 for SSDs'
+    end
+    object lblDownloadSpeed: TLabel
+      Position.Y = 130.000000000000000000
+      Size.Width = 200.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Download speed:'
+    end
+    object cbDownloadSpeed: TComboBox
+      TabOrder = 4
+      Position.X = 208.000000000000000000
+      Position.Y = 129.000000000000000000
+      Size.Width = 100.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+    end
+    object lblDownloadSpeedHint: TLabel
+      Anchors = [akLeft, akTop, akRight]
+      StyledSettings = [Family, Style, FontColor]
+      Position.X = 316.000000000000000000
+      Position.Y = 130.000000000000000000
+      Size.Width = 220.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.Font.Size = 11.000000000000000000
+      TextSettings.Trimming = Character
+      Text = 'Fast suits fast lines; eases off if NASA objects'
+    end
   end
   object layTheme: TLayout
     Align = Bottom
@@ -185,7 +249,7 @@ object frmSettings: TfrmSettings
     Margins.Top = 8.000000000000000000
     Margins.Right = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 232.000000000000000000
+    Position.Y = 276.000000000000000000
     Size.Width = 536.000000000000000000
     Size.Height = 40.000000000000000000
     Size.PlatformDefault = False
