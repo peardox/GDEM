@@ -34,15 +34,6 @@
             <RemoteCommand/>
             <Overwrite>True</Overwrite>
         </DeployFile>
-        <DeployFile Include="..\styles\buildstyles.cmd" Condition="'$(Config)'=='Debug'">
-            <RemoteDir>GDEMFetch.app\Contents\Resources\StartUp\</RemoteDir>
-            <RemoteName>buildstyles.cmd</RemoteName>
-            <DeployClass>ProjectFile</DeployClass>
-            <Operation>0</Operation>
-            <LocalCommand/>
-            <RemoteCommand/>
-            <Overwrite>True</Overwrite>
-        </DeployFile>
         <DeployFile Include="OSXARM64\Debug\GDEMFetch" Condition="'$(Config)'=='Debug'">
             <RemoteDir>GDEMFetch.app\Contents\MacOS\</RemoteDir>
             <RemoteName>GDEMFetch</RemoteName>
@@ -52,15 +43,6 @@
             <RemoteCommand/>
             <Overwrite>True</Overwrite>
             <Required>True</Required>
-        </DeployFile>
-        <DeployFile Include="..\maps\world_1080x540.jpg" Condition="'$(Config)'=='Debug'">
-            <RemoteDir>GDEMFetch.app\Contents\Resources\StartUp\</RemoteDir>
-            <RemoteName>world_1080x540.jpg</RemoteName>
-            <DeployClass>ProjectFile</DeployClass>
-            <Operation>0</Operation>
-            <LocalCommand/>
-            <RemoteCommand/>
-            <Overwrite>True</Overwrite>
         </DeployFile>
         <DeployFile Include="OSXARM64\Debug\GDEMFetch.entitlements" Condition="'$(Config)'=='Debug'">
             <RemoteDir>GDEMFetch.app\..\</RemoteDir>

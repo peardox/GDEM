@@ -159,6 +159,14 @@ macOS and Linux alike, and everything else (settings, the tile index, the
 data folder) is created at run time. The default Deployment Manager
 entries are all that is needed.
 
+The IDE adds files that are part of the project, such as the map image
+and `styles/buildstyles.cmd`, to the deployment on its own. These are
+disabled in `GDEMFetch.dproj` for every platform: the map is already
+inside the program, the script only runs at build time, and on macOS
+anything in the app's `Resources/StartUp` folder is copied out to the
+user's folders by `System.StartUpCopy`. If the Deployment Manager ever
+shows them ticked again, untick them.
+
 **Windows:** the executable on its own.
 
 **macOS:** deployed as an app bundle through PAServer.
@@ -361,6 +369,10 @@ before starting work.
   has to be deployed beside it. If a file ever cannot be a resource, add
   Deployment entries for every platform and say so in
   [Deploying](#deploying).
+- When adding a file to the project (an `RcItem`, or a `None` item such as
+  a script), disable its entry for every platform in the `.dproj`'s
+  Deployment section (`<Enabled>false</Enabled>`), as is done for the map
+  and `buildstyles.cmd`; the IDE otherwise deploys it.
 - On macOS, every privacy-sensitive location the program touches needs a
   usage description in the Version Info keys; keep them accurate.
 - Naming: fields `F`, parameters `A`, locals `L`; non-visual units
