@@ -1,0 +1,50 @@
+{
+  "format": 1,
+  "name": "8081_earthmap10k",
+  "source": "8081_earthmap10k.jpg",
+  "sourceWidth": 10800,
+  "sourceHeight": 5400,
+  "tileSize": 225,
+  "imageFormat": "jpg",
+  "quality": 90,
+  "resampling": "lanczos3, linear light",
+  "projection": "equirectangular",
+  "bounds": {
+    "west": -180.0,
+    "north": 90.0,
+    "east": 180.0,
+    "south": -90.0
+  },
+  "levels": [
+    {
+      "width": 10800,
+      "height": 5400,
+      "columns": 48,
+      "rows": 24,
+      "folder": "10800x5400"
+    },
+    {
+      "width": 5400,
+      "height": 2700,
+      "columns": 24,
+      "rows": 12,
+      "folder": "5400x2700"
+    },
+    {
+      "width": 2700,
+      "height": 1350,
+      "columns": 12,
+      "rows": 6,
+      "folder": "2700x1350"
+    },
+    {
+      "width": 1350,
+      "height": 675,
+      "columns": 6,
+      "rows": 3,
+      "folder": "1350x675"
+    }
+  ],
+  "generator": "TileMaker",
+  "created": "2026-10-27T14:48:16.231Z"
+}

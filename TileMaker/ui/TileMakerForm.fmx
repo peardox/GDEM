@@ -1,0 +1,236 @@
+object frmTileMaker: TfrmTileMaker
+  Left = 0
+  Top = 0
+  Caption = 'TileMaker'
+  ClientHeight = 720
+  ClientWidth = 1100
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [Desktop]
+  OnCreate = FormCreate
+  OnCloseQuery = FormCloseQuery
+  DesignerMasterStyle = 0
+  object mnuMain: TMainMenu
+    Left = 24
+    Top = 24
+    object mnuFile: TMenuItem
+      Text = 'File'
+      object mnuOpen: TMenuItem
+        Text = 'Open...'
+        OnClick = mnuOpenClick
+      end
+      object mnuSaveAs: TMenuItem
+        Text = 'Save As...'
+        OnClick = mnuSaveAsClick
+      end
+      object mnuFileSep: TMenuItem
+        Text = '-'
+      end
+      object mnuExit: TMenuItem
+        Text = 'Exit'
+        OnClick = mnuExitClick
+      end
+    end
+  end
+  object layProgress: TLayout
+    Align = Bottom
+    Margins.Left = 8.000000000000000000
+    Margins.Right = 8.000000000000000000
+    Margins.Bottom = 4.000000000000000000
+    Position.X = 8.000000000000000000
+    Position.Y = 684.000000000000000000
+    Size.Width = 1084.000000000000000000
+    Size.Height = 32.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 2
+    object lblProgress: TLabel
+      Align = Left
+      Size.Width = 420.000000000000000000
+      Size.Height = 32.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.Trimming = Character
+    end
+    object pbProgress: TProgressBar
+      Align = Client
+      Margins.Left = 8.000000000000000000
+      Margins.Top = 9.000000000000000000
+      Margins.Right = 8.000000000000000000
+      Margins.Bottom = 9.000000000000000000
+      Orientation = Horizontal
+      Size.Width = 556.000000000000000000
+      Size.Height = 14.000000000000000000
+      Size.PlatformDefault = False
+    end
+    object btnCancel: TButton
+      Align = Right
+      Margins.Top = 3.000000000000000000
+      Margins.Bottom = 3.000000000000000000
+      Position.X = 1004.000000000000000000
+      Position.Y = 3.000000000000000000
+      Size.Width = 80.000000000000000000
+      Size.Height = 26.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 0
+      Text = 'Cancel'
+      OnClick = btnCancelClick
+    end
+  end
+  object memLog: TMemo
+    Touch.InteractiveGestures = [Pan, LongTap, DoubleTap]
+    DataDetectorTypes = []
+    ReadOnly = True
+    Align = Bottom
+    Margins.Left = 8.000000000000000000
+    Margins.Top = 4.000000000000000000
+    Margins.Right = 8.000000000000000000
+    Position.X = 8.000000000000000000
+    Position.Y = 560.000000000000000000
+    Size.Width = 1084.000000000000000000
+    Size.Height = 120.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 1
+  end
+  object layRight: TLayout
+    Align = Right
+    Margins.Left = 8.000000000000000000
+    Margins.Top = 8.000000000000000000
+    Margins.Right = 8.000000000000000000
+    Position.X = 752.000000000000000000
+    Position.Y = 8.000000000000000000
+    Size.Width = 340.000000000000000000
+    Size.Height = 548.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 0
+    object lblSource: TLabel
+      Align = Top
+      StyledSettings = [Family, Size, FontColor]
+      Size.Width = 340.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.Trimming = Character
+      Text = 'No image open'
+    end
+    object layOptions: TLayout
+      Align = Top
+      Position.Y = 24.000000000000000000
+      Size.Width = 340.000000000000000000
+      Size.Height = 200.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 0
+      object lblTileSize: TLabel
+        Position.Y = 8.000000000000000000
+        Size.Width = 150.000000000000000000
+        Size.Height = 22.000000000000000000
+        Size.PlatformDefault = False
+        Text = 'Tile size (pixels)'
+      end
+      object cbTileSize: TComboBox
+        Position.X = 160.000000000000000000
+        Position.Y = 7.000000000000000000
+        Size.Width = 170.000000000000000000
+        Size.Height = 24.000000000000000000
+        Size.PlatformDefault = False
+        TabOrder = 0
+        OnChange = OptionChange
+      end
+      object lblCoarsest: TLabel
+        Position.Y = 40.000000000000000000
+        Size.Width = 150.000000000000000000
+        Size.Height = 22.000000000000000000
+        Size.PlatformDefault = False
+        Text = 'Smallest level width at most'
+      end
+      object nbCoarsest: TNumberBox
+        Touch.InteractiveGestures = [LongTap, DoubleTap]
+        TabOrder = 1
+        Cursor = crIBeam
+        Position.X = 160.000000000000000000
+        Position.Y = 39.000000000000000000
+        Size.Width = 100.000000000000000000
+        Size.Height = 24.000000000000000000
+        Size.PlatformDefault = False
+        OnChange = nbCoarsestChange
+      end
+      object lblFormat: TLabel
+        Position.Y = 72.000000000000000000
+        Size.Width = 150.000000000000000000
+        Size.Height = 22.000000000000000000
+        Size.PlatformDefault = False
+        Text = 'Tile format'
+      end
+      object cbFormat: TComboBox
+        Position.X = 160.000000000000000000
+        Position.Y = 71.000000000000000000
+        Size.Width = 100.000000000000000000
+        Size.Height = 24.000000000000000000
+        Size.PlatformDefault = False
+        TabOrder = 2
+        OnChange = OptionChange
+      end
+      object lblQuality: TLabel
+        Position.Y = 104.000000000000000000
+        Size.Width = 150.000000000000000000
+        Size.Height = 22.000000000000000000
+        Size.PlatformDefault = False
+        Text = 'Quality (1 to 100)'
+      end
+      object nbQuality: TNumberBox
+        Touch.InteractiveGestures = [LongTap, DoubleTap]
+        TabOrder = 3
+        Cursor = crIBeam
+        Position.X = 160.000000000000000000
+        Position.Y = 103.000000000000000000
+        Size.Width = 100.000000000000000000
+        Size.Height = 24.000000000000000000
+        Size.PlatformDefault = False
+        OnChange = OptionChange
+      end
+      object chkWorld: TCheckBox
+        Position.Y = 136.000000000000000000
+        Size.Width = 330.000000000000000000
+        Size.Height = 22.000000000000000000
+        Size.PlatformDefault = False
+        TabOrder = 4
+        Text = 'Whole-world map (wraps east to west)'
+        OnChange = OptionChange
+      end
+      object lblGridLevel: TLabel
+        Position.Y = 168.000000000000000000
+        Size.Width = 150.000000000000000000
+        Size.Height = 22.000000000000000000
+        Size.PlatformDefault = False
+        Text = 'Show the tiles of'
+      end
+      object cbGridLevel: TComboBox
+        Position.X = 160.000000000000000000
+        Position.Y = 167.000000000000000000
+        Size.Width = 170.000000000000000000
+        Size.Height = 24.000000000000000000
+        Size.PlatformDefault = False
+        TabOrder = 5
+        OnChange = cbGridLevelChange
+      end
+    end
+    object memPlan: TMemo
+      Touch.InteractiveGestures = [Pan, LongTap, DoubleTap]
+      DataDetectorTypes = []
+      ReadOnly = True
+      TextSettings.WordWrap = True
+      Align = Client
+      Margins.Top = 8.000000000000000000
+      Size.Width = 340.000000000000000000
+      Size.Height = 316.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 1
+    end
+  end
+  object pbPreview: TSkPaintBox
+    Align = Client
+    Margins.Left = 8.000000000000000000
+    Margins.Top = 8.000000000000000000
+    Size.Width = 736.000000000000000000
+    Size.Height = 548.000000000000000000
+    Size.PlatformDefault = False
+    OnDraw = pbPreviewDraw
+  end
+end

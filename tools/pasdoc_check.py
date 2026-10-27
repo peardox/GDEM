@@ -2,18 +2,26 @@
 
 Usage, from the repository root:
 
-    python3 tools/pasdoc_check.py GDEMFetch
+    python3 tools/pasdoc_check.py
 
-It reads every .pas file in the folder and the folders inside it (lib and
-ui), and the program's .dpr, and reports, per unit:
+which checks GDEMFetch, TileMaker and common together, or name the
+folders to check:
+
+    python3 tools/pasdoc_check.py GDEMFetch common
+
+It reads every .pas file in each folder and the folders inside it (lib and
+ui), and each program's .dpr. Names declared in any of them count for
+@link, so a program's comments can link to the units in common. It
+reports, per unit:
   - a missing @abstract unit comment before `unit X;`
   - interface declarations with no comment immediately before them
   - unbalanced parentheses inside @tag(...) in comments
   - @link(...) targets that are not declared anywhere in the project
   - fields declared after a method or property in the same section of a
     class, which Delphi rejects (E2169)
-  - a unit in lib that uses FMX or a unit in ui: lib must stay free of the
-    user interface, so other programs can reuse it
+  - a unit in lib, or in common, that uses FMX or a unit in any ui folder:
+    those must stay free of the user interface, so other programs can
+    reuse them
 
 It does not parse Pascal fully, so it can miss things PasDoc would warn
 about, but it has no dependencies beyond Python 3. Prints
@@ -21,13 +29,16 @@ about, but it has no dependencies beyond Python 3. Prints
 """
 import re, sys, pathlib
 
-root = pathlib.Path(sys.argv[1])
-files = sorted(root.rglob('*.pas')) + sorted(root.glob('*.dpr'))
+roots = [pathlib.Path(a) for a in sys.argv[1:]] or [
+    pathlib.Path(p) for p in ('GDEMFetch', 'TileMaker', 'common') if pathlib.Path(p).is_dir()]
+files = []
+for root in roots:
+    files += sorted(root.rglob('*.pas')) + sorted(root.glob('*.dpr'))
 
 
 def label(path):
-    """The file's path inside the project folder, for messages."""
-    return path.relative_to(root).as_posix()
+    """The file's path as given on the command line, for messages."""
+    return path.as_posix()
 
 DECL_KW = re.compile(r'^\s*(class\s+)?(procedure|function|constructor|destructor|property|operator)\b', re.I)
 TYPE_DECL = re.compile(r'^\s*([A-Za-z_]\w*)(<[^>]*>)?\s*=\s*(?!\s*$)', re.I)
@@ -155,8 +166,11 @@ for f in files:
             paren_depth = 0
 
 # lib must not depend on the user interface
-ui_units = {p.stem.lower() for p in (root / 'ui').glob('*.pas')}
-for f in sorted((root / 'lib').glob('*.pas')):
+ui_units = {p.stem.lower() for root in roots for p in root.rglob('*.pas')
+            if p.parent.name == 'ui'}
+no_ui_files = [f for f in files if f.suffix == '.pas' and
+               (f.parent.name == 'lib' or f.parent.name == 'common')]
+for f in no_ui_files:
     code = re.sub(r'\{(?!\$).*?\}', ' ', texts[f], flags=re.S)
     code = re.sub(r'\(\*.*?\*\)', ' ', code, flags=re.S)
     code = re.sub(r'//[^\n]*', ' ', code)
@@ -165,7 +179,7 @@ for f in sorted((root / 'lib').glob('*.pas')):
         for name in re.sub(r'\{\$.*?\}', ' ', clause.group(1)).split(','):
             name = name.strip().split()[0] if name.strip() else ''
             if name.lower().startswith('fmx.') or name.lower() in ui_units:
-                problems.append(f'{label(f)}: lib unit uses {name}, which belongs to the '
+                problems.append(f'{label(f)}: {f.parent.name} unit uses {name}, which belongs to the '
                                 f'user interface')
 
 print('\n'.join(problems) if problems else 'No problems found')

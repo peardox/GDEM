@@ -15,8 +15,9 @@ Last updated: 27 October 2026.
 2. Read `README.md`, then this file.
 3. The owner's working copy is often ahead of GitHub. If the owner
    attaches or pastes files, build on those, not on GitHub.
-4. Before delivering code, run `python3 tools/pasdoc_check.py GDEMFetch`
-   and fix anything it reports.
+4. Before delivering code, run `python3 tools/pasdoc_check.py` (it
+   checks `GDEMFetch/`, `TileMaker/` and `common/`) and fix anything it
+   reports.
 
 ## How the owner works
 
@@ -366,6 +367,73 @@ the up-front total-space check is skipped. It still copies and deletes
 rather than renaming, as the owner asked for the import's behaviour; a
 rename within one drive would be far faster for 400 GB if wanted. Not
 yet built.
+
+### The old world download (27 October 2026)
+
+The owner's earlier copy of the whole world, made with NASA's AppEEARS
+(which the owner finds a poor tool), held 45,819 tile files, 5 short of
+the 45,824 (22,912 x 2) that exist; Move Existing Files moved them all
+(0 failed). A whole-world Fetch selection then downloaded just the
+missing ones, and counts in WSL gave 22,912 `_dem.tif` and 22,912
+`_num.tif`. (A PowerShell count gave 0 for reasons not found; WSL's
+`find` is the one to trust.)
+
+### TileMaker (27 October 2026)
+
+The owner planned this layout for a second program. TileMaker
+(`TileMaker/`, `lib/` and `ui/`, in `GDEM.groupproj`) cuts an image into
+a tile set for GDEMFetch's high-resolution map. Decisions, mostly the
+owner's:
+
+- Analysis of 10800 x 5400 by prime factors: three halvings to
+  1350 x 675; square tiles must divide 675; **225** chosen (the owner had
+  picked it already). Squares over 2:1 rectangles. Levels stop at the
+  first that is no wider than 2048 (`DEFAULT_COARSEST_WIDTH`), or when a
+  side would stop being whole.
+- Shared units in a new root `common/` (owner's choice over
+  `TileMaker/lib`): `GDEMFactors` (prime factors, GCD, divisors,
+  `LevelSizes`, `TileSizesFor`, `SuggestTileSize` nearest 256 by ratio),
+  `GDEMResample`, `GDEMTileSet`. Neon stays at the root; both programs
+  reach it as `..\delphi-neon\Source`.
+- Resampling for quality, not speed (owner): Lanczos-3 widened by the
+  factor, linear light (sRGB tables, 65,536-step encode table),
+  premultiplied alpha, every level from the full image, wrapping east to
+  west for world maps, edge rows repeated. Skia's own
+  `TSkSamplingOptions.High` is a Mitchell cubic with a fixed 4x4
+  footprint, which aliases when shrinking, so it is not used for this.
+  Ported to Python with numpy and checked: weights sum to 1 (12, 24, 48
+  taps for 2, 4, 8), flat colour unchanged, a 1-pixel checkerboard halves
+  to sRGB 188 (gamma-space averaging would give 128), wrapping works.
+- Tiles: JPEG quality 90 by default (owner), WebP and PNG offered.
+  Encoded straight from the level's pixels with
+  `TSkImageEncoder.EncodeToFile` (tile's top-left pointer, level's row
+  bytes). Source read with `TSkImage.MakeFromEncodedFile` and
+  `ReadPixels` as RGBA8888 unpremultiplied, avoiding FMX's `TBitmap` size
+  limits. The preview is the smallest level, made by `ReduceImage`, shown
+  in a `TSkPaintBox` with a level's grid.
+- Save As makes a folder named as typed; it must be new or empty, or
+  hold an earlier tile set (replaced after asking). Level folders are
+  named `WxH`, tiles `r000_c000.<ext>`, and `tileset.json` (format 1) is
+  written last, atomically; see the README's Tile sets.
+- `TileMaker.dproj` was made by script from `GDEMFetch.dproj`: new GUID,
+  names, no themes pre-build step, the default Delphi icon, `..\common`
+  on the search path, TileMaker's own macOS privacy texts, and only the
+  RAD Studio and Skia deployment entries (the IDE adds the program's
+  own). The macOS templates were copied. No `TileMaker.res`: the IDE
+  makes it. No themes or settings yet. The Linux menu fix is a copy of
+  GDEMFetch's `UseFmxMenuBar`; once the owner's test of the general
+  `ReplaceMainMenu` unit (`LinuxMenuIssues.md`) passes, both could share
+  it (it uses FMX, so it would need a shared ui folder, not `common/`).
+- `tools/pasdoc_check.py` with no arguments checks all three folders,
+  and applies the no-FMX rule to `common/` too.
+
+Not yet built. Next: the owner builds TileMaker and makes the 10800 x
+5400 tile set; then GDEMFetch loads a tile set (chosen in Settings, or
+found beside the program) with `TTileSet.Load` and draws the level from
+`LevelFor`, decoding tiles on demand with a cache, the coarser level
+showing until a tile is ready, and level 0 enlarged past its own detail
+(the owner wants zoom beyond 1:1 for accurate selection and, later,
+drawing). With no tile set, the 1080 x 540 map stays.
 
 ## NASA: what was found by testing
 

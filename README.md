@@ -9,6 +9,11 @@ The first program, **GDEMFetch**, lets you pick an area on a world map and
 download the elevation tiles that cover it. Later stages will read and use
 those tiles.
 
+The second, **TileMaker**, cuts a large image (such as a 10800 x 5400
+world map) into a tile set: square tiles at several levels of detail,
+described by a `tileset.json`, for GDEMFetch to draw as you zoom. See
+[TileMaker](#tilemaker).
+
 ## About the data
 
 ASTER GDEM V3 is published as one-degree tiles, 3601 x 3601 pixels each,
@@ -540,16 +545,126 @@ layout:
   any that were safely copied but could not be deleted (read-only files,
   say).
 
+## TileMaker
+
+TileMaker (`TileMaker/`, in the project group) turns one large image into
+a **tile set**: the image at several levels of detail, each cut into
+square tiles, so a program can draw just the tiles on screen, at the
+detail the zoom needs.
+
+**File > Open...** reads an image (JPEG, PNG, WebP, BMP or GIF; Skia
+decodes it). The right-hand panel shows:
+
+- its size and the prime factors of its width and height, which decide
+  how it can be divided;
+- the **levels**: the image itself, then each half the size of the last,
+  for as long as both sides stay whole and until a level is no wider than
+  *Smallest level width at most* (2048 by default, about a screen
+  across);
+- the **tile sizes** that cut every level exactly: the divisors of the
+  smallest level's width and height in common. TileMaker offers those from
+  16 to 2048 pixels and picks the one nearest 256;
+- the tiles each level needs, and in all.
+
+The preview shows the image with any level's tile grid over it.
+
+For the 10800 x 5400 world map, 10800 = 2^4 x 3^3 x 5^2 and 5400 =
+2^3 x 3^3 x 5^2. The three shared 2s allow three halvings, and the
+smallest level, 1350 x 675 (675 = 3^3 x 5^2), is about the size of a
+window showing the whole world. Square tiles must divide 675, so they are
+odd: 135, 225 or 675. 225 is used:
+
+| Level | Size | Pixels per degree | Tile covers | Tiles |
+|-------|------|-------------------|-------------|-------|
+| 0 | 10800 x 5400 | 30 | 7.5 degrees | 48 x 24 = 1152 |
+| 1 | 5400 x 2700 | 15 | 15 degrees | 24 x 12 = 288 |
+| 2 | 2700 x 1350 | 7.5 | 30 degrees | 12 x 6 = 72 |
+| 3 | 1350 x 675 | 3.75 | 60 degrees | 6 x 3 = 18 |
+
+Square tiles, rather than 2:1 rectangles, because in this projection a
+square tile is a square patch of the world, and a zoomed-in view is
+rarely 2:1. Tile edges at 7.5 degrees cannot also fall on whole degrees
+(that needs a multiple of 30 pixels, and 675 is odd), which does not
+matter for imagery.
+
+**Options:** tile size, smallest level width, tile format (JPEG, the
+default, at quality 90; WebP; or PNG) and quality, and *Whole-world map
+(wraps east to west)*. With that ticked the tile set says it covers 180
+west to 180 east and 90 north to 90 south, in the equirectangular
+projection, and resampling treats the left and right edges as
+neighbours; untick it for an image that is not a world map.
+
+**Resampling.** Every smaller level is made straight from the full image,
+not from the level above, with a **Lanczos-3** filter widened to the
+reduction (12 source pixels across for a halving, 48 for an eighth) and in
+**linear light** (sRGB values are turned into light, filtered and turned
+back, so fine bright detail is not darkened). Alpha is filtered
+premultiplied. Off the top and bottom the edge row is repeated. This is
+chosen for quality, not speed; see `common/GDEMResample.pas`. Level 0 is
+the image as it is.
+
+**File > Save As...** asks for a name and makes a folder of that name (an
+extension typed is dropped). It must be new or empty; a folder holding an
+earlier tile set may be replaced, after asking, and anything else is left
+alone. The work runs in the background with a progress bar and Cancel.
+
+### Tile sets
+
+```
+<tile set>/
+  tileset.json
+  10800x5400/          level 0
+    r000_c000.jpg      top-left tile
+    r000_c001.jpg      the next one east
+    ...
+  5400x2700/           level 1
+  2700x1350/
+  1350x675/
+```
+
+Each level's folder is named after its size; tiles are named `r` and the
+row, `_c` and the column, three digits each, from 0 at the top left.
+`tileset.json` describes it:
+
+```json
+{
+  "format": 1,
+  "name": "8081_earthmap10k",
+  "source": "8081_earthmap10k.jpg",
+  "sourceWidth": 10800,
+  "sourceHeight": 5400,
+  "tileSize": 225,
+  "imageFormat": "jpg",
+  "quality": 90,
+  "resampling": "lanczos3, linear light",
+  "projection": "equirectangular",
+  "bounds": { "west": -180, "north": 90, "east": 180, "south": -90 },
+  "levels": [
+    { "width": 10800, "height": 5400, "columns": 48, "rows": 24, "folder": "10800x5400" },
+    ...
+  ],
+  "generator": "TileMaker",
+  "created": "2026-10-27T15:00:00.000Z"
+}
+```
+
+`tileset.json` is written last, so a folder without it is an unfinished
+tile set (an interrupted or cancelled save). `common/GDEMTileSet.pas`
+reads and writes it, and checks that every level is whole tiles and half
+the size of the one before.
+
 ## Repository layout
 
 | Path | Contents |
 |------|----------|
 | `GDEM.groupproj` | Project group |
 | `GDEMFetch/` | The GDEMFetch application: the project files, with its units in `lib/` and `ui/` (see [GDEMFetch units](#gdemfetch-units)) |
+| `TileMaker/` | The TileMaker application, laid out the same way (see [TileMaker units](#tilemaker-units)) |
+| `common/` | Units shared by the programs: no FMX, and nothing from any program's folders (see [Common units](#common-units)) |
 | `styles/` | FMX styles for the themes, with the resource script and the pre-build script that builds them; see [Themes](#themes) |
 | `maps/` | World map images and vectors. `world_1080x540.jpg` and `world_vectors.bin` (borders and coastlines) are linked into GDEMFetch as resources. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository. |
 | `delphi-neon/` | Neon JSON library (git submodule) |
-| `tools/pasdoc_check.py` | Checks the units follow the PasDoc rules; see [Notes for Claude](#notes-for-claude) |
+| `tools/pasdoc_check.py` | Checks the units of `GDEMFetch/`, `TileMaker/` and `common/` follow the PasDoc and layout rules; see [Notes for Claude](#notes-for-claude) |
 | `tools/build_vectors.py` | Builds `maps/world_vectors.bin` from Natural Earth; see [Borders and coastlines](#borders-and-coastlines) |
 | `CLAUDE.md` | Handover notes: the project's current state, test results and lessons learned, for picking the work up in a new conversation |
 | `docs/` | Ignored for development |
@@ -599,6 +714,26 @@ it:
 | `GDEMStyles` | Switches FMX styles at run time (ported from Sprite3D) |
 | `GDEMTitleBar` | Colours title bars to match the style (ported from Sprite3D) |
 
+### TileMaker units
+
+| Unit | Purpose |
+|------|---------|
+| `ui/TileMakerForm` | Main window: File > Open and Save As, the plan, options, preview with tile grid, log and progress |
+| `lib/GDEMTiler` | Reads an image with Skia (`LoadSourceImage`), plans a tile set (`PlanTileSet`) and writes it (`WriteTileSet`); no FMX |
+
+### Common units
+
+`common/` holds units more than one program uses. Like `lib/`, they never
+use FMX or anything in a program's folders, and `tools/pasdoc_check.py`
+reports any that do. Each program's `.dpr` lists them with
+`in '..\common\Name.pas'`.
+
+| Unit | Purpose |
+|------|---------|
+| `GDEMFactors` | Prime factors, greatest common divisor, divisors, and planning levels of detail and tile sizes from an image's size |
+| `GDEMResample` | `TRGBA8Image`, and `ReduceImage`: shrinking by a whole factor with Lanczos-3 in linear light |
+| `GDEMTileSet` | `TTileSet`, a tile set's description, read and written as `tileset.json` with Neon |
+
 The world map image `maps/world_1080x540.jpg` is linked into GDEMFetch as
 the `WORLDMAP` RCDATA resource, and `maps/world_vectors.bin` as
 `WORLDVECTORS`, so nothing needs deploying beside the program. The image
@@ -614,9 +749,10 @@ the left and latitude 90 at the top.
   binding.
 - **High-resolution map:** `maps/8081_earthmap10k.jpg`, a 10800 x 5400
   world map (30 pixels per degree, so each GDEM tile is 30 x 30 pixels),
-  cut into tiles that are loaded as the user zooms in. The image is
-  gitignored because of its size, so the tiling step must not assume it is
-  in a fresh clone.
+  cut into a tile set by [TileMaker](#tilemaker), for GDEMFetch to load
+  as the user zooms in, and to zoom past level 0's own detail for
+  accurate selection. The image is gitignored because of its size, so
+  GDEMFetch must cope with no tile set and keep its 1080 x 540 map.
 
 ## Notes for Claude
 
@@ -679,12 +815,13 @@ got to, what has been tested and what was learned along the way.
     PasDoc cannot resolve them.
   - Things declared only in an implementation section are not in the
     generated docs, but are documented anyway.
-  - Before delivering, run `python3 tools/pasdoc_check.py GDEMFetch`. It
-    reads `lib/` and `ui/` as well, and reports undocumented interface
+  - Before delivering, run `python3 tools/pasdoc_check.py` from the
+    repository root. It reads `GDEMFetch/`, `TileMaker/` and `common/`
+    (with their `lib/` and `ui/`), and reports undocumented interface
     items, `@link` targets that do not exist, unbalanced `@tag(...)`
     brackets, class fields declared after a method or property (which
-    Delphi rejects), and `lib/` units that use FMX or a `ui/` unit. It
-    prints `No problems found` when all is well.
+    Delphi rejects), and `lib/` or `common/` units that use FMX or a `ui/`
+    unit. It prints `No problems found` when all is well.
 - **Source files are ASCII only.** Delphi reads files without a byte
   order mark as ANSI, so write characters such as the degree sign as
   character codes (`#$00B0`).
@@ -712,6 +849,9 @@ got to, what has been tested and what was learned along the way.
   usage description in the Version Info keys; keep them accurate.
 - Naming: fields `F`, parameters `A`, locals `L`; non-visual units
   `GDEM*.pas`; forms `*Form.pas`.
+- **Units shared by programs go in `common/`** at the repository root:
+  no FMX, nothing from a program's folders. A program's own units go in
+  its `lib/` or `ui/` as below.
 - **Units go in `lib/` or `ui/`.** Anything that does the work goes in
   `lib/`, never using FMX or a `ui/` unit, so later programs can reuse it;
   `tools/pasdoc_check.py` reports a `lib/` unit that breaks this. Forms,

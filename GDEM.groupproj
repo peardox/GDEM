@@ -6,6 +6,9 @@
         <Projects Include="GDEMFetch\GDEMFetch.dproj">
             <Dependencies/>
         </Projects>
+        <Projects Include="TileMaker\TileMaker.dproj">
+            <Dependencies/>
+        </Projects>
     </ItemGroup>
     <ProjectExtensions>
         <Borland.Personality>Default.Personality.12</Borland.Personality>
@@ -23,14 +26,23 @@
     <Target Name="GDEMFetch:Make">
         <MSBuild Projects="GDEMFetch\GDEMFetch.dproj" Targets="Make"/>
     </Target>
+    <Target Name="TileMaker">
+        <MSBuild Projects="TileMaker\TileMaker.dproj"/>
+    </Target>
+    <Target Name="TileMaker:Clean">
+        <MSBuild Projects="TileMaker\TileMaker.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="TileMaker:Make">
+        <MSBuild Projects="TileMaker\TileMaker.dproj" Targets="Make"/>
+    </Target>
     <Target Name="Build">
-        <CallTarget Targets="GDEMFetch"/>
+        <CallTarget Targets="GDEMFetch;TileMaker"/>
     </Target>
     <Target Name="Clean">
-        <CallTarget Targets="GDEMFetch:Clean"/>
+        <CallTarget Targets="GDEMFetch:Clean;TileMaker:Clean"/>
     </Target>
     <Target Name="Make">
-        <CallTarget Targets="GDEMFetch:Make"/>
+        <CallTarget Targets="GDEMFetch:Make;TileMaker:Make"/>
     </Target>
     <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
 </Project>
