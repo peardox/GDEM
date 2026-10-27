@@ -427,8 +427,20 @@ owner's:
 - `tools/pasdoc_check.py` with no arguments checks all three folders,
   and applies the no-FMX rule to `common/` too.
 
-Not yet built. Next: the owner builds TileMaker and makes the 10800 x
-5400 tile set; then GDEMFetch loads a tile set (chosen in Settings, or
+Built by the owner, after one fix: the default icon is
+`$(BDS)\bin\delphi_PROJECTICON.ico` (I first wrote `..._PROJECTICO.ico`,
+which BRCC32 could not find). The owner made the tile set and committed
+it as `maps/tiles/` (commit `9615c81`, 12 MB: 1152 + 288 + 72 + 18 tiles,
+`tileset.json` as designed). Checked in Python: every tile present, 225 x
+225 JPEG, nothing extra. Levels 1 and 2 match a numpy Lanczos-3
+linear-light reference computed from level 0 to within JPEG noise (mean
+difference about 0.5 of 255, max 5 to 7), at the date line too, so the
+Pascal resampler and its wrapping are right; level 3 agrees on average
+(0.85), with a few larger differences only on sharp high-contrast edges,
+not at tile borders. Stitched level 3 shows no seams. The step across the
+date line is the same in every level as in the source image itself.
+
+Next: GDEMFetch loads a tile set (chosen in Settings, or
 found beside the program) with `TTileSet.Load` and draws the level from
 `LevelFor`, decoding tiles on demand with a cache, the coarser level
 showing until a tile is ready, and level 0 enlarged past its own detail
