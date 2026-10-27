@@ -92,20 +92,6 @@ object frmMain: TfrmMain
         Text = 'Show Coastlines'
         OnClick = mnuShowCoastlinesClick
       end
-      object mnuDrawSep: TMenuItem
-        Text = '-'
-      end
-      object mnuSkiaPaths: TMenuItem
-        AutoCheck = True
-        IsChecked = True
-        Text = 'Draw Lines from Cached Paths'
-        OnClick = mnuSkiaPathsClick
-      end
-      object mnuLogDrawing: TMenuItem
-        AutoCheck = True
-        Text = 'Log Drawing Times'
-        OnClick = mnuLogDrawingClick
-      end
       object mnuLogSep: TMenuItem
         Text = '-'
       end
