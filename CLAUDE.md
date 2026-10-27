@@ -6,111 +6,61 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 27 October 2026, at the end of the day's session.
+Last updated: 27 October 2026, at the end of the evening's session.
 
 ## State at the end of 27 October 2026
 
-GitHub `main` at `2b46ddc` ("more place names") holds everything: the
-owner applied, built and pushed all the work described below, which was
-checked against GitHub file for file. Sections below that say "Not yet
-built" were written before the owner's builds: the lib/ui split,
-Shift + right-click, Move Existing Files, TileMaker, the high-resolution
-map and the search have all been built and run since. The search,
-markers, town names, View-menu memory and easter eggs are the newest and
-the least tried.
+GitHub `main` at `ce47687` ("Map OK") holds everything. The owner
+applied, built and tested the evening's work on Windows, macOS and
+Linux, and everything works: the map-jump fix (below), the display log,
+the built-in high-resolution tile set (and the removal of the tile set
+folder setting), and the View options suggested for faster drawing. It
+was checked against GitHub file for file (the only difference was the
+IDE reordering Skia entries in `GDEMFetch.deployproj`) and validated:
+`pasdoc_check.py` clean; every source ASCII; both `.dproj` files keep
+their BOM and parse; every unit in `lib/` and `ui/` is in both the `.dpr`
+and the `.dproj`, and every path exists; each `RcItem` exists, with its
+Deployment entries disabled, and nothing from `maps/` is in the
+`.deployproj`; `maps/tiles.zip` rebuilds byte-identically from
+`maps/tiles`; every form's `.fmx` objects and events match its unit; no
+code refers to anything removed.
 
-**Known bug, first thing to look at:** while dragging the map it
-sometimes jumps a long way, seemingly at random (owner, 27 October; the
-owner meant to investigate later). Suspects, most likely first:
+Sections below that say "Not yet built" were written before the owner's
+builds; everything in them has been built and run since. No known bugs.
 
-1. A zoom during a pan. A pan sets
-   `FOrigin := FDragOrigin + (FMousePos - FDragStart)` in
-   `TWorldMapView.MouseMove`, from values taken at `MouseDown`, but
-   `MouseWheel` (`SetScaleAt`) changes `FScale` and `FOrigin` without
-   updating `FDragOrigin` and `FDragStart`. The next move then restores
-   the old origin at the new scale: a large jump. A touchpad's two-finger
-   scroll mid-drag, or a wheel notch during a right-drag, would do it.
-   Likely fix: in `MouseWheel`, when `FDragMode = mdPan`, set
-   `FDragOrigin := FOrigin` and `FDragStart := FMousePos` after
-   `SetScaleAt`. (A selection drag is not affected: it keeps its anchor in
-   degrees.)
-2. `ClampOrigin` shifts `FOrigin.X` by whole map widths during a pan.
-   That should look identical, since everything is drawn on every copy of
-   the map; a jump of exactly 360 degrees would point at something drawn
-   on one copy only.
-3. Something moving the map from outside a drag: `CentreOn` and
-   `ZoomToArea` (the search), `ZoomToSelection`, or `Resize`.
+### The map jumping while dragging (fixed 27 October 2026)
 
-The owner reported it on Windows with a mouse. Two fixes in
-`GDEMWorldMap.pas`, not yet built:
+The owner saw the map jump a long way while dragging. Cause, found by
+the owner: dragging off the window onto a display with a different scale
+factor. The owner's displays (from the start-up log): 1920 x 1200 at
+-1920, 0, scale 1.00; 3440 x 1440 at -5360, 7, scale 1.00; primary 2560
+x 1440 at 0, 0, scale 1.50.
 
-- Suspect 1 confirmed in the code. `MouseWheel` now moves the pan's
-  starting origin after `SetScaleAt`:
-  `FDragOrigin := FOrigin - (FMousePos - FDragStart)`, so the next move
-  carries on from the new view. `FDragStart` is left alone, because
-  `MouseUp` measures from it (`CLICK_SLOP`) to tell a right click (select
-  a country) from a right drag.
-- A fourth suspect found while reading: a lost button release. If the
-  button is let go while another window has the focus (Alt+Tab, a
-  notification), `MouseUp` never comes, `FDragMode` stays `mdPan`, and
-  the next plain move pans from the old `FDragStart`: a jump that looks
-  random. `MouseMove` now ends any drag when no button is held (on
-  Windows only, `{$IFDEF MSWINDOWS}`, where FMX puts `ssLeft`, `ssRight`
-  and `ssMiddle` in every move's `Shift`; unchecked on macOS and Linux).
-  A selection drag ended this way fires `OnSelectionChanged` as
-  `MouseUp` would.
-
-To test: right-drag and turn the wheel mid-drag (it used to jump; now
-the map should zoom about the pointer and keep panning); right-drag,
-Alt+Tab away, let go, come back and move the mouse (the map should not
-move). Still possible if it recurs: suspects 2 and 3 above.
-
-**The cause, found by the owner:** the jump happens when a drag takes
-the pointer off the window onto a display with a different scale. The
-owner's set-up (start-up log): Display 1 1920 x 1200 at -1920, 0,
-scale 1.00; Display 2 3440 x 1440 at -5360, 7, scale 1.00; Display 3,
-primary, 2560 x 1440 at 0, 0, scale 1.50. Dragging from the 150% display
-onto a 100% one jumps.
-
-First try, wrong: `DragPointer` took the position from `GetCursorPos`
-and `ScreenToClient`, divided by the window's scale, on the theory that
-FMX converted with the wrong display's scale. The owner's log showed
-FMX's and Windows' figures within 2 or 3 pixels of each other (the
-cursor moving between the message and the call), and the map still
-jumped: Windows' own figure jumps at the border too. Removed, with its
-`OnLog` event.
-
-The fix, as the owner suggested earlier (forcing window bounds):
-built and tried by the owner on 27 October 2026, and it stops the
-jump. The owner finds it "not as good" as dragging freely past the
-window, but good enough. `TWorldMapView.ClipPointer` (Windows only) calls `ClipCursor`
-with the map's `AbsoluteRect`, times the window's `Scale`, through
-`ClientToScreen` (both in the program's own DPI coordinates, so they
-agree), when a select or pan drag starts in `MouseDown`.
-`ReleasePointer` lets go in `MouseUp`, in the lost-release path of
-`MouseMove`, and in `Destroy`. The two `user32` calls are declared in
-the unit, because `Winapi.Windows`' `TBitmap` record would hide FMX's.
-`EdgeScrollStep` now reaches `EDGE_SCROLL_MAX_STEP` at the edge itself
-(it used to need the pointer 50 pixels beyond it, which the clip
-forbids). Ctrl + click (markers) is not clipped.
-`TfrmMain.LogDisplays` (start of `RunStartup`) stays: one line per
-`Screen.Displays` entry with size, position, scale and primary.
-(Sprite3D's `DisplayData` gives scales only off Windows, from the same
-`Screen.Displays`, so it was not ported.)
-
-A possible improvement, offered and not taken up: let the pointer
-leave the window and convert its position on another display back into
-the window's units with that display's scale and origin. The owner says
-Sprite3D's `DisplayData` handles Windows scales properly where the
-plain Windows API does not; the GitHub copy read on 27 October showed
-no scale on Windows, so ask for the owner's current copy first.
-
-Still worth checking (Windows, the three displays): pan and select towards each edge
-of the map; the pointer should stop at the map's edge and the map should
-not jump; selecting against an edge should scroll at full speed; after
-letting go the pointer should move freely; Alt+Tab mid-drag, then
-coming back, should leave the pointer free. On macOS and Linux nothing
-changes except the edge-scroll speed curve.
+- First try, wrong: taking the position from `GetCursorPos` and the
+  window's scale instead of FMX's. The owner's log showed both agreeing
+  within 2 or 3 pixels and the jump remaining: Windows' own position
+  jumps at the border too. Removed.
+- The fix, the owner's suggestion: `TWorldMapView.ClipPointer` (Windows
+  only) holds the cursor inside the map with `ClipCursor` (the map's
+  `AbsoluteRect` times the window's `Scale`, through `ClientToScreen`)
+  from the start of a select or pan drag; `ReleasePointer` lets go in
+  `MouseUp`, the lost-release path of `MouseMove`, and `Destroy`. The
+  `user32` calls are declared in the unit, because `Winapi.Windows`'
+  `TBitmap` record would hide FMX's. `EdgeScrollStep` reaches full speed
+  at the edge itself. Ctrl + click is not clipped. The owner finds it
+  "not as good" as dragging freely, but good enough.
+- Also fixed on the way: a wheel zoom during a pan now moves the pan's
+  starting origin (`FDragOrigin := FOrigin - (FMousePos - FDragStart)`;
+  `FDragStart` is kept for the right-click test), and on Windows a drag
+  whose button release was lost (no button in a move's `Shift`) is ended.
+- `TfrmMain.LogDisplays` logs each display's size, position and scale at
+  start-up.
+- Offered and not taken up: let the pointer leave the window and convert
+  its position on another display with that display's scale and origin.
+  The owner says Sprite3D's `DisplayData` handles Windows scales properly
+  where the plain Windows API does not; the GitHub copy read on 27
+  October showed no scale on Windows, so ask for the owner's current copy
+  first.
 
 ## Starting a new conversation
 
@@ -716,7 +666,8 @@ The owner found the high-resolution map missing on macOS and Linux (the
 tile set was not deployed; PAServer runs the program from its own
 folder, so the search for `maps/tiles` found nothing) and offered two
 fixes: link it in as a resource, or deploy it to a sensible folder. It is
-now a resource, per the README's rule. Not yet built.
+now a resource, per the README's rule. Built and tested on all three
+platforms.
 
 - `tools/pack_tiles.py` packs `maps/tiles` into `maps/tiles.zip`:
   `tileset.json` and the tiles under their folder names with `/`,
@@ -783,7 +734,7 @@ and closes it with OK, turn on View options suited to the new choice and
 say so in a modal dialog, advising turning some off if the map is slow
 and listing the options from the most demanding to the least. The owner
 fixed one case (GPU with High performance on Windows: everything) and
-left the rest to Claude. Not yet built.
+left the rest to Claude. Built and tested on all three platforms.
 
 - `lib/GDEMViewOptions`: `TViewLayer` / `TViewLayers`,
   `ALL_VIEW_LAYERS`, `VIEW_LAYERS_BY_COST` (coastlines, borders, towns
