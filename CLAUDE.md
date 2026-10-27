@@ -6,7 +6,45 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 27 October 2026.
+Last updated: 27 October 2026, at the end of the day's session.
+
+## State at the end of 27 October 2026
+
+GitHub `main` at `2b46ddc` ("more place names") holds everything: the
+owner applied, built and pushed all the work described below, which was
+checked against GitHub file for file. Sections below that say "Not yet
+built" were written before the owner's builds: the lib/ui split,
+Shift + right-click, Move Existing Files, TileMaker, the high-resolution
+map and the search have all been built and run since. The search,
+markers, town names, View-menu memory and easter eggs are the newest and
+the least tried.
+
+**Known bug, first thing to look at:** while dragging the map it
+sometimes jumps a long way, seemingly at random (owner, 27 October; the
+owner meant to investigate later). Suspects, most likely first:
+
+1. A zoom during a pan. A pan sets
+   `FOrigin := FDragOrigin + (FMousePos - FDragStart)` in
+   `TWorldMapView.MouseMove`, from values taken at `MouseDown`, but
+   `MouseWheel` (`SetScaleAt`) changes `FScale` and `FOrigin` without
+   updating `FDragOrigin` and `FDragStart`. The next move then restores
+   the old origin at the new scale: a large jump. A touchpad's two-finger
+   scroll mid-drag, or a wheel notch during a right-drag, would do it.
+   Likely fix: in `MouseWheel`, when `FDragMode = mdPan`, set
+   `FDragOrigin := FOrigin` and `FDragStart := FMousePos` after
+   `SetScaleAt`. (A selection drag is not affected: it keeps its anchor in
+   degrees.)
+2. `ClampOrigin` shifts `FOrigin.X` by whole map widths during a pan.
+   That should look identical, since everything is drawn on every copy of
+   the map; a jump of exactly 360 degrees would point at something drawn
+   on one copy only.
+3. Something moving the map from outside a drag: `CentreOn` and
+   `ZoomToArea` (the search), `ZoomToSelection`, or `Resize`.
+
+Ask the owner: which platform and input device (mouse or touchpad),
+whether the wheel or a second finger was used during the drag, how far it
+jumps (a whole world width?), and whether it happens with the View layers
+off.
 
 ## Starting a new conversation
 
@@ -273,8 +311,8 @@ Owner's tests the same morning (of the build before the split):
   `RecreateOSMenu`, then `mnuMain` is freed. Not yet tried.
   Sprite3D would benefit from the same change.
 
-Anything delivered after that is in the conversation, not here: ask the
-owner whether it has been applied before changing the same units.
+Everything delivered later is described in the sections below and is on
+GitHub (see the top of this file).
 
 ### Next, as far as is known
 
@@ -599,8 +637,9 @@ summary site's figure, while latlong.net's 37.2558, 126.3068 is 27 km off
 (near Yeongheungdo). Python port of the search: `area 51`, `ufo`,
 `groom lake`, `seongapdo`, `squid gaem` and the rest find them first.
 
-Things to check when built: that `TControl.OnMouseDown` can be assigned
-from `MainForm` (it should be public), that Ctrl + click on macOS is not
+All of this was built and pushed by the owner (it compiles, so
+`TControl.OnMouseDown` is assignable from `MainForm`). Not yet reported
+on: that Ctrl + click on macOS is not
 turned into a right click by the system (Cmd + click is the documented
 way there), the drop-down's position over the map on all three
 platforms, and the label drawing cost on the CPU canvas (`OnPaintStats`).
