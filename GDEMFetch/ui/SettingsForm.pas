@@ -54,11 +54,8 @@ const
   { Page where an Earthdata Login user generates a bearer token. }
   EARTHDATA_TOKEN_URL = 'https://urs.earthdata.nasa.gov';
 
-  { Smallest free-space reserve the dialog allows, in megabytes. }
-  MIN_FREE_SPACE_LOWER_MB = 100;
-
-  { Largest free-space reserve the dialog allows, in megabytes (1 TB). }
-  MIN_FREE_SPACE_UPPER_MB = 1024 * 1024;
+  { What follows the free-space percentage in the dialog. }
+  MIN_FREE_UNIT_TEXT = '% free drive space';
 
 type
   { Called when the settings dialog closes.
@@ -94,9 +91,11 @@ type
     btnBrowse: TButton;
     { Caption for @link(nbMinFree). }
     lblMinFree: TLabel;
-    { Free space to keep, in megabytes. }
+    { Free space to keep, as a percentage of the drive's size, from
+      @link(MIN_RESERVE_PERCENT) to @link(MAX_RESERVE_PERCENT). }
     nbMinFree: TNumberBox;
-    { Unit shown after @link(nbMinFree). }
+    { Shown after @link(nbMinFree): what the percentage means, and how
+      much it comes to on the chosen folder's drive. }
     lblMinFreeUnit: TLabel;
     { Caption for @link(cbImportWorkers). }
     lblImportWorkers: TLabel;
@@ -167,7 +166,8 @@ type
     function GetDataFolder: string;
 
     { Enables @link(btnOK) only when a token and a data folder have been
-      entered, and shows when the token expires. }
+      entered, shows when the token expires, and shows how much the
+      free-space percentage comes to on the chosen folder's drive. }
     procedure UpdateOK;
 
     { Selects the choice in @link(cbImportWorkers) for a number of files.
@@ -221,7 +221,8 @@ implementation
 {$R *.fmx}
 
 uses
-  System.IOUtils, System.Math, GDEMBrowser, GDEMThemes, GDEMDrawing, GDEMGpuPreference;
+  System.IOUtils, System.Math, GDEMBrowser, GDEMThemes, GDEMDrawing, GDEMGpuPreference,
+  GDEMStore;
 
 { TfrmSettings }
 
@@ -272,8 +273,8 @@ begin
   lblLink.TextSettings.Font.Style := [TFontStyle.fsUnderline];
   lblLink.Text := EARTHDATA_TOKEN_URL;
   lblLocation.Text := 'Settings are saved to: ' + TGDEMSettings.SettingsFileName;
-  nbMinFree.Min := MIN_FREE_SPACE_LOWER_MB;
-  nbMinFree.Max := MIN_FREE_SPACE_UPPER_MB;
+  nbMinFree.Min := MIN_RESERVE_PERCENT;
+  nbMinFree.Max := MAX_RESERVE_PERCENT;
   // Whole megabytes only
   nbMinFree.DecimalDigits := 0;
   cbImportWorkers.Items.Clear;
@@ -295,10 +296,20 @@ begin
 end;
 
 procedure TfrmSettings.UpdateOK;
+var
+  LReserve: Int64;
 begin
   lblTokenExpiry.Text := DescribeTokenExpiry(Token);
   btnOK.Enabled := (Token <> '') and (DataFolder <> '') and
     TPath.IsPathRooted(DataFolder);
+  // What the percentage comes to on the chosen folder's drive
+  lblMinFreeUnit.Text := MIN_FREE_UNIT_TEXT;
+  if TPath.IsPathRooted(DataFolder) and (TGDEMStore.DriveSizeAt(DataFolder) > 0) then
+  begin
+    LReserve := TGDEMStore.ReserveAt(DataFolder, Round(nbMinFree.Value));
+    lblMinFreeUnit.Text := Format('%s (%s on that drive)',
+      [MIN_FREE_UNIT_TEXT, FormatByteSize(LReserve)]);
+  end;
 end;
 
 class procedure TfrmSettings.SelectChoice(ACombo: TComboBox;
@@ -373,7 +384,8 @@ begin
   LForm := TfrmSettings.Create(Application);
   LForm.memToken.Text := ASettings.BearerToken;
   LForm.edtDataFolder.Text := ASettings.DataFolder;
-  LForm.nbMinFree.Value := ASettings.MinFreeSpaceMB;
+  LForm.nbMinFree.Value := EnsureRange(ASettings.MinFreePercent, MIN_RESERVE_PERCENT,
+    MAX_RESERVE_PERCENT);
   LForm.SetImportWorkers(ASettings.ImportWorkers);
   LForm.cbDownloadSpeed.ItemIndex := Ord(DownloadSpeedFromKey(ASettings.DownloadSpeed));
   LForm.cbTheme.ItemIndex := Ord(ThemeFromKey(ASettings.Theme));
@@ -390,7 +402,8 @@ begin
       if AResult = mrOk then
       begin
         ASettings.BearerToken := LForm.Token;
-        ASettings.MinFreeSpaceMB := Round(LForm.nbMinFree.Value);
+        ASettings.MinFreePercent := EnsureRange(Round(LForm.nbMinFree.Value),
+          MIN_RESERVE_PERCENT, MAX_RESERVE_PERCENT);
         ASettings.ImportWorkers := LForm.GetImportWorkers;
         if LForm.cbDownloadSpeed.ItemIndex >= 0 then
           ASettings.DownloadSpeed :=

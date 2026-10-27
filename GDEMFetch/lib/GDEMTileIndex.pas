@@ -92,6 +92,11 @@ type
       @param(ASource The index to copy.) }
     procedure Assign(ASource: TTileIndex);
 
+    { Marks every tile that has data in another index as having data in
+      this one too, keeping those it already has: the union of the two.
+      @param(ASource The index to add.) }
+    procedure AddIndex(ASource: TTileIndex);
+
     { Marks a tile as having data. Tiles outside the world are ignored.
       @param(ASouth Latitude of the tile's southern edge.)
       @param(AWest Longitude of the tile's western edge.) }
@@ -269,6 +274,15 @@ procedure TTileIndex.Assign(ASource: TTileIndex);
 begin
   Move(ASource.FBits, FBits, SizeOf(FBits));
   FCount := ASource.FCount;
+end;
+
+procedure TTileIndex.AddIndex(ASource: TTileIndex);
+var
+  LIndex: Integer;
+begin
+  for LIndex := 0 to High(FBits) do
+    FBits[LIndex] := FBits[LIndex] or ASource.FBits[LIndex];
+  FCount := CountBits;
 end;
 
 procedure TTileIndex.Add(ASouth, AWest: Integer);

@@ -168,12 +168,13 @@ object frmSettings: TfrmSettings
       Size.Width = 200.000000000000000000
       Size.Height = 22.000000000000000000
       Size.PlatformDefault = False
-      Text = 'Always leave at least this much free:'
+      Text = 'Leave at least'
     end
     object nbMinFree: TNumberBox
       Touch.InteractiveGestures = [LongTap, DoubleTap]
       TabOrder = 2
       Cursor = crIBeam
+      OnChangeTracking = InputChangeTracking
       Position.X = 208.000000000000000000
       Position.Y = 63.000000000000000000
       Size.Width = 100.000000000000000000
@@ -181,12 +182,14 @@ object frmSettings: TfrmSettings
       Size.PlatformDefault = False
     end
     object lblMinFreeUnit: TLabel
+      Anchors = [akLeft, akTop, akRight]
       Position.X = 316.000000000000000000
       Position.Y = 64.000000000000000000
-      Size.Width = 40.000000000000000000
+      Size.Width = 220.000000000000000000
       Size.Height = 22.000000000000000000
       Size.PlatformDefault = False
-      Text = 'MB'
+      TextSettings.Trimming = Character
+      Text = '% free drive space'
     end
     object lblImportWorkers: TLabel
       Position.Y = 98.000000000000000000

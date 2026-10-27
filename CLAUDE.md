@@ -302,6 +302,71 @@ owner whether it has been applied before changing the same units.
    progress dialog for moving the data folder; a macOS `.icns` and a
    Linux `.desktop` file; a menu item to open the Reports folder.
 
+### Shift + right-click (27 October 2026)
+
+Shift + right-click adds the country under the pointer to the selection
+(`TfrmMain.MapRightClick`, now given the modifier keys: `TMapPointEvent`
+has an `AShift` parameter). The current selection's tiles (the map's
+`SelectionMask`, or every tile of a dragged block) are put in a
+`TTileIndex` and the country's added with the new `TTileIndex.AddIndex`
+(a bitwise OR), so a tile shared by two countries is counted once; the
+owner expected overlaps to need tidying, but the union removes them.
+The selection is named from `FSelectedCountries` (`Germany + France`, or
+`Germany + France + 3 more`), which is trusted only while the map's
+`SelectionName` is still `FSelectionLabel`; a dragged block is named
+`Selected area`. Not yet built.
+
+The download summary now says "1 was already here" and "1 has no data"
+for counts of one (`IfThen` in `TDownloadBatch.Run`).
+
+The toolbar's Tile label, tile name box (`edtTile`) and Fetch tile button
+(`btnFetch`, `btnFetchClick`) were removed at the owner's request, as
+selecting on the map does the same; Fetch selection, Cancel and the
+selection label moved left to fill the space. `FetchTiles` stays, used by
+Fetch selection.
+
+Fetch selection no longer asks "Download N tile(s), about X?" (it asked
+for more than `CONFIRM_TILE_COUNT`, 10, tiles, or when space was short):
+the owner found it pointless before the progress dialog, which has Cancel.
+`CONFIRM_TILE_COUNT` is gone; a selection too big for the free space
+above the reserve now gets a `WARNING:` line on the Debug tab instead.
+
+The free-space reserve is now a percentage of the drive's size, not a
+fixed number of megabytes: `TGDEMSettings.MinFreePercent` (JSON
+`minFreePercent`, default `DEFAULT_RESERVE_PERCENT` 10, kept to
+`MIN_RESERVE_PERCENT` 1 to `MAX_RESERVE_PERCENT` 50; never 0, at the
+owner's wish, as SSDs need spare space). The old `minFreeSpaceMB` is
+ignored by Neon (it reads only declared members), so old settings start
+at 10%. `GDEMStore` gained `DriveSizeAt`, `ReserveAt(path, percent)` and
+`Reserve(percent)`, sharing a `MeasureDrive` routine with `FreeSpaceAt`
+(`GetDiskFreeSpaceEx` total on Windows, `f_blocks * f_frsize` on POSIX);
+an unmeasurable drive gets `FALLBACK_RESERVE_BYTES`, 2 GB.
+`TfrmMain.ReserveBytes` uses the data folder's drive; `StartMove` checks
+the destination against that drive's own share. Settings reads "Leave at
+least [n] % free drive space (N GB on that drive)", updating as the
+number or folder changes. The owner asked for "10% of the drive's free
+space"; this was taken as 10% of the drive, the usual SSD advice, since a
+share of the free space would shrink as the drive filled.
+
+### Move Existing Files (27 October 2026)
+
+Data > Move Existing Files... (`mnuMoveImport`, `mnuMoveImportClick`) is
+the import with the originals deleted, for moving the owner's old
+downloads (such as `E:\usgs\data\World`, all in one folder) into the
+block layout; the owner has them backed up. `TGDEMStore.ImportFrom` has a
+new `AMoveSource` parameter (default `False`): after a file's copy is
+size-checked and renamed into place the source is deleted, as are sources
+the store already has at the same size (deleted after the space check,
+before the workers start). Failures to delete only log a `WARNING:` and
+count in `TImportResult.SourcesKept`; `SourcesDeleted` counts the rest.
+Emptied folders inside the source are removed, never the source itself
+(`RemoveEmptyFoldersUpTo`). If the source is on the same drive as the
+store (`SameDrive`: `GetVolumePathName` on Windows, `st_dev` on POSIX)
+the up-front total-space check is skipped. It still copies and deletes
+rather than renaming, as the owner asked for the import's behaviour; a
+rename within one drive would be far faster for 400 GB if wanted. Not
+yet built.
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection
@@ -349,6 +414,21 @@ owner whether it has been applied before changing the same units.
   real CMR, with a whole-world selection into an empty data folder: it
   works, with no fallback to names. The old name lookup took 6 minutes
   for the whole world (230 requests).
+- **Slow after the whole world, 27 October 2026.** The day after the
+  whole-world run (383 GB from the Mac, which shares the owner's static
+  IP and Earthdata account), Windows at Fast fetched Britain and Ireland
+  (87 tiles, 1.0 GB) at only 5 MB/s, and a part of Australia was slow
+  too. The report showed GDEMFetch working as it should: block lookup of
+  all 87 in one request in 1 s, 4 to 16 at once within 9 s, no retries,
+  502s, 429s or cut-backs. NASA answered every request and redirect
+  promptly, but each file then arrived at 0.3 to 0.6 MB/s (N57W004_dem
+  14.1 MB in 23 s, N56W005_dem 22.7 MB in 59 s, N52W004_dem 21.6 MB in
+  79 s), against about 3.5 MB/s per connection before. So NASA (or
+  CloudFront) was slowing every connection for this account or IP, not
+  refusing it, which the throttle cannot see. NASA publishes no limits.
+  To be checked: whether speed returns after a day or two. Every tile
+  had been downloaded from this IP and account by then, so there is no
+  fresh area to compare. Nothing in GDEMFetch was changed for it.
 - Measured on the owner's line: 1 at a time about 3 MB/s; 3 about
   12 MB/s; 6 about 15 MB/s; 12 about 26 MB/s (36 tiles); 16 about
   56 MB/s (100 tiles, 2.1 GB in 38 s, no errors, no cut-backs). With the

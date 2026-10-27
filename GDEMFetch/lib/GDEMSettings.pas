@@ -34,8 +34,16 @@ const
   { Name of the settings file inside @link(SETTINGS_FOLDER_NAME). }
   SETTINGS_FILE_NAME = 'settings.json';
 
-  { Default for @link(TGDEMSettings.MinFreeSpaceMB): keep 2 GB free. }
-  DEFAULT_MIN_FREE_SPACE_MB = 2048;
+  { Default for @link(TGDEMSettings.MinFreePercent): keep 10% of the drive
+    free. SSDs in particular need spare space to stay fast and last. }
+  DEFAULT_RESERVE_PERCENT = 10;
+
+  { The lowest @link(TGDEMSettings.MinFreePercent) allowed: some space is
+    always kept free, so the drive never fills completely. }
+  MIN_RESERVE_PERCENT = 1;
+
+  { The highest @link(TGDEMSettings.MinFreePercent) allowed. }
+  MAX_RESERVE_PERCENT = 50;
 
   { Default for @link(TGDEMSettings.ImportWorkers): one file at a time,
     which suits every kind of drive. }
@@ -133,8 +141,8 @@ type
     FDataFolder: string;
     { Backing field for @link(DataFolderUsed). }
     FDataFolderUsed: Boolean;
-    { Backing field for @link(MinFreeSpaceMB). }
-    FMinFreeSpaceMB: Integer;
+    { Backing field for @link(MinFreePercent). }
+    FMinFreePercent: Integer;
     { Backing field for @link(Theme). }
     FTheme: string;
     { Backing field for @link(ImportWorkers). }
@@ -216,10 +224,15 @@ type
       again somewhere unexpected. }
     property DataFolderUsed: Boolean read FDataFolderUsed write FDataFolderUsed;
 
-    { Free space, in megabytes, that downloads must leave on the drive
-      holding @link(DataFolder). A batch of downloads stops before going
-      below it. Defaults to @link(DEFAULT_MIN_FREE_SPACE_MB). }
-    property MinFreeSpaceMB: Integer read FMinFreeSpaceMB write FMinFreeSpaceMB;
+    { How much of the drive holding @link(DataFolder) downloads, imports
+      and moves must leave free, as a percentage of the drive's size, from
+      @link(MIN_RESERVE_PERCENT) to @link(MAX_RESERVE_PERCENT); values
+      outside that are kept to it when used. A batch stops before going
+      below it. Defaults to @link(DEFAULT_RESERVE_PERCENT). Settings saved
+      by older versions held a fixed size in megabytes
+      (@code(minFreeSpaceMB)); that is ignored, so they start at the
+      default. }
+    property MinFreePercent: Integer read FMinFreePercent write FMinFreePercent;
 
     { The look of the program, stored by key: @code(Default), @code(Dark),
       @code(AquaGraphite), @code(RubyGraphite) or @code(GoldenGraphite).
@@ -381,7 +394,7 @@ constructor TGDEMSettings.Create;
 begin
   inherited Create;
   FDataFolder := DefaultDataFolder;
-  FMinFreeSpaceMB := DEFAULT_MIN_FREE_SPACE_MB;
+  FMinFreePercent := DEFAULT_RESERVE_PERCENT;
   FTheme := 'Default';
   FImportWorkers := DEFAULT_IMPORT_WORKERS;
   FDownloadSpeed := DOWNLOAD_SPEED_KEYS[DEFAULT_DOWNLOAD_SPEED];

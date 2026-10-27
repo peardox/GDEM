@@ -55,6 +55,9 @@ const
   { Average size of one tile's two files, used for estimates. The whole
     world is about 400 GB over about 23,000 tiles. }
   ESTIMATED_TILE_BYTES = Int64(18) * 1024 * 1024;
+  { Space kept free when a drive's size cannot be found out, as the old
+    fixed reserve was: 2 GB. }
+  FALLBACK_RESERVE_BYTES = Int64(2) * 1024 * 1024 * 1024;
   { Most files @link(TGDEMStore.ImportFrom) copies at once. The default,
     1, is @code(DEFAULT_IMPORT_WORKERS) in @code(GDEMSettings). }
   MAX_IMPORT_WORKERS = 16;
@@ -90,6 +93,13 @@ type
       @link(IMPORT_ATTEMPTS) tries. Each is listed in the log; running the
       import again tries them again. }
     Failed: Integer;
+    { When moving: source files deleted, because they were copied or the
+      store already had them at the same size. Always 0 when copying. }
+    SourcesDeleted: Integer;
+    { When moving: source files that were safely in the store but could
+      not be deleted from the source (read-only, say). Each is listed in
+      the log. Always 0 when copying. }
+    SourcesKept: Integer;
   end;
 
   { @abstract(Contents of @link(STORE_MARKER_FILE).) }
@@ -244,6 +254,28 @@ type
       @returns(Bytes free, or -1 if it cannot be found out.) }
     class function FreeSpaceAt(const APath: string): Int64; static;
 
+    { Size of the drive holding a path, used and free together. The path
+      need not exist; its nearest existing parent is checked.
+      @param(APath Any path.)
+      @returns(Bytes, or -1 if it cannot be found out.) }
+    class function DriveSizeAt(const APath: string): Int64; static;
+
+    { How much space must be left free on the drive holding a path: a
+      percentage of the drive's size, so the reserve suits the drive. SSDs
+      in particular slow down and wear faster when nearly full.
+      @param(APath Any path on the drive.)
+      @param(APercent The percentage of the drive to keep free; kept to
+        @link(MIN_RESERVE_PERCENT) to @link(MAX_RESERVE_PERCENT).)
+      @returns(Bytes to leave free; @link(FALLBACK_RESERVE_BYTES) if the
+        drive's size cannot be found out.) }
+    class function ReserveAt(const APath: string; APercent: Integer): Int64; static;
+
+    { How much space must be left free on the drive holding the root; see
+      @link(ReserveAt).
+      @param(APercent The percentage of the drive to keep free.)
+      @returns(Bytes to leave free.) }
+    function Reserve(APercent: Integer): Int64;
+
     { Full path of the downloaded-tiles index file.
       @returns(@code(downloaded.bin) in the root.) }
     function DownloadedIndexFileName: string;
@@ -300,9 +332,19 @@ type
       const AOnProgress: TStoreProgressEvent): TArray<string>;
 
     { Copies every ASTER GDEM V3 tile file found in a folder, and in any
-      folders inside it, into this store's block layout. The source is
-      opened for reading only and nothing in it is changed, moved or
-      deleted.
+      folders inside it, into this store's block layout. Unless AMoveSource
+      is set, the source is opened for reading only and nothing in it is
+      changed, moved or deleted.
+
+      With AMoveSource set, the files are moved instead: each source file
+      is deleted once its copy is in the store, complete and under its
+      real name, and so is each source file the store already has at the
+      same size. Files that are not tile files, and files that fail, are
+      left where they are. Folders inside the source left empty are
+      removed; the source folder itself is kept. When the source is on the
+      same drive as the store, moving needs no extra space overall, so the
+      check of the total space needed is skipped; the check before each
+      file still applies.
 
       Files the store already has, at the same size, are skipped, so an
       interrupted import can simply be run again. Each file is copied under
@@ -337,13 +379,15 @@ type
       @param(AOnProgress Called before each file is copied and after each
         file is dealt with, from the worker threads, possibly from several
         at once. May be @nil.)
-      @returns(What was copied and skipped.)
+      @param(AMoveSource @true to delete each source file once it is safely
+        in the store: a move rather than a copy.)
+      @returns(What was copied, skipped and, when moving, deleted.)
       @raises(EStoreError if the folders overlap, space is short, the data
         folder disappears, or too many files cannot be copied.)
       @raises(EOperationCancelled if AToken is cancelled.) }
     function ImportFrom(const ASourceFolder: string; AReserve: Int64;
       AWorkers: Integer; AToken: TCancelToken;
-      const AOnProgress: TImportProgressEvent): TImportResult;
+      const AOnProgress: TImportProgressEvent; AMoveSource: Boolean = False): TImportResult;
 
     { Total size of all tile files.
       @param(AToken Checked between files. May be @nil.)
@@ -378,7 +422,7 @@ uses
   Winapi.Windows,
   {$ENDIF}
   {$IFDEF POSIX}
-  Posix.SysStatvfs,
+  Posix.SysStatvfs, Posix.SysStat,
   {$ENDIF}
   Neon.Core.Types, Neon.Core.Persistence, Neon.Core.Persistence.JSON,
   GDEMSettings;
@@ -412,6 +456,59 @@ begin
     Result := Format('%d min %d s', [LMinutes, LSeconds mod 60])
   else
     Result := Format('%d s', [LSeconds]);
+end;
+
+{ Checks whether two paths are on the same drive (volume), so a move
+  between them needs no extra space. Both paths must exist.
+  @param(APath1 A path.)
+  @param(APath2 Another path.)
+  @returns(@true if they are on the same drive; @false if they are not, or
+    it cannot be found out.) }
+function SameDrive(const APath1, APath2: string): Boolean;
+{$IFDEF MSWINDOWS}
+var
+  LVolume1, LVolume2: array[0..MAX_PATH] of Char;
+begin
+  Result := False;
+  if not GetVolumePathName(PChar(APath1), LVolume1, Length(LVolume1)) then
+    Exit;
+  if not GetVolumePathName(PChar(APath2), LVolume2, Length(LVolume2)) then
+    Exit;
+  Result := SameText(string(PChar(@LVolume1[0])), string(PChar(@LVolume2[0])));
+end;
+{$ELSE}
+var
+  LStat1, LStat2: _stat;
+begin
+  Result := (stat(PAnsiChar(UTF8String(APath1)), LStat1) = 0) and
+    (stat(PAnsiChar(UTF8String(APath2)), LStat2) = 0) and
+    (LStat1.st_dev = LStat2.st_dev);
+end;
+{$ENDIF}
+
+{ Removes a folder if it is empty, then each parent that becomes empty, up
+  to but not including a top folder. Errors are ignored: a folder that
+  cannot be removed is simply left.
+  @param(AFolder The folder to start from.)
+  @param(ATop The folder to stop at, which is never removed.) }
+procedure RemoveEmptyFoldersUpTo(const AFolder, ATop: string);
+var
+  LFolder, LTop: string;
+begin
+  LFolder := NormalizeFolder(AFolder);
+  LTop := NormalizeFolder(ATop);
+  while (LFolder <> '') and not SameText(LFolder, LTop) and
+        StartsText(IncludeTrailingPathDelimiter(LTop), LFolder) do
+  begin
+    try
+      if not TDirectory.IsEmpty(LFolder) then
+        Exit;
+      TDirectory.Delete(LFolder);
+    except
+      Exit;
+    end;
+    LFolder := NormalizeFolder(TPath.GetDirectoryName(LFolder));
+  end;
 end;
 
 type
@@ -596,7 +693,14 @@ begin
   end;
 end;
 
-class function TGDEMStore.FreeSpaceAt(const APath: string): Int64;
+{ Measures the drive holding a path. The path need not exist; its nearest
+  existing parent is measured.
+  @param(APath Any path.)
+  @param(AFree Receives the bytes free for the current user.)
+  @param(ASize Receives the size of the drive, in bytes.)
+  @returns(@false if the drive could not be measured, in which case AFree
+    and ASize are -1.) }
+function MeasureDrive(const APath: string; out AFree, ASize: Int64): Boolean;
 var
   LPath: string;
   {$IFDEF MSWINDOWS}
@@ -606,7 +710,9 @@ var
   LStat: _statvfs;
   {$ENDIF}
 begin
-  Result := -1;
+  Result := False;
+  AFree := -1;
+  ASize := -1;
   // Walk up to the nearest folder that exists
   LPath := NormalizeFolder(APath);
   while (LPath <> '') and not TDirectory.Exists(LPath) do
@@ -620,12 +726,49 @@ begin
 
   {$IFDEF MSWINDOWS}
   if GetDiskFreeSpaceEx(PChar(IncludeTrailingPathDelimiter(LPath)), LFree, LTotal, nil) then
-    Result := LFree;
+  begin
+    AFree := LFree;
+    ASize := LTotal;
+    Result := True;
+  end;
   {$ENDIF}
   {$IFDEF POSIX}
   if statvfs(PAnsiChar(UTF8String(LPath)), LStat) = 0 then
-    Result := Int64(LStat.f_bavail) * Int64(LStat.f_frsize);
+  begin
+    AFree := Int64(LStat.f_bavail) * Int64(LStat.f_frsize);
+    ASize := Int64(LStat.f_blocks) * Int64(LStat.f_frsize);
+    Result := True;
+  end;
   {$ENDIF}
+end;
+
+class function TGDEMStore.FreeSpaceAt(const APath: string): Int64;
+var
+  LSize: Int64;
+begin
+  MeasureDrive(APath, Result, LSize);
+end;
+
+class function TGDEMStore.DriveSizeAt(const APath: string): Int64;
+var
+  LFree: Int64;
+begin
+  MeasureDrive(APath, LFree, Result);
+end;
+
+class function TGDEMStore.ReserveAt(const APath: string; APercent: Integer): Int64;
+var
+  LSize: Int64;
+begin
+  LSize := DriveSizeAt(APath);
+  if LSize <= 0 then
+    Exit(FALLBACK_RESERVE_BYTES);
+  Result := LSize div 100 * EnsureRange(APercent, MIN_RESERVE_PERCENT, MAX_RESERVE_PERCENT);
+end;
+
+function TGDEMStore.Reserve(APercent: Integer): Int64;
+begin
+  Result := ReserveAt(FRoot, APercent);
 end;
 
 function TGDEMStore.FreeSpace: Int64;
@@ -867,10 +1010,14 @@ end;
 
 function TGDEMStore.ImportFrom(const ASourceFolder: string; AReserve: Int64;
   AWorkers: Integer; AToken: TCancelToken;
-  const AOnProgress: TImportProgressEvent): TImportResult;
+  const AOnProgress: TImportProgressEvent; AMoveSource: Boolean): TImportResult;
 var
   LSource, LSourceDir, LRootDir: string;
   LFiles: TArray<string>;
+  LPresentSources: TList<string>;
+  LMove, LSameDrive: Boolean;
+  LDeleted, LKept: Integer;
+  LSourceFolders: TList<string>;
   LTodo: TList<TImportItem>;
   LItem: TImportItem;
   LIndex, LSouth, LWest, LTotal, LPresent, LIgnored, LWorkerCount: Integer;
@@ -895,6 +1042,7 @@ begin
   LOnProgress := AOnProgress;
   LReserve := AReserve;
   LWorkerCount := EnsureRange(AWorkers, 1, MAX_IMPORT_WORKERS);
+  LMove := AMoveSource;
 
   LSource := NormalizeFolder(TPath.GetFullPath(NormalizeFolder(ASourceFolder)));
   if not TDirectory.Exists(LSource) then
@@ -913,6 +1061,8 @@ begin
 
   LTodo := TList<TImportItem>.Create;
   LFailedFolders := TList<string>.Create;
+  LSourceFolders := TList<string>.Create;
+  LPresentSources := TList<string>.Create;
   LLock := TObject.Create;
   try
     // Work out what needs copying and how much space it takes. Files the
@@ -934,7 +1084,10 @@ begin
       LItem.Dest := PathForFile(LFiles[LIndex]);
       LItem.Size := TFile.GetSize(LItem.Source);
       if TFile.Exists(LItem.Dest) and (TFile.GetSize(LItem.Dest) = LItem.Size) then
-        Inc(LPresent)
+      begin
+        Inc(LPresent);
+        LPresentSources.Add(LItem.Source);
+      end
       else
       begin
         LTodo.Add(LItem);
@@ -944,12 +1097,42 @@ begin
     Log(Format('  found %d tile file(s): %d already in the data folder, %d to copy (%s), ' +
       '%d at a time', [LTotal, LPresent, LTodo.Count, FormatByteSize(LNeeded), LWorkerCount]));
 
+    // Moving within one drive frees each file's space as the next is used,
+    // so only the check before each file matters
+    LSameDrive := LMove and SameDrive(LSource, FRoot);
+    if LSameDrive then
+      Log('  moving within the same drive: no extra space is needed overall');
     LFree := FreeSpace;
-    if (LFree >= 0) and (LFree - LNeeded < LReserve) then
+    if not LSameDrive and (LFree >= 0) and (LFree - LNeeded < LReserve) then
       raise EStoreError.CreateFmt('Importing needs about %s, but the data drive has %s ' +
         'free and %s must be kept free. Free some space, choose a larger drive, or ' +
         'lower the reserve in File > Settings.',
         [FormatByteSize(LNeeded), FormatByteSize(LFree), FormatByteSize(LReserve)]);
+
+    // Moving: the store already has these, the same size, so their source
+    // files can go
+    LDeleted := 0;
+    LKept := 0;
+    if LMove then
+      for LIndex := 0 to LPresentSources.Count - 1 do
+      begin
+        LToken.Check;
+        try
+          TFile.Delete(LPresentSources[LIndex]);
+          Inc(LDeleted);
+          if not LSourceFolders.Contains(TPath.GetDirectoryName(LPresentSources[LIndex])) then
+            LSourceFolders.Add(TPath.GetDirectoryName(LPresentSources[LIndex]));
+        except
+          on E: Exception do
+          begin
+            Inc(LKept);
+            Log(Format('  WARNING: %s is already in the data folder but could not be ' +
+              'deleted: %s', [LPresentSources[LIndex], E.Message.TrimRight(['.'])]));
+          end;
+        end;
+      end;
+    if LMove and (LDeleted > 0) then
+      Log(Format('  deleted %d source file(s) the data folder already had', [LDeleted]));
 
     LNext := -1;
     LDone := LPresent;
@@ -1076,6 +1259,30 @@ begin
                 end;
               end;
 
+              // Moving: the copy is complete and under its real name, so
+              // the source can go. Failing to delete it loses nothing.
+              if LCopiedOk and LMove then
+              begin
+                try
+                  TFile.Delete(LJob.Source);
+                  TInterlocked.Increment(LDeleted);
+                  TMonitor.Enter(LLock);
+                  try
+                    if not LSourceFolders.Contains(TPath.GetDirectoryName(LJob.Source)) then
+                      LSourceFolders.Add(TPath.GetDirectoryName(LJob.Source));
+                  finally
+                    TMonitor.Exit(LLock);
+                  end;
+                except
+                  on E: Exception do
+                  begin
+                    TInterlocked.Increment(LKept);
+                    Log(Format('  WARNING: copied %s but could not delete it: %s',
+                      [LJob.Source, E.Message.TrimRight(['.'])]));
+                  end;
+                end;
+              end;
+
               if not LCopiedOk and not LToken.Cancelled then
               begin
                 if not TDirectory.Exists(FRoot) then
@@ -1158,6 +1365,10 @@ begin
     // Only now that no worker is writing can empty folders be removed
     for LFolder in LFailedFolders do
       PruneEmptyFolders(LFolder);
+    // Moving: folders inside the source that are now empty go too, but
+    // never the source folder itself
+    for LFolder in LSourceFolders do
+      RemoveEmptyFoldersUpTo(LFolder, LSource);
 
     Result.Copied := LCopied;
     Result.AlreadyPresent := LPresent;
@@ -1165,6 +1376,8 @@ begin
     Result.Ignored := LIgnored + LIgnoredCopy;
     Result.Bytes := LCopiedBytes;
     Result.Failed := LFailedCount;
+    Result.SourcesDeleted := LDeleted;
+    Result.SourcesKept := LKept;
 
     if LError <> '' then
       raise EStoreError.Create(LError);
@@ -1172,6 +1385,8 @@ begin
     LReport(LTotal, '');
   finally
     LLock.Free;
+    LPresentSources.Free;
+    LSourceFolders.Free;
     LFailedFolders.Free;
     LTodo.Free;
   end;

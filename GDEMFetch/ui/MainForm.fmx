@@ -38,6 +38,10 @@ object frmMain: TfrmMain
         Text = 'Import Existing Tiles...'
         OnClick = mnuImportClick
       end
+      object mnuMoveImport: TMenuItem
+        Text = 'Move Existing Files...'
+        OnClick = mnuMoveImportClick
+      end
       object mnuRescan: TMenuItem
         Text = 'Rescan Data Folder'
         OnClick = mnuRescanClick
@@ -118,58 +122,31 @@ object frmMain: TfrmMain
     Size.Height = 40.000000000000000000
     Size.PlatformDefault = False
     TabOrder = 0
-    object lblTile: TLabel
-      Position.X = 8.000000000000000000
-      Position.Y = 9.000000000000000000
-      Size.Width = 32.000000000000000000
-      Size.Height = 22.000000000000000000
-      Size.PlatformDefault = False
-      Text = 'Tile'
-    end
-    object edtTile: TEdit
-      Touch.InteractiveGestures = [LongTap, DoubleTap]
-      TabOrder = 0
-      Position.X = 44.000000000000000000
-      Position.Y = 9.000000000000000000
-      Size.Width = 100.000000000000000000
-      Size.Height = 22.000000000000000000
-      Size.PlatformDefault = False
-    end
-    object btnFetch: TButton
-      Position.X = 152.000000000000000000
-      Position.Y = 7.000000000000000000
-      Size.Width = 100.000000000000000000
-      Size.Height = 26.000000000000000000
-      Size.PlatformDefault = False
-      TabOrder = 1
-      Text = 'Fetch tile'
-      OnClick = btnFetchClick
-    end
     object btnFetchSelection: TButton
-      Position.X = 260.000000000000000000
+      Position.X = 8.000000000000000000
       Position.Y = 7.000000000000000000
       Size.Width = 120.000000000000000000
       Size.Height = 26.000000000000000000
       Size.PlatformDefault = False
-      TabOrder = 2
+      TabOrder = 0
       Text = 'Fetch selection'
       OnClick = btnFetchSelectionClick
     end
     object btnCancel: TButton
-      Position.X = 388.000000000000000000
+      Position.X = 136.000000000000000000
       Position.Y = 7.000000000000000000
       Size.Width = 80.000000000000000000
       Size.Height = 26.000000000000000000
       Size.PlatformDefault = False
-      TabOrder = 3
+      TabOrder = 1
       Text = 'Cancel'
       OnClick = btnCancelClick
     end
     object lblSelection: TLabel
       Anchors = [akLeft, akTop, akRight]
-      Position.X = 480.000000000000000000
+      Position.X = 228.000000000000000000
       Position.Y = 9.000000000000000000
-      Size.Width = 612.000000000000000000
+      Size.Width = 864.000000000000000000
       Size.Height = 22.000000000000000000
       Size.PlatformDefault = False
       TextSettings.Trimming = Character

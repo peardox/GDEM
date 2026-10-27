@@ -169,7 +169,7 @@ implementation
 
 uses
   System.Classes, System.IOUtils, System.Math, System.Diagnostics, System.SyncObjs,
-  System.Generics.Collections,
+  System.Generics.Collections, System.StrUtils,
   GDEMTiles, GDEMReport;
 
 { TDownloadBatch }
@@ -546,11 +546,13 @@ begin
     if LThrottle.Lowest < LThrottle.Peak then
       LCutBack := Format(' (cut back to %d at worst, %d at the end)',
         [LThrottle.Lowest, LThrottle.Allowed]);
-    LBoth(Format('Downloaded %d tile(s), %s, in %s at %s/s, up to %d at a time%s; %d were ' +
-      'already here, %d have no data, %d failed.',
+    // "1 was already here", "2 were"; "1 has no data", "2 have"
+    LBoth(Format('Downloaded %d tile(s), %s, in %s at %s/s, up to %d at a time%s; %d %s ' +
+      'already here, %d %s no data, %d failed.',
       [LDownloaded, FormatByteSize(LSaved), FormatDuration(LSeconds),
        FormatByteSize(Round(LBytes / Max(LSeconds, 0.001))), LThrottle.Peak, LCutBack,
-       LAlready, LNoData, LFailed]));
+       LAlready, IfThen(LAlready = 1, 'was', 'were'), LNoData,
+       IfThen(LNoData = 1, 'has', 'have'), LFailed]));
     if LError <> '' then
       raise EGDEMError.Create(LError);
     AToken.Check;

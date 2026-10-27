@@ -23,8 +23,9 @@
       on screen.)
     @item(Right-drag, middle-drag or Shift+left-drag moves the map.)
     @item(A right click, without moving, fires
-      @link(TWorldMapView.OnRightClick); GDEMFetch uses it to select the
-      country under the pointer.)
+      @link(TWorldMapView.OnRightClick), with the modifier keys held;
+      GDEMFetch uses it to select the country under the pointer, or with
+      Shift to add it to the selection.)
     @item(The mouse wheel zooms in and out around the pointer.)
   )
 
@@ -85,8 +86,9 @@ type
   { Reports a point clicked on the map.
     @param(Sender The map view.)
     @param(ALat Latitude clicked, in degrees.)
-    @param(ALon Longitude clicked, from -180 to 180.) }
-  TMapPointEvent = procedure(Sender: TObject; ALat, ALon: Double) of object;
+    @param(ALon Longitude clicked, from -180 to 180.)
+    @param(AShift The modifier keys held when the button was released.) }
+  TMapPointEvent = procedure(Sender: TObject; ALat, ALon: Double; AShift: TShiftState) of object;
 
   { @abstract(How long the map took to draw during one stretch of
     movement.)
@@ -1758,7 +1760,7 @@ begin
   if LWasSelecting and Assigned(FOnSelectionChanged) then
     FOnSelectionChanged(Self);
   if LRightClick and Assigned(FOnRightClick) and ScreenToGeo(PointF(X, Y), LLat, LLon) then
-    FOnRightClick(Self, LLat, LLon);
+    FOnRightClick(Self, LLat, LLon, Shift);
 end;
 
 procedure TWorldMapView.MouseWheel(Shift: TShiftState; WheelDelta: Integer;

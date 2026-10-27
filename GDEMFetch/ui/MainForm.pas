@@ -78,10 +78,6 @@ const
   { Name of the RCDATA resource holding the world map image. }
   WORLD_MAP_RESOURCE = 'WORLDMAP';
 
-  { Selections larger than this many tiles ask for confirmation before
-    downloading. }
-  CONFIRM_TILE_COUNT = 10;
-
   { How often the data folder and its free space are checked, in
     milliseconds. }
   STORAGE_CHECK_INTERVAL = 60000;
@@ -115,6 +111,9 @@ type
     { Data > Import Existing Tiles: copies tiles from another folder into
       the data folder. }
     mnuImport: TMenuItem;
+    { Data > Move Existing Files: like @link(mnuImport), but deletes each
+      original once it is safely in the data folder. }
+    mnuMoveImport: TMenuItem;
     { Data > Rescan Data Folder: rebuilds the downloaded-tiles bitmap from
       the files and tidies the folder. }
     mnuRescan: TMenuItem;
@@ -149,13 +148,6 @@ type
     mnuClearLog: TMenuItem;
     { Toolbar above the tabs. }
     layTop: TLayout;
-    { Caption for @link(edtTile). }
-    lblTile: TLabel;
-    { Tile to fetch by name, such as @code(N50W002). Filled in when a single
-      tile is selected on the map. }
-    edtTile: TEdit;
-    { Fetches the tile named in @link(edtTile). }
-    btnFetch: TButton;
     { Fetches every tile in the map selection that has data and is not
       downloaded yet. }
     btnFetchSelection: TButton;
@@ -204,12 +196,10 @@ type
       @param(CanClose Set to @false while work is still stopping.) }
     procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
 
-    { Fetches the tile named in @link(edtTile).
-      @param(Sender The button.) }
-    procedure btnFetchClick(Sender: TObject);
-
-    { Fetches the tiles in the map selection that still need downloading,
-      confirming large or space-hungry batches.
+    { Fetches the tiles in the map selection that still need downloading.
+      It starts at once, without asking: the progress dialog that opens has
+      a Cancel button. If the drive looks too full for them all, the Debug
+      tab says so; downloading stops at the free-space reserve anyway.
       @param(Sender The button.) }
     procedure btnFetchSelectionClick(Sender: TObject);
 
@@ -229,6 +219,13 @@ type
       data folder, leaving the originals untouched.
       @param(Sender The menu item.) }
     procedure mnuImportClick(Sender: TObject);
+
+    { Asks for a folder of existing tile files and moves them into the
+      data folder: each original is deleted once its copy is safely there,
+      and so is each one the data folder already has. Asks first, saying
+      plainly that the originals are deleted.
+      @param(Sender The menu item.) }
+    procedure mnuMoveImportClick(Sender: TObject);
 
     { Rebuilds the downloaded-tiles bitmap from the data folder.
       @param(Sender The menu item.) }
@@ -343,6 +340,17 @@ type
       @link(RunStartup) downloads one. }
     FNeedIndexBuild: Boolean;
 
+    { The names of the countries in a selection made by right-clicking,
+      in the order they were added, so Shift+right-click can add to them.
+      Only meaningful while the map's @code(SelectionName) is
+      @link(FSelectionLabel). }
+    FSelectedCountries: TArray<string>;
+
+    { The name @link(MapRightClick) last gave the map's selection; if the
+      map's @code(SelectionName) is now something else, the selection has
+      changed since and @link(FSelectedCountries) no longer describes it. }
+    FSelectionLabel: string;
+
     { Adds a line to @link(memLog). Safe to call from any thread. Query
       strings in web addresses are hidden first (see @link(HideURLQueries)),
       as error messages can carry signed download addresses.
@@ -377,10 +385,15 @@ type
 
     { Starts a job that imports tiles from a folder, then rescans the data
       folder so the map shows them.
-      @param(ASourceFolder The folder to import from.) }
-    procedure StartImport(const ASourceFolder: string);
+      @param(ASourceFolder The folder to import from.)
+      @param(AMove @true to delete each original once it is safely in the
+        data folder (Data > Move Existing Files); @false to leave the
+        originals untouched.) }
+    procedure StartImport(const ASourceFolder: string; AMove: Boolean = False);
 
-    { The free-space reserve from the settings.
+    { The free-space reserve for the data folder's drive: the percentage
+      in the settings, of that drive's size (see
+      @code(TGDEMStore.Reserve)).
       @returns(Bytes that must be left free.) }
     function ReserveBytes: Int64;
 
@@ -391,8 +404,7 @@ type
     procedure LoadWorldMap;
 
     { Updates the selection label and buttons after the map selection or a
-      tile bitmap changes, and copies a single selected tile into
-      @link(edtTile).
+      tile bitmap changes.
       @param(Sender The map view.) }
     procedure MapSelectionChanged(Sender: TObject);
 
@@ -414,11 +426,22 @@ type
     procedure MapHover(Sender: TObject; ALat, ALon: Double; AOnMap: Boolean);
 
     { Selects every tile of the country under a right click, ready to fetch
-      or delete. Does nothing over the sea.
+      or delete. With Shift held, adds them to the current selection
+      instead, whether that is a country or countries, or a block dragged
+      on the map; a tile already selected stays selected once. Does
+      nothing over the sea.
       @param(Sender The map view.)
       @param(ALat Latitude clicked.)
-      @param(ALon Longitude clicked.) }
-    procedure MapRightClick(Sender: TObject; ALat, ALon: Double);
+      @param(ALon Longitude clicked.)
+      @param(AShift The modifier keys held.) }
+    procedure MapRightClick(Sender: TObject; ALat, ALon: Double; AShift: TShiftState);
+
+    { Names a selection of countries for the selection label, such as
+      @code(Germany + France), or @code(Germany + France + 3 more) when
+      there are more than three.
+      @param(ANames The countries, in the order they were added.)
+      @returns(The name.) }
+    class function DescribeCountries(const ANames: TArray<string>): string; static;
 
     { Names the selected tiles: every tile of the map's selection block, or
       only those in its @code(SelectionMask) when it is a country.
@@ -662,7 +685,7 @@ implementation
 {$R *.fmx}
 
 uses
-  System.Math, System.Diagnostics, System.Rtti, FMX.DialogService, FMX.Platform, GDEMAwake,
+  System.Math, System.StrUtils, System.Diagnostics, System.Rtti, FMX.DialogService, FMX.Platform, GDEMAwake,
   {$IFDEF MSWINDOWS}
   Winapi.Windows,
   {$ENDIF}
@@ -742,7 +765,6 @@ begin
   UseFmxMenuBar;
   {$ENDIF}
 
-  edtTile.Text := 'N50W002';
 
   FMap := TWorldMapView.Create(Self);
   FMap.Parent := layMap;
@@ -912,7 +934,10 @@ end;
 
 function TfrmMain.ReserveBytes: Int64;
 begin
-  Result := Int64(FSettings.MinFreeSpaceMB) * 1024 * 1024;
+  if FStore = nil then
+    Result := TGDEMStore.ReserveAt(FSettings.DataFolder, FSettings.MinFreePercent)
+  else
+    Result := FStore.Reserve(FSettings.MinFreePercent);
 end;
 
 { Map }
@@ -1006,36 +1031,80 @@ begin
 end;
 
 procedure TfrmMain.MapSelectionChanged(Sender: TObject);
-var
-  LSelection: TTileRect;
 begin
-  LSelection := FMap.Selection;
   UpdateSelectionText;
-  if LSelection.Count = 1 then
-    edtTile.Text := TileName(LSelection.South, LSelection.West);
   UpdateButtons;
 end;
 
-procedure TfrmMain.MapRightClick(Sender: TObject; ALat, ALon: Double);
+procedure TfrmMain.MapRightClick(Sender: TObject; ALat, ALon: Double; AShift: TShiftState);
 var
-  LCountry: Integer;
+  LCountry, LLat, LLon, LIndex: Integer;
   LName: string;
-  LTiles: TTileIndex;
+  LCountryTiles, LTiles: TTileIndex;
+  LNames: TArray<string>;
+  LRect: TTileRect;
+  LKnown: Boolean;
 begin
   LCountry := FVectors.CountryIndexAt(ALat, ALon);
   if LCountry < 0 then
     Exit;
   LName := FVectors.CountryName(LCountry);
+  LCountryTiles := TTileIndex.Create;
   LTiles := TTileIndex.Create;
   try
-    FVectors.AddCountryTiles(LCountry, LTiles);
-    if LTiles.IsEmpty then
-      ShowMessage(LName + ' lies outside ASTER GDEM coverage.')
-    else
-      FMap.SelectTiles(LTiles, LName);
+    FVectors.AddCountryTiles(LCountry, LCountryTiles);
+    if LCountryTiles.IsEmpty then
+    begin
+      ShowMessage(LName + ' lies outside ASTER GDEM coverage.');
+      Exit;
+    end;
+
+    // Shift adds to what is selected: the tiles of a country selection, or
+    // every tile of a dragged block
+    LNames := nil;
+    if (ssShift in AShift) and not FMap.Selection.IsEmpty then
+    begin
+      if FMap.SelectionMask <> nil then
+      begin
+        LTiles.Assign(FMap.SelectionMask);
+        if (FSelectionLabel <> '') and (FMap.SelectionName = FSelectionLabel) then
+          LNames := FSelectedCountries
+        else
+          LNames := [FMap.SelectionName];
+      end
+      else
+      begin
+        LRect := FMap.Selection;
+        for LLat := LRect.South to LRect.North - 1 do
+          for LLon := LRect.West to LRect.East - 1 do
+            LTiles.Add(LLat, LLon);
+        LNames := ['Selected area'];
+      end;
+    end;
+    // A union, so tiles the country shares with the selection count once
+    LTiles.AddIndex(LCountryTiles);
+
+    LKnown := False;
+    for LIndex := 0 to High(LNames) do
+      if SameText(LNames[LIndex], LName) then
+        LKnown := True;
+    if not LKnown then
+      LNames := LNames + [LName];
+    FSelectedCountries := LNames;
+    FSelectionLabel := DescribeCountries(LNames);
+    FMap.SelectTiles(LTiles, FSelectionLabel);
   finally
     LTiles.Free;
+    LCountryTiles.Free;
   end;
+end;
+
+class function TfrmMain.DescribeCountries(const ANames: TArray<string>): string;
+begin
+  if Length(ANames) <= 3 then
+    Result := string.Join(' + ', ANames)
+  else
+    Result := Format('%s + %s + %d more', [ANames[0], ANames[1], Length(ANames) - 2]);
 end;
 
 procedure TfrmMain.MapHover(Sender: TObject; ALat, ALon: Double; AOnMap: Boolean);
@@ -1072,13 +1141,13 @@ var
 begin
   LBusy := FJob <> nil;
   LHaveSelection := not FMap.Selection.IsEmpty;
-  btnFetch.Enabled := not LBusy;
   btnFetchSelection.Enabled := not LBusy and LHaveSelection;
   btnCancel.Enabled := LBusy;
   mnuZoomSelection.Enabled := LHaveSelection;
   mnuRefreshIndex.Enabled := FIndexBuilder = nil;
   mnuRescan.Enabled := not LBusy;
   mnuImport.Enabled := not LBusy;
+  mnuMoveImport.Enabled := not LBusy;
   mnuDeleteSelected.Enabled := not LBusy and LHaveSelection;
 end;
 
@@ -1703,18 +1772,54 @@ begin
     end);
 end;
 
-procedure TfrmMain.StartImport(const ASourceFolder: string);
+procedure TfrmMain.mnuMoveImportClick(Sender: TObject);
 var
-  LSource: string;
+  LFolder: string;
+begin
+  LFolder := '';
+  if not SelectDirectory('Choose the folder holding the ASTER GDEM .tif files to move',
+    '', LFolder) then
+    Exit;
+
+  TDialogService.MessageDialog(
+    Format('Move the ASTER GDEM tiles found in'#13#10'%s'#13#10'(and any folders ' +
+      'inside it) into the data folder'#13#10'%s?'#13#10#13#10 +
+      'Each original file is DELETED once its copy is complete in the data ' +
+      'folder, and so is each one the data folder already has. Other files ' +
+      'are left alone, and so are any that cannot be copied. A move can be ' +
+      'cancelled and run again later.',
+      [LFolder, FStore.Root]),
+    TMsgDlgType.mtWarning, [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo],
+    TMsgDlgBtn.mbNo, 0,
+    procedure(const AResult: TModalResult)
+    begin
+      if AResult = mrYes then
+        WithStore(
+          procedure
+          begin
+            StartImport(LFolder, True);
+          end);
+    end);
+end;
+
+procedure TfrmMain.StartImport(const ASourceFolder: string; AMove: Boolean);
+var
+  LSource, LVerb: string;
   LStore: TGDEMStore;
   LReserve: Int64;
   LWorkers: Integer;
+  LMove: Boolean;
 begin
   LSource := ASourceFolder;
+  LMove := AMove;
+  if LMove then
+    LVerb := 'Moving'
+  else
+    LVerb := 'Copying';
   LStore := FStore;
   LReserve := ReserveBytes;
   LWorkers := EnsureRange(FSettings.ImportWorkers, 1, MAX_IMPORT_WORKERS);
-  RunJob('Import',
+  RunJob(IfThen(LMove, 'Move import', 'Import'),
     procedure(AToken: TCancelToken)
     var
       LResult: TImportResult;
@@ -1732,12 +1837,12 @@ begin
           ShowProgress(AProgress.FilesDone, AProgress.FilesTotal);
 
           if AProgress.CurrentFile <> '' then
-            ProgressStatus('Copying ' + AProgress.CurrentFile)
+            ProgressStatus(LVerb + ' ' + AProgress.CurrentFile)
           else if AProgress.FilesDone >= AProgress.FilesTotal then
             ProgressStatus('Finishing...')
           else
-            ProgressStatus(Format('Found %d tile file(s); copying...',
-              [AProgress.FilesTotal]));
+            ProgressStatus(Format('Found %d tile file(s); %s...',
+              [AProgress.FilesTotal, LVerb.ToLower]));
           ProgressOverall(AProgress.FilesDone, AProgress.FilesTotal,
             Format('File %d of %d', [AProgress.FilesDone, AProgress.FilesTotal]));
 
@@ -1755,11 +1860,19 @@ begin
                FormatDuration((AProgress.BytesToCopy - AProgress.BytesCopied) / LRate)]);
           end;
           ProgressItemText(AProgress.BytesCopied, AProgress.BytesToCopy, LBytesText);
-        end);
-      AddLog(Format('Import finished: %d file(s) copied (%s), %d already present, ' +
+        end,
+        LMove);
+      AddLog(Format('%s finished: %d file(s) copied (%s), %d already present, ' +
         '%d replaced, %d ignored, %d failed.',
-        [LResult.Copied, FormatByteSize(LResult.Bytes), LResult.AlreadyPresent,
-         LResult.Replaced, LResult.Ignored, LResult.Failed]));
+        [IfThen(LMove, 'Move', 'Import'), LResult.Copied, FormatByteSize(LResult.Bytes),
+         LResult.AlreadyPresent, LResult.Replaced, LResult.Ignored, LResult.Failed]));
+      if LMove then
+      begin
+        AddLog(Format('  %d original file(s) deleted from %s', [LResult.SourcesDeleted, LSource]));
+        if LResult.SourcesKept > 0 then
+          AddLog(Format('WARNING: %d file(s) are safely in the data folder but could not ' +
+            'be deleted from %s; the Debug tab lists them.', [LResult.SourcesKept, LSource]));
+      end;
       if LResult.Failed > 0 then
         ReportError(Format('The import finished, but %d file(s) could not be copied, ' +
           'even after %d tries each, and were skipped. The Debug tab lists them and ' +
@@ -1772,7 +1885,7 @@ begin
       // so bring the map up to date either way
       StartRescan(nil);
     end,
-    'Importing tiles');
+    IfThen(LMove, 'Moving tiles', 'Importing tiles'));
 end;
 
 procedure TfrmMain.MarkDownloaded(ASouth, AWest: Integer);
@@ -1933,7 +2046,7 @@ var
   LSource: TGDEMStore;
   LTarget: TGDEMStore;
   LNewFolder: string;
-  LFree, LNeeded: Int64;
+  LFree, LNeeded, LReserve: Int64;
   LGo: TProc;
 begin
   LNewFolder := ANewFolder;
@@ -1971,14 +2084,17 @@ begin
         LTarget.Free;
     end;
 
+  // The reserve is a share of the destination's own drive
   LFree := TGDEMStore.FreeSpaceAt(LNewFolder);
+  LReserve := TGDEMStore.ReserveAt(LNewFolder, FSettings.MinFreePercent);
   LNeeded := FDownloaded.Count * ESTIMATED_TILE_BYTES;
-  if (LFree >= 0) and (LFree - ReserveBytes < LNeeded) then
+  if (LFree >= 0) and (LFree - LReserve < LNeeded) then
     TDialogService.MessageDialog(
       Format('The destination has %s free, but the data is about %s and %s ' +
-        'must be kept free.'#13#10#13#10 +
+        '(%d%% of that drive) must be kept free.'#13#10#13#10 +
         'A move within the same drive needs no extra space. Move anyway?',
-        [FormatBytes(LFree), FormatBytes(LNeeded), FormatBytes(ReserveBytes)]),
+        [FormatBytes(LFree), FormatBytes(LNeeded), FormatBytes(LReserve),
+         EnsureRange(FSettings.MinFreePercent, MIN_RESERVE_PERCENT, MAX_RESERVE_PERCENT)]),
       TMsgDlgType.mtWarning, [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo],
       TMsgDlgBtn.mbNo, 0,
       procedure(const AResult: TModalResult)
@@ -1994,15 +2110,10 @@ end;
 
 { Downloads }
 
-procedure TfrmMain.btnFetchClick(Sender: TObject);
-begin
-  FetchTiles([Trim(edtTile.Text)]);
-end;
-
 procedure TfrmMain.btnFetchSelectionClick(Sender: TObject);
 var
   LCandidates, LTiles: TArray<string>;
-  LTile, LQuestion, LSpace: string;
+  LTile: string;
   LSouth, LWest, LCount, LAlready: Integer;
   LFree, LNeeded: Int64;
 begin
@@ -2039,34 +2150,20 @@ begin
     Exit;
   end;
 
+  // No question asked: the progress dialog has a Cancel button. A drive
+  // too full for them all is only mentioned, as downloading stops at the
+  // reserve by itself.
   LNeeded := LCount * ESTIMATED_TILE_BYTES;
   LFree := -1;
   if FStore.IsAvailable then
     LFree := FStore.FreeSpace;
-  LSpace := '';
   if (LFree >= 0) and (LFree - ReserveBytes < LNeeded) then
-    LSpace := Format(#13#10#13#10'Only %s is free on the data drive and %s must be ' +
-      'kept free, so downloading will stop after about %d tile(s).',
-      [FormatBytes(LFree), FormatBytes(ReserveBytes),
-       Max(0, (LFree - ReserveBytes) div ESTIMATED_TILE_BYTES)]);
+    AddLog(Format('WARNING: the %d tile(s) need about %s, but only %s is free on the ' +
+      'data drive and %s must be kept free, so downloading will stop after about ' +
+      '%d tile(s).', [LCount, FormatBytes(LNeeded), FormatBytes(LFree),
+      FormatBytes(ReserveBytes), Max(0, (LFree - ReserveBytes) div ESTIMATED_TILE_BYTES)]));
 
-  if FTileIndex.IsEmpty then
-    LQuestion := Format('Download up to %d tile(s), about %s? Tiles with no data ' +
-      'are skipped.', [LCount, FormatBytes(LNeeded)])
-  else
-    LQuestion := Format('Download %d tile(s), about %s?', [LCount, FormatBytes(LNeeded)]);
-
-  if (LCount <= CONFIRM_TILE_COUNT) and (LSpace = '') then
-    FetchTiles(LTiles, LAlready)
-  else
-    TDialogService.MessageDialog(LQuestion + LSpace,
-      TMsgDlgType.mtConfirmation, [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo],
-      TMsgDlgBtn.mbNo, 0,
-      procedure(const AResult: TModalResult)
-      begin
-        if AResult = mrYes then
-          FetchTiles(LTiles, LAlready);
-      end);
+  FetchTiles(LTiles, LAlready);
 end;
 
 procedure TfrmMain.FetchTiles(const ATiles: TArray<string>; AAlready: Integer);

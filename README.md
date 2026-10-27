@@ -90,8 +90,8 @@ If you already cloned without submodules, run
    where downloaded tiles should go (or keep the default), and press OK.
 3. At the same time the tile index is built from CMR in the background.
    This takes about a dozen requests and needs no token.
-4. Select tiles on the map and press **Fetch selection**, or type a tile
-   name such as `N50W002` and press **Fetch tile**.
+4. Select tiles on the map (a single tile is a left click) and press
+   **Fetch selection**.
 
 ### Using the map
 
@@ -99,6 +99,7 @@ If you already cloned without submodules, run
 |--------|---------|
 | Select a block of tiles | Left-drag. The size and tile counts update as you drag. A left click selects one tile. To reach beyond the screen, drag towards an edge and the map scrolls that way, or use the mouse wheel to zoom while still dragging. |
 | Select a whole country | Right-click it (on a Mac trackpad, click with two fingers). Every tile the country touches is selected and tinted, including tiles along its borders and coasts, so neighbouring countries' tiles are included where they share one. Overseas parts count too: France includes French Guiana, the United States includes Alaska and Hawaii. The selection label then gives the country, its tile count, and how many have data and are downloaded, such as `Germany: 68 tile(s), ...`. Fetch selection and Delete Selected Downloads work on just those tiles. Dragging a new selection or clicking replaces it. |
+| Add a country to the selection | Shift + right-click it (on a Mac trackpad, Shift + two-finger click). Its tiles join those already selected, whether a country, several countries or a dragged block; a tile in both is selected once. The label names the countries, such as `Germany + France: 146 tile(s), ...`, or the first two and how many more when there are over three (a dragged block is named `Selected area`). With nothing selected it is the same as a right-click. |
 | Move the map | Right-drag, middle-drag, or Shift + left-drag. A right click that does not move selects a country instead. The map wraps east to west, so you can keep going past 180°, and selections can cross it (for example around Fiji or the Bering Strait). It stops at the poles, since the world does not wrap north to south. |
 | Zoom | Mouse wheel, or the View menu |
 | Show or hide tiles that have data (cyan) | View > Show Available Tiles |
@@ -121,9 +122,10 @@ otherwise use showed only the first letter of each menu and item.
 
 | Menu | Item | Does |
 |------|------|------|
-| File | Settings... | Bearer token, data folder, free-space reserve, files copied at once when importing, download speed, theme, drawing (GPU or CPU), and on Windows which graphics processor to use |
+| File | Settings... | Bearer token, data folder, how much of the drive to keep free, files copied at once when importing, download speed, theme, drawing (GPU or CPU), and on Windows which graphics processor to use |
 | File | Refresh Tile Index | Rebuilds the list of tiles that exist, from CMR |
 | Data | Import Existing Tiles... | Copies tiles you already have, from any folder, into the data folder. The originals are not changed. |
+| Data | Move Existing Files... | The same, but deletes each original once it is safely in the data folder; see [Moving instead of copying](#moving-instead-of-copying) |
 | Data | Rescan Data Folder | Rebuilds the downloaded-tiles bitmap from the files, files any misplaced downloads into place, and removes leftovers and empty folders |
 | Data | Delete Selected Downloads... | Deletes the downloaded tiles inside the map selection |
 | View | Zoom In / Zoom Out / Whole World / Zoom to Selection | Map view |
@@ -132,9 +134,12 @@ otherwise use showed only the first letter of each menu and item.
 | View | Copy Log / Clear Log | Copy the Debug tab's log to the clipboard, or empty it |
 
 **Fetch selection** downloads only tiles that have data and are not yet
-downloaded. Free space is checked before every tile, and downloading stops
-rather than go below the reserve set in Settings (2 GB by default). The
-**Cancel** button stops whatever job is running.
+downloaded. It starts straight away, without asking: the progress dialog
+that opens has its own Cancel button. Free space is checked before every
+tile, and downloading stops rather than go below the reserve set in
+Settings (see [Free space](#free-space)); if the selection looks too big for the space
+left, the Debug tab says so at the start. The **Cancel** button stops
+whatever job is running.
 
 #### How downloads work
 
@@ -204,6 +209,13 @@ it closes or crashes.
 Downloading the same tiles again and again in a short time (deleting and
 re-fetching them while testing, say) seems to make NASA cut connections
 off much sooner. Test on a different area each time.
+
+After a very large amount has been downloaded, NASA may also slow every
+download down without refusing any. The day after the whole world had
+been fetched (383 GB), downloads from the same account and connection ran
+at about 5 MB/s, each file at well under 1 MB/s, anywhere in the world,
+with no errors. GDEMFetch cannot speed that up, since nothing is being
+refused; it only shows as a low speed in the summary.
 
 The summary at the end gives the size saved, the time taken, the speed
 and the most downloads at once reached, for example: `Downloaded 100
@@ -446,6 +458,25 @@ The folder describes itself, so it can be moved or copied freely:
   `Documents/ASTGTM`. The first rescan of that folder files them into
   blocks.
 
+### Free space
+
+**File > Settings** has *Leave at least ... % free drive space*: the share
+of the data folder's drive that downloads, imports and moves always leave
+free. It is a percentage of the drive's size, so it suits any drive: the
+default, **10%**, is about 100 GB on a 1 TB drive and 400 GB on a 4 TB one.
+The dialog shows what the number comes to on the chosen folder's drive.
+
+SSDs in particular need spare space: nearly full, they slow down and wear
+faster. The setting can go from 1% to 50%. It cannot be 0, so the drive is
+never filled completely; below about 10% is fine for a hard disk but not
+kind to an SSD. A batch stops before going below it, the status bar shows
+`LOW ON SPACE` once the drive is under it, and moving the data folder
+checks the destination drive against its own share. If a drive's size
+cannot be found out, 2 GB is kept free instead.
+
+Settings saved by older versions held a fixed size in megabytes; that is
+ignored, and the setting starts at 10%.
+
 ### Importing tiles you already have
 
 If you already have ASTER GDEM V3 `.tif` files, for example from another
@@ -485,6 +516,29 @@ Existing Tiles...** and choose that folder.
   cache fills, or the enclosure gets hot and throttles. That is the drive,
   not the program.
 - The source folder must not be inside the data folder, or contain it.
+
+#### Moving instead of copying
+
+**Data > Move Existing Files...** does everything an import does, but
+deletes the originals, for moving an old download into the data folder's
+layout:
+
+- Each original is deleted only once its copy is in the data folder,
+  complete (size-checked) and under its real name. Originals the data
+  folder already has, at the same size, are deleted too.
+- Files that are not ASTER GDEM tile files, and any that cannot be copied,
+  are left where they are. Folders inside the chosen folder that end up
+  empty are removed; the chosen folder itself is kept.
+- When the old files are on the same drive as the data folder, no extra
+  space is needed overall (each file's space is freed as the next is
+  used), so the import's up-front check for room for a full copy is
+  skipped. The check before every file still keeps the reserve free.
+- It asks first, saying that the originals will be deleted. Like an
+  import, it can be cancelled and run again; files already moved are gone
+  from the source, so the next run carries on with the rest.
+- The Debug tab's summary says how many originals were deleted, and lists
+  any that were safely copied but could not be deleted (read-only files,
+  say).
 
 ## Repository layout
 
