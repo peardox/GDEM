@@ -309,6 +309,21 @@ type
     { @true between pressing the left button with Ctrl (or Cmd) held and
       releasing it. }
     FMarkerClickPending: Boolean;
+    { @true while @link(ClipPointer) holds the pointer inside the map. }
+    FPointerClipped: Boolean;
+
+    { Keeps the pointer inside the map until @link(ReleasePointer), for the
+      length of a drag (Windows only; elsewhere it does nothing).
+
+      When a drag crossed onto a display with a different scale factor,
+      the positions both FMX and Windows gave jumped, and so did the map.
+      Held inside the map, the pointer never reaches another display.
+      Edge scrolling still works, since it starts inside the edge. }
+    procedure ClipPointer;
+
+    { Lets the pointer go after @link(ClipPointer). Safe to call when it is
+      not held. }
+    procedure ReleasePointer;
 
     { Ends a selection made of separate tiles, leaving
       @link(FSelection) as it is. }
@@ -819,7 +834,28 @@ uses
   {$IFDEF SKIA}
   , FMX.Skia.Canvas
   {$ENDIF}
+  {$IFDEF MSWINDOWS}
+  , FMX.Forms, FMX.Platform.Win
+  {$ENDIF}
   ;
+
+{$IFDEF MSWINDOWS}
+// Declared here rather than taken from Winapi.Windows, whose TBitmap record
+// would hide FMX's TBitmap in this section
+
+{ Turns a position in a window's client area into one on the desktop.
+  @param(AWnd The window.)
+  @param(APoint The position, changed in place.)
+  @returns(@true on success.) }
+function ClientToScreen(AWnd: THandle; var APoint: TPoint): LongBool; stdcall;
+  external 'user32.dll' name 'ClientToScreen';
+
+{ Keeps the cursor inside a rectangle of the desktop, or lets it go.
+  @param(ARect The rectangle, or @nil to let the cursor go.)
+  @returns(@true on success.) }
+function ClipCursor(ARect: PRect): LongBool; stdcall;
+  external 'user32.dll' name 'ClipCursor';
+{$ENDIF}
 
 const
   { Colour drawn behind the map, visible when it is smaller than the
@@ -975,6 +1011,7 @@ end;
 
 destructor TWorldMapView.Destroy;
 begin
+  ReleasePointer;
   FSelectionOverlay.Free;
   FSelectionMask.Free;
   FTileOverlay.Free;
@@ -2285,8 +2322,11 @@ function TWorldMapView.EdgeScrollStep: TPointF;
       LDepth := APos - (ALength - EDGE_SCROLL_MARGIN)
     else
       Exit;
-    // Speed grows with how far into the band, or beyond the edge, it is
-    Result := Min(EDGE_SCROLL_MAX_STEP, EDGE_SCROLL_MIN_STEP + LDepth / 2);
+    // Speed grows with how far into the band the pointer is, and is
+    // greatest at the edge itself, since on Windows ClipPointer keeps the
+    // pointer from going beyond it
+    Result := EDGE_SCROLL_MIN_STEP + (EDGE_SCROLL_MAX_STEP - EDGE_SCROLL_MIN_STEP) *
+      Min(1, LDepth / EDGE_SCROLL_MARGIN);
     if APos > ALength / 2 then
       Result := -Result;
   end;
@@ -2327,6 +2367,53 @@ begin
   end;
 end;
 
+procedure TWorldMapView.ClipPointer;
+{$IFDEF MSWINDOWS}
+var
+  LForm: TCommonCustomForm;
+  LHandle: TWinWindowHandle;
+  LArea: TRectF;
+  LTopLeft, LBottomRight: TPoint;
+  LClip: TRect;
+  LScale: Single;
+{$ENDIF}
+begin
+  {$IFDEF MSWINDOWS}
+  if (Root = nil) or not (Root.GetObject is TCommonCustomForm) then
+    Exit;
+  LForm := TCommonCustomForm(Root.GetObject);
+  if LForm.Handle = nil then
+    Exit;
+  LHandle := WindowHandleToPlatform(LForm.Handle);
+  if (LHandle = nil) or (LHandle.Wnd = 0) then
+    Exit;
+  LScale := LHandle.Scale;
+  if LScale <= 0 then
+    LScale := 1;
+  // The map's area in the form, then in the window's pixels, then on the
+  // desktop, all in the program's own coordinates, as ClipCursor wants
+  LArea := AbsoluteRect;
+  LTopLeft := Point(Ceil(LArea.Left * LScale), Ceil(LArea.Top * LScale));
+  LBottomRight := Point(Floor(LArea.Right * LScale), Floor(LArea.Bottom * LScale));
+  if (LBottomRight.X <= LTopLeft.X) or (LBottomRight.Y <= LTopLeft.Y) or
+     not ClientToScreen(LHandle.Wnd, LTopLeft) or
+     not ClientToScreen(LHandle.Wnd, LBottomRight) then
+    Exit;
+  LClip := Rect(LTopLeft.X, LTopLeft.Y, LBottomRight.X, LBottomRight.Y);
+  FPointerClipped := ClipCursor(@LClip);
+  {$ENDIF}
+end;
+
+procedure TWorldMapView.ReleasePointer;
+begin
+  if not FPointerClipped then
+    Exit;
+  FPointerClipped := False;
+  {$IFDEF MSWINDOWS}
+  ClipCursor(nil);
+  {$ENDIF}
+end;
+
 procedure TWorldMapView.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Single);
 begin
   inherited;
@@ -2358,16 +2445,37 @@ begin
     FDragStart := FMousePos;
     FDragOrigin := FOrigin;
   end;
+  ClipPointer;
   Repaint;
 end;
 
 procedure TWorldMapView.MouseMove(Shift: TShiftState; X, Y: Single);
+{$IFDEF MSWINDOWS}
+var
+  LWasSelecting: Boolean;
+{$ENDIF}
 begin
   inherited;
   // During a drag the control keeps receiving moves after the pointer
-  // leaves it, with positions outside its bounds
+  // leaves it, with positions outside its bounds (not on Windows, where
+  // ClipPointer keeps it inside)
   FMousePos := PointF(X, Y);
   FMouseInside := True;
+  {$IFDEF MSWINDOWS}
+  // Windows reports the buttons held in every move. A drag with none held
+  // lost its release (let go while another window had the focus, say), so
+  // end it here; carrying on would pan from where it began and jump.
+  if (FDragMode <> mdNone) and ([ssLeft, ssRight, ssMiddle] * Shift = []) then
+  begin
+    LWasSelecting := FDragMode = mdSelect;
+    FDragMode := mdNone;
+    FScrollTimer.Enabled := False;
+    ReleasePointer;
+    EndMeasuring;
+    if LWasSelecting and Assigned(FOnSelectionChanged) then
+      FOnSelectionChanged(Self);
+  end;
+  {$ENDIF}
   case FDragMode of
     mdSelect:
       begin
@@ -2406,6 +2514,7 @@ begin
     (PointF(X, Y).Distance(FDragStart) <= CLICK_SLOP);
   FDragMode := mdNone;
   FScrollTimer.Enabled := False;
+  ReleasePointer;
   Repaint;
   EndMeasuring;
   if LWasSelecting and Assigned(FOnSelectionChanged) then
@@ -2433,6 +2542,13 @@ begin
   // drag has taken the pointer outside it
   SetScaleAt(FScale * Power(WHEEL_ZOOM_STEP, WheelDelta / 120),
     PointF(EnsureRange(FMousePos.X, 0, Width), EnsureRange(FMousePos.Y, 0, Height)));
+  // A pan works out the origin from where it started, at the old scale.
+  // Move that starting origin so the pan carries on from here, or the next
+  // move puts back the old origin at the new scale and the map jumps.
+  // FDragStart is left alone: MouseUp still measures from it to tell a
+  // right click from a right drag.
+  if FDragMode = mdPan then
+    FDragOrigin := FOrigin - (FMousePos - FDragStart);
   // The anchor is held in degrees, so the selection survives the zoom
   if FDragMode = mdSelect then
   begin

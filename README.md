@@ -104,7 +104,7 @@ If you already cloned without submodules, run
 
 | Action | Control |
 |--------|---------|
-| Select a block of tiles | Left-drag. The size and tile counts update as you drag. A left click selects one tile. To reach beyond the screen, drag towards an edge and the map scrolls that way, or use the mouse wheel to zoom while still dragging. |
+| Select a block of tiles | Left-drag. The size and tile counts update as you drag. A left click selects one tile. To reach beyond the screen, drag towards an edge and the map scrolls that way, faster the nearer the edge, or use the mouse wheel to zoom while still dragging. On Windows the pointer stays inside the map until you let go. |
 | Select a whole country | Right-click it (on a Mac trackpad, click with two fingers). Every tile the country touches is selected and tinted, including tiles along its borders and coasts, so neighbouring countries' tiles are included where they share one. Overseas parts count too: France includes French Guiana, the United States includes Alaska and Hawaii. The selection label then gives the country, its tile count, and how many have data and are downloaded, such as `Germany: 68 tile(s), ...`. Fetch selection and Delete Selected Downloads work on just those tiles. Dragging a new selection or clicking replaces it. |
 | Add a country to the selection | Shift + right-click it (on a Mac trackpad, Shift + two-finger click). Its tiles join those already selected, whether a country, several countries or a dragged block; a tile in both is selected once. The label names the countries, such as `Germany + France: 146 tile(s), ...`, or the first two and how many more when there are over three (a dragged block is named `Selected area`). With nothing selected it is the same as a right-click. |
 | Move the map | Right-drag, middle-drag, or Shift + left-drag. A right click that does not move selects a country instead. The map wraps east to west, so you can keep going past 180°, and selections can cross it (for example around Fiji or the Bering Strait). It stops at the poles, since the world does not wrap north to south. |
@@ -133,7 +133,7 @@ otherwise use showed only the first letter of each menu and item.
 
 | Menu | Item | Does |
 |------|------|------|
-| File | Settings... | Bearer token, data folder, how much of the drive to keep free, files copied at once when importing, download speed, the high-resolution map's tile set, theme, drawing (GPU or CPU), and on Windows which graphics processor to use |
+| File | Settings... | Bearer token, data folder, how much of the drive to keep free, files copied at once when importing, download speed, theme, drawing (GPU or CPU), and on Windows which graphics processor to use |
 | File | Refresh Tile Index | Rebuilds the list of tiles that exist, from CMR |
 | Data | Import Existing Tiles... | Copies tiles you already have, from any folder, into the data folder. The originals are not changed. |
 | Data | Move Existing Files... | The same, but deletes each original once it is safely in the data folder; see [Moving instead of copying](#moving-instead-of-copying) |
@@ -143,17 +143,35 @@ otherwise use showed only the first letter of each menu and item.
 | View | Zoom In / Zoom Out / Whole World / Zoom to Selection | Map view |
 | View | Show Available Tiles / Show Downloaded Tiles | The cyan and green tile tints |
 | View | Show Country Borders / Show Coastlines | The borders and coastlines drawn over the map |
-| View | High-Resolution Map | Draws the tile set instead of the plain map (greyed out when there is no tile set) |
+| View | High-Resolution Map | Draws the tile set instead of the plain map (greyed out only if the built-in tile set could not be read) |
 | View | Show Towns and Cities / Show Markers | The place names and the markers drawn on the map |
 | View | Copy Log / Clear Log | Copy the Debug tab's log to the clipboard, or empty it |
+| Markers | Add Marker at Map Centre... | Asks for a name and puts a marker in the middle of the map |
+| Markers | Edit Markers... | Lists the markers, to go to, rename or delete them |
 
 What the View menu shows is remembered from one run to the next. Out of
 the box the tile tints and markers are shown, and the layers that cost the
 most to draw without a GPU (country borders, coastlines, the
 high-resolution map, and town and city names) are off: tick the ones you
 want.
-| Markers | Add Marker at Map Centre... | Asks for a name and puts a marker in the middle of the map |
-| Markers | Edit Markers... | Lists the markers, to go to, rename or delete them |
+
+The first time you change **Drawing** (or, on Windows, **Graphics**) in
+Settings to something faster, GDEMFetch turns on the View options that
+suit it and says which in a dialog:
+
+| Your choice | Turned on |
+|-------------|-----------|
+| GPU, with Windows' High performance graphics processor | Everything |
+| GPU on Windows, with Let Windows decide or Power saving | Borders, coastlines and the high-resolution map |
+| GPU on macOS (Metal) | Everything |
+| CPU, or Linux (which draws only on the CPU) | Nothing yet: choosing the GPU later still turns options on |
+
+Options already ticked stay as they are, and nothing is ever turned off.
+This happens once; after that the View menu is yours. If the map is slow,
+turn options off, starting with the most demanding: Show Coastlines, Show
+Country Borders, Show Towns and Cities, High-Resolution Map, Show
+Available Tiles, Show Downloaded Tiles, Show Markers. The dialog lists
+them in that order too.
 
 **Fetch selection** downloads only tiles that have data and are not yet
 downloaded. It starts straight away, without asking: the progress dialog
@@ -369,10 +387,10 @@ saved as soon as they change.
 ### The high-resolution map
 
 The map built into GDEMFetch is 1080 x 540 pixels, 3 per degree, which
-turns to blur once you zoom in. Where a [tile set](#tile-sets) made by
-[TileMaker](#tilemaker) can be found, GDEMFetch draws that over it
-instead: the repository's `maps/tiles` is the 10800 x 5400 world map,
-30 pixels per degree, in four levels.
+turns to blur once you zoom in. So GDEMFetch also has a
+[tile set](#tile-sets) made by [TileMaker](#tilemaker) built in, and draws
+that over it instead: the 10800 x 5400 world map, 30 pixels per degree, in
+four levels.
 
 - **Which level:** the smallest one with at least as many pixels per
   degree as the screen shows, counting the display's own pixels (so a
@@ -384,26 +402,26 @@ instead: the repository's `maps/tiles` is the 10800 x 5400 world map,
   picked out accurately. Enlarged tiles are drawn with a smooth cubic
   filter rather than as blocks; reduced ones with mipmaps, so they do
   not shimmer.
-- **Loading:** tiles are read from disk only when they come into view, at
+- **Loading:** tiles are decoded only when they come into view, at
   most 6 a frame so panning stays smooth, and the rest over the next
   frames. Until a tile is ready, the matching part of a coarser tile is
   drawn enlarged in its place. The smallest level (18 tiles) is read at
   start-up and kept, so there is always something to draw. Up to 400
   other tiles (about 80 MB) are kept in memory, the least recently used
   going first.
-- **Finding the tile set:** **File > Settings > High-resolution map
-  tiles** names its folder (the one holding `tileset.json`). Left empty,
-  as it is by default, GDEMFetch looks for a `tiles` folder beside the
-  program, then (on macOS) in the app's `Resources` folder, then for
-  `maps/tiles` beside the program and in each folder above it, up to six
-  levels. That last finds the repository's own tile set when GDEMFetch
-  runs from its build folder, such as `GDEMFetch/Win64/Debug`. The line
-  under the box says which tile set will be used.
+- **Built in:** the repository's tile set, `maps/tiles`, is packed into
+  one file, `maps/tiles.zip`, by `tools/pack_tiles.py`, and linked into
+  the program as the `MAPTILES` resource (8.6 MB), so nothing is deployed
+  on any platform. The tiles are stored in the zip as they are, not
+  compressed again, since they are JPEGs already. After changing
+  `maps/tiles` (with TileMaker, say), run
+  `python3 tools/pack_tiles.py maps/tiles maps/tiles.zip` from the
+  repository root and rebuild.
 - The Debug tab says at start-up which tile set was loaded, such as
   `Map: tile set "8081_earthmap10k", 10800 x 5400 in 4 levels of
-  225-pixel tiles, from ...`, or that none was found and the plain map is
-  drawn. Without a tile set, or with **View > High-Resolution Map**
-  unticked, GDEMFetch draws the 1080 x 540 map as before.
+  225-pixel tiles, built into the program`. With
+  **View > High-Resolution Map** unticked, GDEMFetch draws the 1080 x 540
+  map.
 - Tiles are drawn only when drawing with Skia, which GDEMFetch always
   does.
 
@@ -422,7 +440,15 @@ The choice has to be made before the program starts up, so a change takes
 effect the next time GDEMFetch starts. The Debug tab says at start-up what
 was asked for and which canvas Skia is using, such as `Drawing with Skia:
 asked for the GPU, using TVkCanvas`. Choose the CPU if the graphics driver
-causes trouble.
+causes trouble. It also lists each display with its size, position and
+scale factor, such as `Display 2: 2560 x 1440 at 1707, 0, scale 1.00`.
+
+On Windows the pointer cannot leave the map while you drag it (to select
+or to move the map): it stops at the map's edge until you let go. Where
+displays have different scale factors, the pointer's position jumped as
+it crossed onto another display, and the map jumped with it. Scrolling at
+an edge while selecting is fastest with the pointer right against the
+edge.
 
 **File > Settings > Graphics** (Windows only) is Windows' own choice of
 graphics processor for GDEMFetch, the same as Windows Settings > System >
@@ -508,26 +534,19 @@ look and behave alike.
 
 ## Deploying
 
-The world map and its borders and coastlines are linked into the
-executable as resources, which Delphi does on Windows, macOS and Linux
-alike, and everything else (settings, the tile index, the data folder) is
-created at run time. The only file deployed beside the program is
-**Skia's library** on Windows and Linux: `sk4d.dll` (from RAD Studio's
-`bin` or `bin64`) and `libsk4d.so` (from `binlinux64`). The IDE added
-Deployment entries for them when Skia was enabled for the project; leave
-those ticked. On macOS Skia is linked into the program. The default
-Deployment Manager entries are all that is needed.
-
-The high-resolution map's tile set (`maps/tiles`, 1530 files) is not
-deployed: on Windows GDEMFetch finds it in the repository from its build
-folder (see [The high-resolution map](#the-high-resolution-map)). On
-macOS and Linux, where PAServer runs the program from its own folder,
-either choose a copy of the tile set on that machine in Settings or put
-one beside the program as a folder named `tiles` (on macOS, in the app's
-`Contents/Resources`). Without one, the plain map is drawn.
+The world map, its high-resolution tile set, and its borders and
+coastlines are linked into the executable as resources (see [The
+high-resolution map](#the-high-resolution-map)), which Delphi does on
+Windows, macOS and Linux alike, and everything else (settings, the tile
+index, the data folder) is created at run time. The only file deployed
+beside the program is **Skia's library** on Windows and Linux: `sk4d.dll`
+(from RAD Studio's `bin` or `bin64`) and `libsk4d.so` (from `binlinux64`).
+The IDE added Deployment entries for them when Skia was enabled for the
+project; leave those ticked. On macOS Skia is linked into the program. The
+default Deployment Manager entries are all that is needed.
 
 The IDE adds files that are part of the project, such as the map image,
-`maps/world_vectors.bin` and `styles/buildstyles.cmd`, to the deployment
+`maps/world_vectors.bin`, `maps/tiles.zip` and `styles/buildstyles.cmd`, to the deployment
 on its own. These are disabled in `GDEMFetch.dproj` for every platform:
 the map and vectors are already inside the program, the script only runs
 at build time, and on macOS
@@ -819,10 +838,11 @@ the size of the one before.
 | `TileMaker/` | The TileMaker application, laid out the same way (see [TileMaker units](#tilemaker-units)) |
 | `common/` | Units shared by the programs: no FMX, and nothing from any program's folders (see [Common units](#common-units)) |
 | `styles/` | FMX styles for the themes, with the resource script and the pre-build script that builds them; see [Themes](#themes) |
-| `maps/` | World map images and vectors. `world_1080x540.jpg` and `world_vectors.bin` (borders, coastlines, countries, and towns and cities) are linked into GDEMFetch as resources. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository; `maps/tiles/` is the tile set TileMaker made from it (225-pixel JPEG tiles, four levels, 1530 tiles, 12 MB), which is. |
+| `maps/` | World map images and vectors. `world_1080x540.jpg` and `world_vectors.bin` (borders, coastlines, countries, and towns and cities) are linked into GDEMFetch as resources. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository; `maps/tiles/` is the tile set TileMaker made from it (225-pixel JPEG tiles, four levels, 1530 tiles, 8.4 MB), which is, and `maps/tiles.zip` the same packed into one file by `tools/pack_tiles.py`, linked into GDEMFetch as a resource. |
 | `delphi-neon/` | Neon JSON library (git submodule) |
 | `tools/pasdoc_check.py` | Checks the units of `GDEMFetch/`, `TileMaker/` and `common/` follow the PasDoc and layout rules; see [Notes for Claude](#notes-for-claude) |
 | `tools/build_vectors.py` | Builds `maps/world_vectors.bin` from Natural Earth; see [Borders and coastlines](#borders-and-coastlines) |
+| `tools/pack_tiles.py` | Packs `maps/tiles` into `maps/tiles.zip`; see [The high-resolution map](#the-high-resolution-map) |
 | `additions.md` | How to add places the search finds: markers, easter eggs, towns and countries |
 | `CLAUDE.md` | Handover notes: the project's current state, test results and lessons learned, for picking the work up in a new conversation |
 | `docs/` | Ignored for development |
@@ -862,7 +882,7 @@ it:
 | `GDEMAwake` | `TKeepAwake`, which keeps the computer from sleeping while a job runs |
 | `GDEMBrowser` | Opens web links in the default browser on each platform |
 | `GDEMGpuPreference` | Reads and sets Windows' graphics processor preference for the program (ported from Sprite3D's `GpuPreference`); does nothing on other platforms |
-| `GDEMMapTiles` | `FindMapTiles`: finds the tile set for the high-resolution map, from Settings or beside the program |
+| `GDEMMapTiles` | `OpenBuiltInMapTiles`, the tile set linked into the program, and `FindMapTiles`, a tile set folder from Settings or beside the program to draw instead |
 
 **ui/**
 
@@ -897,10 +917,11 @@ reports any that do. Each program's `.dpr` lists them with
 | `GDEMFactors` | Prime factors, greatest common divisor, divisors, and planning levels of detail and tile sizes from an image's size |
 | `GDEMResample` | `TRGBA8Image`, and `ReduceImage`: shrinking by a whole factor with Lanczos-3 in linear light |
 | `GDEMTileSet` | `TTileSet`, a tile set's description, read and written as `tileset.json` with Neon |
-| `GDEMTileCache` | `TTileCache`: a tile set's tiles, decoded with Skia when first needed and kept, the least recently used dropped first; a level can be kept for good (used by GDEMFetch) |
+| `GDEMTileCache` | `TTileCache`: a tile set's tiles, from its folder or packed in a zip, decoded with Skia when first needed and kept, the least recently used dropped first; a level can be kept for good (used by GDEMFetch) |
 
 The world map image `maps/world_1080x540.jpg` is linked into GDEMFetch as
 the `WORLDMAP` RCDATA resource, `maps/easter_eggs.json` as `EASTEREGGS`,
+`maps/tiles.zip` as `MAPTILES`,
 and `maps/world_vectors.bin` as
 `WORLDVECTORS`, so nothing needs deploying beside the program. The image
 is an equirectangular projection: 3 pixels per degree, longitude -180 at
@@ -983,7 +1004,8 @@ got to, what has been tested and what was learned along the way.
     (with their `lib/` and `ui/`), and reports undocumented interface
     items, `@link` targets that do not exist, unbalanced `@tag(...)`
     brackets, class fields declared after a method or property (which
-    Delphi rejects), and `lib/` or `common/` units that use FMX or a `ui/`
+    Delphi rejects), a type declared in a `const` or `var` section (a
+    `type` missing after a block of constants), and `lib/` or `common/` units that use FMX or a `ui/`
     unit. It prints `No problems found` when all is well.
 - **Source files are ASCII only.** Delphi reads files without a byte
   order mark as ANSI, so write characters such as the degree sign as

@@ -41,10 +41,76 @@ owner meant to investigate later). Suspects, most likely first:
 3. Something moving the map from outside a drag: `CentreOn` and
    `ZoomToArea` (the search), `ZoomToSelection`, or `Resize`.
 
-Ask the owner: which platform and input device (mouse or touchpad),
-whether the wheel or a second finger was used during the drag, how far it
-jumps (a whole world width?), and whether it happens with the View layers
-off.
+The owner reported it on Windows with a mouse. Two fixes in
+`GDEMWorldMap.pas`, not yet built:
+
+- Suspect 1 confirmed in the code. `MouseWheel` now moves the pan's
+  starting origin after `SetScaleAt`:
+  `FDragOrigin := FOrigin - (FMousePos - FDragStart)`, so the next move
+  carries on from the new view. `FDragStart` is left alone, because
+  `MouseUp` measures from it (`CLICK_SLOP`) to tell a right click (select
+  a country) from a right drag.
+- A fourth suspect found while reading: a lost button release. If the
+  button is let go while another window has the focus (Alt+Tab, a
+  notification), `MouseUp` never comes, `FDragMode` stays `mdPan`, and
+  the next plain move pans from the old `FDragStart`: a jump that looks
+  random. `MouseMove` now ends any drag when no button is held (on
+  Windows only, `{$IFDEF MSWINDOWS}`, where FMX puts `ssLeft`, `ssRight`
+  and `ssMiddle` in every move's `Shift`; unchecked on macOS and Linux).
+  A selection drag ended this way fires `OnSelectionChanged` as
+  `MouseUp` would.
+
+To test: right-drag and turn the wheel mid-drag (it used to jump; now
+the map should zoom about the pointer and keep panning); right-drag,
+Alt+Tab away, let go, come back and move the mouse (the map should not
+move). Still possible if it recurs: suspects 2 and 3 above.
+
+**The cause, found by the owner:** the jump happens when a drag takes
+the pointer off the window onto a display with a different scale. The
+owner's set-up (start-up log): Display 1 1920 x 1200 at -1920, 0,
+scale 1.00; Display 2 3440 x 1440 at -5360, 7, scale 1.00; Display 3,
+primary, 2560 x 1440 at 0, 0, scale 1.50. Dragging from the 150% display
+onto a 100% one jumps.
+
+First try, wrong: `DragPointer` took the position from `GetCursorPos`
+and `ScreenToClient`, divided by the window's scale, on the theory that
+FMX converted with the wrong display's scale. The owner's log showed
+FMX's and Windows' figures within 2 or 3 pixels of each other (the
+cursor moving between the message and the call), and the map still
+jumped: Windows' own figure jumps at the border too. Removed, with its
+`OnLog` event.
+
+The fix, as the owner suggested earlier (forcing window bounds):
+built and tried by the owner on 27 October 2026, and it stops the
+jump. The owner finds it "not as good" as dragging freely past the
+window, but good enough. `TWorldMapView.ClipPointer` (Windows only) calls `ClipCursor`
+with the map's `AbsoluteRect`, times the window's `Scale`, through
+`ClientToScreen` (both in the program's own DPI coordinates, so they
+agree), when a select or pan drag starts in `MouseDown`.
+`ReleasePointer` lets go in `MouseUp`, in the lost-release path of
+`MouseMove`, and in `Destroy`. The two `user32` calls are declared in
+the unit, because `Winapi.Windows`' `TBitmap` record would hide FMX's.
+`EdgeScrollStep` now reaches `EDGE_SCROLL_MAX_STEP` at the edge itself
+(it used to need the pointer 50 pixels beyond it, which the clip
+forbids). Ctrl + click (markers) is not clipped.
+`TfrmMain.LogDisplays` (start of `RunStartup`) stays: one line per
+`Screen.Displays` entry with size, position, scale and primary.
+(Sprite3D's `DisplayData` gives scales only off Windows, from the same
+`Screen.Displays`, so it was not ported.)
+
+A possible improvement, offered and not taken up: let the pointer
+leave the window and convert its position on another display back into
+the window's units with that display's scale and origin. The owner says
+Sprite3D's `DisplayData` handles Windows scales properly where the
+plain Windows API does not; the GitHub copy read on 27 October showed
+no scale on Windows, so ask for the owner's current copy first.
+
+Still worth checking (Windows, the three displays): pan and select towards each edge
+of the map; the pointer should stop at the map's edge and the map should
+not jump; selecting against an edge should scroll at full speed; after
+letting go the pointer should move freely; Alt+Tab mid-drag, then
+coming back, should leave the pointer free. On macOS and Linux nothing
+changes except the edge-scroll speed curve.
 
 ## Starting a new conversation
 
@@ -644,6 +710,112 @@ turned into a right click by the system (Cmd + click is the documented
 way there), the drop-down's position over the map on all three
 platforms, and the label drawing cost on the CPU canvas (`OnPaintStats`).
 
+### Built-in tile set (27 October 2026)
+
+The owner found the high-resolution map missing on macOS and Linux (the
+tile set was not deployed; PAServer runs the program from its own
+folder, so the search for `maps/tiles` found nothing) and offered two
+fixes: link it in as a resource, or deploy it to a sensible folder. It is
+now a resource, per the README's rule. Not yet built.
+
+- `tools/pack_tiles.py` packs `maps/tiles` into `maps/tiles.zip`:
+  `tileset.json` and the tiles under their folder names with `/`,
+  stored (JPEGs do not compress), sorted, fixed 1980 dates, so it is
+  reproducible (packed twice, same MD5); it refuses if a tile is
+  missing. 1531 entries, 8.6 MB (the folder's 12 MB was disk blocks).
+  Checked in Python: every name the reader asks for is present, no data
+  descriptors, extras or compression, and every entry is identical to
+  its file. Run it again after changing `maps/tiles`.
+- `GDEMFetch.dproj`: `RcItem` `..\maps\tiles.zip`, RCDATA `MAPTILES`
+  (linked through `{$R *.dres}`), and Debug and Release `DeployFile`
+  entries disabled for every platform, copied from
+  `world_vectors.bin`'s. BOM kept; the XML parses.
+- `common/GDEMTileSet`: `TileEntryName` (as `TileFileName`, always
+  `/`) and `FromJSON(text, where)`, which `Load` now uses.
+- `common/GDEMTileCache`: `CreateFromPack(stream, origin, capacity)`
+  takes ownership of the stream (kept in `FPackStream` first, so the
+  destructor frees it if the constructor raises), opens it with
+  `System.Zip`'s `TZipFile` (`zmRead`), indexes the names in a dictionary,
+  and reads `tileset.json` from it. `ReadTile` gets a tile's bytes from
+  the zip or the folder; `Decode` now uses `TSkImage.MakeFromEncoded`
+  on those bytes for both. New `Origin` property (folder, or the
+  description); `Folder` is empty for a pack.
+- `lib/GDEMMapTiles`: `MAP_TILES_RESOURCE`, `BUILT_IN_MAP_TILES`
+  ("built into the program"), `OpenBuiltInMapTiles` (a
+  `TResourceStream` handed to `CreateFromPack`). The search for
+  `maps/tiles` up to 6 folders above the program was removed
+  (`REPOSITORY_MAPS_FOLDER`, `MAX_SEARCH_LEVELS` gone), so every platform
+  draws the same built-in tile set unless a folder is chosen in Settings
+  or a `tiles` folder sits beside the program (or in the macOS bundle's
+  `Resources`).
+- `TfrmMain.LoadMapTiles`: a folder found is tried first; a chosen
+  folder with no tile set, or one that fails to open, logs a `WARNING:`
+  and falls back to the built-in one; only if that fails too is the
+  plain map drawn. The start-up line ends `built into the program` or
+  `from <folder>`. Settings' line says `Using the tile set built into the
+  program` when no folder is found.
+- The executable grows by about 8.6 MB. `maps/tiles` stays in the
+  repository as the source; the two copies cost about 17 MB of history.
+
+Later the same evening, at the owner's request ("we don't have any
+anymore as they're resources"), the folder option went too: the
+Settings row (`lblMapTiles`, `edtMapTiles`, `btnBrowseMapTiles`,
+`lblMapTilesFound`, their handlers; `layData` 236 to 160 high, the form
+676 to 600, `layButtons` and `lblLocation` moved up 76), the
+`TGDEMSettings.MapTiles` setting (an old `mapTiles` in `settings.json`
+is ignored by Neon), and `FindMapTiles`, `MapTilesCandidates` and
+`MAP_TILES_FOLDER_NAME`. `GDEMMapTiles` is now just
+`OpenBuiltInMapTiles`, and `LoadMapTiles` opens only that, at start-up.
+`TTileCache` keeps its folder constructor in `common/` (TileMaker could
+use it); GDEMFetch no longer calls it. Tried on Linux by the owner before
+this change: the built-in tile set works there.
+
+To test on all three platforms: the start-up line says `built into the
+program`; View > High-Resolution Map is enabled and draws the tiles
+sharp when zoomed in; Settings has no tile set row and the
+dialog's spacing looks right.
+
+### View options suggested for faster drawing (27 October 2026)
+
+Asked for by the owner: the View defaults suit the CPU or a low-power
+GPU, so the first time the user changes Drawing or Graphics in Settings
+and closes it with OK, turn on View options suited to the new choice and
+say so in a modal dialog, advising turning some off if the map is slow
+and listing the options from the most demanding to the least. The owner
+fixed one case (GPU with High performance on Windows: everything) and
+left the rest to Claude. Not yet built.
+
+- `lib/GDEMViewOptions`: `TViewLayer` / `TViewLayers`,
+  `ALL_VIEW_LAYERS`, `VIEW_LAYERS_BY_COST` (coastlines, borders, towns
+  and cities, high-resolution map, available tint, downloaded tint,
+  markers: estimated for the GPU from the line and fill timings; towns
+  and the tile drawing were not measured, so `OnPaintStats` could check
+  the order), `SuggestedViewLayers(on GPU, TGpuPreference)`: CPU none;
+  Windows GPU + High performance all; Windows GPU + Let Windows decide or
+  Power saving borders, coastlines, high-resolution map (not towns);
+  macOS GPU all; Linux none. `TViewOptions.DrawingSuggestionMade`
+  (`drawingSuggestionMade` in `view.json`, default false).
+- `MainForm`: `ShowSettings` remembers Drawing and GpuPreference before
+  the dialog and calls `SuggestViewForDrawing` after `LoadMapTiles`. It
+  does nothing once the flag is set, if neither setting changed, or if
+  the suggestion is empty (so choosing the CPU leaves it for a later
+  change). Otherwise it sets the flag, ticks the suggested items that
+  are enabled and unticked (never unticks), `ApplyViewMenu` (new, also
+  used by `LoadViewOptions`), saves, and if anything was turned on, logs
+  a `View: turned on to suit ...` line and shows the dialog: what was
+  turned on, that the drawing change takes effect at the next start, and
+  the numbered list by cost using the menu items' own captions
+  (`ViewLayerItem`).
+- On macOS the Drawing default is already the GPU, so the dialog only
+  appears there if the user goes to the CPU and back. Offer to run it on
+  the first run instead if the owner wants it on the Mac.
+
+To test (Windows): delete `view.json`, open Settings, change Graphics to
+High performance, OK: every View option on, the dialog, one log line;
+open Settings again and change something: no dialog. With a fresh
+`view.json`, Power saving: borders, coastlines and the high-resolution
+map. Choosing CPU first: no dialog, and a later GPU choice still gets it.
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection
@@ -762,6 +934,11 @@ reasons are here.
   script in `tools/` into a compact binary resource, rather than parsing
   JSON at start-up; the JSON-uses-Neon rule is about JSON the program
   itself reads.
+- A `const` block added among the types needs `type` again after it;
+  without it the next class is read as a constant and Delphi fails with
+  dozens of errors starting with E2029 "Expression expected but 'CLASS'
+  found" (`GDEMViewOptions`, 27 October 2026). `tools/pasdoc_check.py`
+  now reports a type declared in a `const` or `var` section.
 - Delphi requires every field of a class section before its first method
   or property (E2169). New private methods were once inserted among the
   fields; `tools/pasdoc_check.py` now reports that.

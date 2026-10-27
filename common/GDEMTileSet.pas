@@ -164,6 +164,15 @@ type
       @returns(The relative path.) }
     function TileFileName(ALevel, ARow, AColumn: Integer): string;
 
+    { A tile's name inside a packed tile set (see @code(GDEMTileCache)),
+      such as @code(10800x5400/r003_c017.jpg): as @link(TileFileName),
+      but always with a forward slash, as zip files name their entries.
+      @param(ALevel The level, 0 for the full image.)
+      @param(ARow The row, 0 at the top.)
+      @param(AColumn The column, 0 at the left.)
+      @returns(The name.) }
+    function TileEntryName(ALevel, ARow, AColumn: Integer): string;
+
     { The level to draw at a scale: the smallest one still at least as
       detailed as the screen, so nothing is drawn from fewer pixels than it
       covers. Past level 0's detail, level 0.
@@ -190,6 +199,14 @@ type
       @raises(ETileSetError if it is missing, unreadable or does not make
         sense.) }
     class function Load(const AFolder: string): TTileSet; static;
+
+    { Reads a tile set's description from its text, as held in a packed
+      tile set.
+      @param(AJSON The contents of @link(TILESET_FILE_NAME).)
+      @param(AWhere Where it came from, for error messages.)
+      @returns(The description, checked with @link(Validate).)
+      @raises(ETileSetError if it is unreadable or does not make sense.) }
+    class function FromJSON(const AJSON, AWhere: string): TTileSet; static;
 
     { Writes the description into a tile set's folder, under a temporary
       name first and then renamed, so a reader never sees half a file.
@@ -242,6 +259,12 @@ function TTileSet.TileFileName(ALevel, ARow, AColumn: Integer): string;
 begin
   Result := TPath.Combine(Levels[ALevel].Folder,
     System.SysUtils.Format('r%.3d_c%.3d.%s', [ARow, AColumn, ImageFormat]));
+end;
+
+function TTileSet.TileEntryName(ALevel, ARow, AColumn: Integer): string;
+begin
+  Result := Levels[ALevel].Folder + '/' +
+    System.SysUtils.Format('r%.3d_c%.3d.%s', [ARow, AColumn, ImageFormat]);
 end;
 
 function TTileSet.PixelsPerUnit(ALevel: Integer): Double;
@@ -302,18 +325,28 @@ end;
 
 class function TTileSet.Load(const AFolder: string): TTileSet;
 var
-  LFileName: string;
+  LFileName, LJSON: string;
 begin
   LFileName := TPath.Combine(AFolder, TILESET_FILE_NAME);
   if not TFile.Exists(LFileName) then
     raise ETileSetError.CreateFmt('%s has no %s, so it is not a finished tile set.',
       [AFolder, TILESET_FILE_NAME]);
   try
-    Result := TNeon.JSONToValue<TTileSet>(
-      TEncoding.UTF8.GetString(TFile.ReadAllBytes(LFileName)), TileSetNeonConfig);
+    LJSON := TEncoding.UTF8.GetString(TFile.ReadAllBytes(LFileName));
   except
     on E: Exception do
       raise ETileSetError.CreateFmt('Could not read %s: %s', [LFileName, E.Message]);
+  end;
+  Result := FromJSON(LJSON, LFileName);
+end;
+
+class function TTileSet.FromJSON(const AJSON, AWhere: string): TTileSet;
+begin
+  try
+    Result := TNeon.JSONToValue<TTileSet>(AJSON, TileSetNeonConfig);
+  except
+    on E: Exception do
+      raise ETileSetError.CreateFmt('Could not read %s: %s', [AWhere, E.Message]);
   end;
   Result.Validate;
 end;

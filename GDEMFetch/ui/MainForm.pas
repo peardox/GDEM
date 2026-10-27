@@ -519,11 +519,10 @@ type
       is only logged as a warning. }
     procedure LoadWorldMap;
 
-    { Finds the tile set for the high-resolution map (see
-      @code(GDEMMapTiles)), opens it and shows it on @link(FMap), replacing
-      any open before. Reads the smallest level at once, so there is always
-      something to draw. Without a tile set, or if it cannot be read, the
-      plain map image is drawn, and the log says which. }
+    { Opens the tile set built into the program for the high-resolution
+      map (see @code(GDEMMapTiles)) and shows it on @link(FMap). Reads the
+      smallest level at once, so there is always something to draw. If it
+      cannot be read, the plain map image is drawn, and the log says so. }
     procedure LoadMapTiles;
 
     { Reads the remembered View choices into @link(FViewOptions), or keeps
@@ -534,6 +533,27 @@ type
     { Copies the View menu's ticks into @link(FViewOptions) and writes
       them, logging a warning if they cannot be written. }
     procedure SaveViewOptions;
+
+    { The View menu item that shows a layer.
+      @param(ALayer The layer.)
+      @returns(Its menu item.) }
+    function ViewLayerItem(ALayer: TViewLayer): TMenuItem;
+
+    { Shows on the map what the View menu has ticked. }
+    procedure ApplyViewMenu;
+
+    { The first time Settings closes with OK after the user changed how
+      GDEMFetch draws (Drawing, or on Windows Graphics), turns on the View
+      menu layers that suit the new choice (see
+      @code(SuggestedViewLayers)) and says so in a dialog, listing the
+      layers from the most demanding to the least for turning off if the
+      map is slow. Choosing the CPU changes nothing and leaves this for a
+      later change; once layers have been suggested it never happens
+      again, as @code(TViewOptions.DrawingSuggestionMade) records.
+      @param(AOldDrawing The Drawing setting before the dialog opened.)
+      @param(AOldGpuPreference The Graphics setting before the dialog
+        opened.) }
+    procedure SuggestViewForDrawing(const AOldDrawing, AOldGpuPreference: string);
 
     { Reads the markers file into @link(FMarkers), logging how many, or a
       warning if it cannot be read. }
@@ -580,6 +600,12 @@ type
       @param(Y Vertical position.) }
     procedure MapMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
       X, Y: Single);
+
+    { Logs each display FMX knows of, with its size, position and scale
+      factor, so a problem that depends on the display (as the map once
+      jumped when dragged onto a display with another scale) can be told
+      from the log. }
+    procedure LogDisplays;
 
     { Adds a marker where the map was Ctrl + clicked (Cmd + clicked).
       @param(Sender The map view.)
@@ -879,8 +905,8 @@ uses
   {$IFDEF MSWINDOWS}
   Winapi.Windows,
   {$ENDIF}
-  GDEMTiles, GDEMDownloadBatch, GDEMDrawing, GDEMMapTiles, GDEMTileSet, SettingsForm,
-  MarkersForm;
+  GDEMTiles, GDEMDownloadBatch, GDEMDrawing, GDEMMapTiles, GDEMTileSet, GDEMGpuPreference,
+  SettingsForm, MarkersForm;
 
 { TfrmMain }
 
@@ -1020,6 +1046,7 @@ end;
 procedure TfrmMain.RunStartup;
 begin
   AddLog(DescribeDrawing);
+  LogDisplays;
   // Each of these waits for the user (or the download) before the next
   if not FHaveSettings then
     ShowSettings(nil)
@@ -1188,35 +1215,22 @@ end;
 
 procedure TfrmMain.LoadMapTiles;
 var
-  LFolder: string;
   LLevels: TArray<TTileSetLevel>;
 begin
   FMap.MapTiles := nil;
   FreeAndNil(FMapTiles);
   // Nothing to switch to without a tile set
   mnuShowMapTiles.Enabled := False;
-
-  LFolder := FindMapTiles(FSettings.MapTiles);
-  if LFolder = '' then
-  begin
-    if FSettings.MapTiles.Trim <> '' then
-      AddLog('WARNING: no tile set (tileset.json) in ' + FSettings.MapTiles.Trim +
-        '; the plain map is drawn')
-    else
-      AddLog('Map: no tile set found beside the program; the plain map is drawn');
-    Exit;
-  end;
-
   try
-    FMapTiles := TTileCache.Create(LFolder);
+    FMapTiles := OpenBuiltInMapTiles;
     LLevels := FMapTiles.TileSet.Levels;
     FMapTiles.PreloadLevel(High(LLevels));
     FMap.MapTiles := FMapTiles;
     mnuShowMapTiles.Enabled := True;
-    AddLog(Format('Map: tile set "%s", %d x %d in %d levels of %d-pixel tiles, from %s',
+    AddLog(Format('Map: tile set "%s", %d x %d in %d levels of %d-pixel tiles, %s',
       [FMapTiles.TileSet.Name, FMapTiles.TileSet.SourceWidth,
        FMapTiles.TileSet.SourceHeight, Length(LLevels), FMapTiles.TileSet.TileSize,
-       LFolder]));
+       FMapTiles.Origin]));
     if FMapTiles.Failures > 0 then
       AddLog(Format('WARNING: %d tile(s) of the smallest level could not be read',
         [FMapTiles.Failures]));
@@ -1225,7 +1239,7 @@ begin
     begin
       FMap.MapTiles := nil;
       FreeAndNil(FMapTiles);
-      AddLog('WARNING: could not open the tile set in ' + LFolder + ' (' +
+      AddLog('WARNING: could not read the high-resolution map (' +
         E.Message.TrimRight(['.']) + '); the plain map is drawn');
     end;
   end;
@@ -1248,13 +1262,107 @@ begin
   mnuShowMapTiles.IsChecked := FViewOptions.ShowMapTiles;
   mnuShowPlaces.IsChecked := FViewOptions.ShowPlaces;
   mnuShowMarkers.IsChecked := FViewOptions.ShowMarkers;
-  FMap.ShowAvailableTiles := FViewOptions.ShowAvailableTiles;
-  FMap.ShowDownloadedTiles := FViewOptions.ShowDownloadedTiles;
-  FMap.ShowBorders := FViewOptions.ShowBorders;
-  FMap.ShowCoastlines := FViewOptions.ShowCoastlines;
-  FMap.ShowMapTiles := FViewOptions.ShowMapTiles;
-  FMap.ShowPlaces := FViewOptions.ShowPlaces;
-  FMap.ShowMarkers := FViewOptions.ShowMarkers;
+  ApplyViewMenu;
+end;
+
+procedure TfrmMain.ApplyViewMenu;
+begin
+  FMap.ShowAvailableTiles := mnuShowTiles.IsChecked;
+  FMap.ShowDownloadedTiles := mnuShowDownloaded.IsChecked;
+  FMap.ShowBorders := mnuShowBorders.IsChecked;
+  FMap.ShowCoastlines := mnuShowCoastlines.IsChecked;
+  FMap.ShowMapTiles := mnuShowMapTiles.IsChecked;
+  FMap.ShowPlaces := mnuShowPlaces.IsChecked;
+  FMap.ShowMarkers := mnuShowMarkers.IsChecked;
+end;
+
+function TfrmMain.ViewLayerItem(ALayer: TViewLayer): TMenuItem;
+begin
+  case ALayer of
+    vlCoastlines: Result := mnuShowCoastlines;
+    vlBorders: Result := mnuShowBorders;
+    vlPlaces: Result := mnuShowPlaces;
+    vlMapTiles: Result := mnuShowMapTiles;
+    vlAvailableTiles: Result := mnuShowTiles;
+    vlDownloadedTiles: Result := mnuShowDownloaded;
+  else
+    Result := mnuShowMarkers;
+  end;
+end;
+
+procedure TfrmMain.SuggestViewForDrawing(const AOldDrawing, AOldGpuPreference: string);
+var
+  LOnGpu: Boolean;
+  LPreference: TGpuPreference;
+  LSuggested, LTurnedOn: TViewLayers;
+  LLayer: TViewLayer;
+  LItem: TMenuItem;
+  LChoice, LOn, LByCost, LMsg: string;
+  I: Integer;
+begin
+  if FViewOptions.DrawingSuggestionMade then
+    Exit;
+  if SameText(FSettings.Drawing, AOldDrawing) and
+     SameText(FSettings.GpuPreference, AOldGpuPreference) then
+    Exit;
+  LOnGpu := GPU_DRAWING_AVAILABLE and
+    (DrawingModeFromKey(FSettings.Drawing) = TDrawingMode.GPU);
+  LPreference := GpuPreferenceFromKey(FSettings.GpuPreference);
+  LSuggested := SuggestedViewLayers(LOnGpu, LPreference);
+  // The CPU keeps the light defaults; a later change may still suggest
+  if LSuggested = [] then
+    Exit;
+
+  FViewOptions.DrawingSuggestionMade := True;
+  LTurnedOn := [];
+  for LLayer in LSuggested do
+  begin
+    LItem := ViewLayerItem(LLayer);
+    // The high-resolution map's item is greyed out without a tile set
+    if LItem.Enabled and not LItem.IsChecked then
+    begin
+      LItem.IsChecked := True;
+      Include(LTurnedOn, LLayer);
+    end;
+  end;
+  ApplyViewMenu;
+  // Saves the flag too, even when nothing needed turning on
+  SaveViewOptions;
+  if LTurnedOn = [] then
+    Exit;
+
+  LChoice := 'drawing on the GPU';
+  {$IFDEF MSWINDOWS}
+  case LPreference of
+    TGpuPreference.HighPerformance:
+      LChoice := LChoice + ' with the High performance graphics processor';
+    TGpuPreference.PowerSaving:
+      LChoice := LChoice + ' with the Power saving graphics processor';
+  end;
+  {$ENDIF}
+  LOn := '';
+  LByCost := '';
+  for I := Low(VIEW_LAYERS_BY_COST) to High(VIEW_LAYERS_BY_COST) do
+  begin
+    LItem := ViewLayerItem(VIEW_LAYERS_BY_COST[I]);
+    if VIEW_LAYERS_BY_COST[I] in LTurnedOn then
+      LOn := LOn + sLineBreak + '    ' + LItem.Text;
+    LByCost := LByCost + sLineBreak + Format('    %d. %s', [I + 1, LItem.Text]);
+  end;
+  LMsg := 'You chose ' + LChoice + ', so these View menu options have been turned on:' +
+    LOn + sLineBreak + sLineBreak +
+    'The new drawing setting takes effect the next time GDEMFetch starts; until then ' +
+    'the map may be slower than it will be.' + sLineBreak + sLineBreak +
+    'If the map is slow with these options on, turn some of them off in the View menu ' +
+    'until you are happy with it. From the most demanding to the least:' + LByCost;
+  AddLog('View: turned on to suit ' + LChoice + ':' +
+    LOn.Replace(sLineBreak + '    ', ', ').TrimLeft([',', ' ']));
+  TDialogService.MessageDialog(LMsg, TMsgDlgType.mtInformation,
+    [TMsgDlgBtn.mbOK], TMsgDlgBtn.mbOK, 0,
+    procedure(const AResult: TModalResult)
+    begin
+      // Nothing to do; the dialog only informs
+    end);
 end;
 
 procedure TfrmMain.SaveViewOptions;
@@ -1492,6 +1600,30 @@ begin
           FMap.ClearHighlight;
         Key := 0;
       end;
+  end;
+end;
+
+procedure TfrmMain.LogDisplays;
+var
+  I: Integer;
+  LDisplay: TDisplay;
+  LText: string;
+  LLeft, LTop, LWidth, LHeight, LScale: Single;
+begin
+  for I := 0 to Screen.DisplayCount - 1 do
+  begin
+    LDisplay := Screen.Displays[I];
+    // Copied to Singles so the format suits whichever type Bounds is
+    LLeft := LDisplay.Bounds.Left;
+    LTop := LDisplay.Bounds.Top;
+    LWidth := LDisplay.Bounds.Width;
+    LHeight := LDisplay.Bounds.Height;
+    LScale := LDisplay.Scale;
+    LText := Format('Display %d: %.0f x %.0f at %.0f, %.0f, scale %.2f',
+      [I + 1, LWidth, LHeight, LLeft, LTop, LScale]);
+    if LDisplay.Primary then
+      LText := LText + ', primary';
+    AddLog(LText);
   end;
 end;
 
@@ -1857,10 +1989,11 @@ end;
 
 procedure TfrmMain.ShowSettings(const AOnSaved: TProc);
 var
-  LOldTheme, LOldMapTiles: string;
+  LOldTheme, LOldDrawing, LOldGpuPreference: string;
 begin
   LOldTheme := FSettings.Theme;
-  LOldMapTiles := FSettings.MapTiles;
+  LOldDrawing := FSettings.Drawing;
+  LOldGpuPreference := FSettings.GpuPreference;
   TfrmSettings.Edit(FSettings,
     procedure(ASaved: Boolean; const ADataFolder: string)
     begin
@@ -1870,8 +2003,7 @@ begin
       CheckTokenExpiry;
       if not SameText(FSettings.Theme, LOldTheme) then
         ApplyThemeSetting(True);
-      if not SameFileName(FSettings.MapTiles, LOldMapTiles) then
-        LoadMapTiles;
+      SuggestViewForDrawing(LOldDrawing, LOldGpuPreference);
       RefreshStorageStatus;
       if not SameFileName(ADataFolder, FSettings.DataFolder) then
         ChangeDataFolder(ADataFolder);

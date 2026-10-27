@@ -3,7 +3,10 @@
 
   A @link(TTileCache) opens a tile set (see @code(GDEMTileSet)) and
   decodes its tiles with Skia only when asked, keeping at most a set
-  number. When it is full, the tile used longest ago goes. A level can be
+  number. When it is full, the tile used longest ago goes. The tile set can
+  be a folder, as TileMaker writes it, or packed into one zip file (by
+  @code(tools/pack_tiles.py)) read from a stream, such as a resource linked
+  into the program. A level can be
   pinned (@link(TTileCache.PreloadLevel)) so it is never dropped: the
   smallest level is a handful of tiles and makes a good stand-in while
   sharper ones load. A tile whose file is missing or cannot be decoded is
@@ -19,7 +22,7 @@ unit GDEMTileCache;
 interface
 
 uses
-  System.SysUtils, System.Generics.Collections,
+  System.SysUtils, System.Classes, System.Generics.Collections, System.Zip,
   System.Skia,
   GDEMTileSet;
 
@@ -46,6 +49,15 @@ type
     FTileSet: TTileSet;
     { Backing field for @link(Folder). }
     FFolder: string;
+    { Backing field for @link(Origin). }
+    FOrigin: string;
+    { The packed tile set's stream, owned; @nil for a folder. }
+    FPackStream: TStream;
+    { The packed tile set, read from @link(FPackStream); @nil for a
+      folder. }
+    FPack: TZipFile;
+    { Each entry of @link(FPack) by name, to its position in the zip. }
+    FPackIndex: TDictionary<string, Integer>;
     { The tiles tried so far, by @link(Key). }
     FEntries: TDictionary<Int64, TTileCacheEntry>;
     { Most tiles kept, pinned ones not counted. }
@@ -67,6 +79,13 @@ type
     { Drops the tile used longest ago that is not pinned. }
     procedure DropOldest;
 
+    { A tile's encoded file, from the folder or the pack.
+      @param(ALevel The level.)
+      @param(ARow The row.)
+      @param(AColumn The column.)
+      @returns(The file's bytes, or @nil if it is missing.) }
+    function ReadTile(ALevel, ARow, AColumn: Integer): TBytes;
+
     { Decodes a tile's file and keeps it.
       @param(ALevel The level.)
       @param(ARow The row.)
@@ -81,6 +100,18 @@ type
       @raises(ETileSetError if the folder is not a finished, valid tile
         set.) }
     constructor Create(const AFolder: string;
+      ACapacity: Integer = DEFAULT_TILE_CACHE_CAPACITY);
+
+    { Opens a packed tile set: a zip holding @code(tileset.json) and the
+      tiles under the names @code(TTileSet.TileEntryName) gives.
+      @param(AStream The zip; the cache owns it from here on and frees it,
+        even if this raises.)
+      @param(AOrigin Where the pack came from, for @link(Origin) and error
+        messages, such as @code(built into the program).)
+      @param(ACapacity Most tiles to keep, besides pinned ones.)
+      @raises(ETileSetError if the stream is not a zip holding a valid
+        tile set.) }
+    constructor CreateFromPack(AStream: TStream; const AOrigin: string;
       ACapacity: Integer = DEFAULT_TILE_CACHE_CAPACITY);
 
     { Frees the cached tiles. }
@@ -126,8 +157,12 @@ type
     { The tile set's description. }
     property TileSet: TTileSet read FTileSet;
 
-    { The tile set's folder. }
+    { The tile set's folder; empty for a packed tile set. }
     property Folder: string read FFolder;
+
+    { Where the tile set came from: its folder, or the description given
+      to @link(CreateFromPack). }
+    property Origin: string read FOrigin;
 
     { Tiles whose files were missing or could not be decoded. }
     property Failures: Integer read FFailures;
@@ -145,13 +180,48 @@ begin
   inherited Create;
   FTileSet := TTileSet.Load(AFolder);
   FFolder := AFolder;
+  FOrigin := AFolder;
   FCapacity := Max(ACapacity, 16);
   FEntries := TDictionary<Int64, TTileCacheEntry>.Create;
+end;
+
+constructor TTileCache.CreateFromPack(AStream: TStream; const AOrigin: string;
+  ACapacity: Integer);
+var
+  I, LIndex: Integer;
+  LBytes: TBytes;
+begin
+  inherited Create;
+  // Kept first, so the destructor frees it if anything below raises
+  FPackStream := AStream;
+  FOrigin := AOrigin;
+  FCapacity := Max(ACapacity, 16);
+  FEntries := TDictionary<Int64, TTileCacheEntry>.Create;
+  FPackIndex := TDictionary<string, Integer>.Create;
+  FPack := TZipFile.Create;
+  try
+    FPack.Open(FPackStream, zmRead);
+  except
+    on E: Exception do
+      raise ETileSetError.CreateFmt('The tile set %s is not a readable zip: %s',
+        [AOrigin, E.Message]);
+  end;
+  // TZipFile looks names up one by one; a dictionary is quicker for 1500
+  for I := 0 to FPack.FileCount - 1 do
+    FPackIndex.AddOrSetValue(FPack.FileName[I], I);
+  if not FPackIndex.TryGetValue(TILESET_FILE_NAME, LIndex) then
+    raise ETileSetError.CreateFmt('The tile set %s has no %s.', [AOrigin, TILESET_FILE_NAME]);
+  FPack.Read(LIndex, LBytes);
+  FTileSet := TTileSet.FromJSON(TEncoding.UTF8.GetString(LBytes),
+    TILESET_FILE_NAME + ' in ' + AOrigin);
 end;
 
 destructor TTileCache.Destroy;
 begin
   FEntries.Free;
+  FPackIndex.Free;
+  FPack.Free;
+  FPackStream.Free;
   inherited;
 end;
 
@@ -209,18 +279,37 @@ begin
   end;
 end;
 
+function TTileCache.ReadTile(ALevel, ARow, AColumn: Integer): TBytes;
+var
+  LFileName: string;
+  LIndex: Integer;
+begin
+  Result := nil;
+  if FPack <> nil then
+  begin
+    if FPackIndex.TryGetValue(FTileSet.TileEntryName(ALevel, ARow, AColumn), LIndex) then
+      FPack.Read(LIndex, Result);
+  end
+  else
+  begin
+    LFileName := TPath.Combine(FFolder, FTileSet.TileFileName(ALevel, ARow, AColumn));
+    if TFile.Exists(LFileName) then
+      Result := TFile.ReadAllBytes(LFileName);
+  end;
+end;
+
 function TTileCache.Decode(ALevel, ARow, AColumn: Integer; APinned: Boolean): ISkImage;
 var
   LEntry: TTileCacheEntry;
-  LFileName: string;
+  LBytes: TBytes;
   LEncoded: ISkImage;
 begin
   Result := nil;
-  LFileName := TPath.Combine(FFolder, FTileSet.TileFileName(ALevel, ARow, AColumn));
   try
-    if TFile.Exists(LFileName) then
+    LBytes := ReadTile(ALevel, ARow, AColumn);
+    if Length(LBytes) > 0 then
     begin
-      LEncoded := TSkImage.MakeFromEncodedFile(LFileName);
+      LEncoded := TSkImage.MakeFromEncoded(LBytes);
       // Decoded now, so drawing it never has to
       if LEncoded <> nil then
         Result := LEncoded.MakeRasterImage;

@@ -10,9 +10,6 @@
     @item(how much free space downloads must leave on that drive;)
     @item(how many files an import copies at once, and how fast tiles are
       downloaded: Slow, Medium or Fast, see @link(TDownloadSpeed);)
-    @item(the folder of the tile set drawn as the high-resolution map, with
-      a Browse button and a line saying which tile set will be used; empty
-      means find one beside the program, see @code(GDEMMapTiles);)
     @item(the theme, the program's look; see @link(GDEMThemes);)
     @item(whether the program draws on the GPU or the CPU, see
       @link(GDEMDrawing), which takes effect at the next start. Not shown
@@ -115,14 +112,6 @@ type
     cbDownloadSpeed: TComboBox;
     { Advice shown after @link(cbDownloadSpeed). }
     lblDownloadSpeedHint: TLabel;
-    { Caption above @link(edtMapTiles). }
-    lblMapTiles: TLabel;
-    { The tile set folder for the high-resolution map; empty to find one. }
-    edtMapTiles: TEdit;
-    { Opens a folder picker for @link(edtMapTiles). }
-    btnBrowseMapTiles: TButton;
-    { Says which tile set @link(edtMapTiles) leads to, if any. }
-    lblMapTilesFound: TLabel;
     { Holds the theme controls. }
     layTheme: TLayout;
     { Caption for @link(cbTheme). }
@@ -168,12 +157,6 @@ type
     { Lets the user pick the data folder.
       @param(Sender The button.) }
     procedure btnBrowseClick(Sender: TObject);
-    { Updates @link(lblMapTilesFound) as the tile set folder is typed.
-      @param(Sender The control that changed.) }
-    procedure MapTilesChangeTracking(Sender: TObject);
-    { Opens a folder picker for the tile set.
-      @param(Sender The button.) }
-    procedure btnBrowseMapTilesClick(Sender: TObject);
   private
     { The token as entered, with whitespace removed.
       @returns(The cleaned token; see @link(TGDEMSettings.CleanToken).) }
@@ -187,11 +170,6 @@ type
       entered, shows when the token expires, and shows how much the
       free-space percentage comes to on the chosen folder's drive. }
     procedure UpdateOK;
-
-    { Shows in @link(lblMapTilesFound) which tile set the folder in
-      @link(edtMapTiles) leads to, or that there is none and the plain map
-      will be drawn. }
-    procedure UpdateMapTilesFound;
 
     { Selects the choice in @link(cbImportWorkers) for a number of files.
       A number that is not one of the choices, perhaps edited into the
@@ -245,7 +223,7 @@ implementation
 
 uses
   System.IOUtils, System.Math, GDEMBrowser, GDEMThemes, GDEMDrawing, GDEMGpuPreference,
-  GDEMStore, GDEMMapTiles;
+  GDEMStore;
 
 { TfrmSettings }
 
@@ -259,7 +237,6 @@ var
 begin
   lblToken.TextSettings.Font.Style := [TFontStyle.fsBold];
   lblDataFolder.TextSettings.Font.Style := [TFontStyle.fsBold];
-  lblMapTiles.TextSettings.Font.Style := [TFontStyle.fsBold];
   lblTheme.TextSettings.Font.Style := [TFontStyle.fsBold];
   lblDrawing.TextSettings.Font.Style := [TFontStyle.fsBold];
   cbDrawing.Items.Clear;
@@ -366,36 +343,6 @@ begin
   Result := ChosenValue(cbImportWorkers, IMPORT_WORKER_CHOICES, DEFAULT_IMPORT_WORKERS);
 end;
 
-procedure TfrmSettings.UpdateMapTilesFound;
-var
-  LFound: string;
-begin
-  LFound := FindMapTiles(edtMapTiles.Text);
-  if LFound <> '' then
-    lblMapTilesFound.Text := 'Using the tile set in ' + LFound
-  else if edtMapTiles.Text.Trim <> '' then
-    lblMapTilesFound.Text := 'No tileset.json in that folder: the plain map will be drawn'
-  else
-    lblMapTilesFound.Text := 'No tile set found beside the program: the plain map will be drawn';
-end;
-
-procedure TfrmSettings.MapTilesChangeTracking(Sender: TObject);
-begin
-  UpdateMapTilesFound;
-end;
-
-procedure TfrmSettings.btnBrowseMapTilesClick(Sender: TObject);
-var
-  LFolder: string;
-begin
-  LFolder := FindMapTiles(edtMapTiles.Text);
-  if SelectDirectory('Choose the folder holding tileset.json', '', LFolder) then
-  begin
-    edtMapTiles.Text := LFolder;
-    UpdateMapTilesFound;
-  end;
-end;
-
 procedure TfrmSettings.InputChangeTracking(Sender: TObject);
 begin
   UpdateOK;
@@ -438,8 +385,6 @@ begin
   LForm := TfrmSettings.Create(Application);
   LForm.memToken.Text := ASettings.BearerToken;
   LForm.edtDataFolder.Text := ASettings.DataFolder;
-  LForm.edtMapTiles.Text := ASettings.MapTiles;
-  LForm.UpdateMapTilesFound;
   LForm.nbMinFree.Value := EnsureRange(ASettings.MinFreePercent, MIN_RESERVE_PERCENT,
     MAX_RESERVE_PERCENT);
   LForm.SetImportWorkers(ASettings.ImportWorkers);
@@ -461,7 +406,6 @@ begin
         ASettings.MinFreePercent := EnsureRange(Round(LForm.nbMinFree.Value),
           MIN_RESERVE_PERCENT, MAX_RESERVE_PERCENT);
         ASettings.ImportWorkers := LForm.GetImportWorkers;
-        ASettings.MapTiles := LForm.edtMapTiles.Text.Trim;
         if LForm.cbDownloadSpeed.ItemIndex >= 0 then
           ASettings.DownloadSpeed :=
             DOWNLOAD_SPEED_KEYS[TDownloadSpeed(LForm.cbDownloadSpeed.ItemIndex)];

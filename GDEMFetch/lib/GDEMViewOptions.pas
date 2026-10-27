@@ -12,6 +12,14 @@
   stretch, and the user's own markers start on. A choice missing from the
   file, such as one added in a later version, keeps its default.
 
+  Those defaults suit drawing on the CPU or a low-powered graphics
+  processor. The first time the user changes how GDEMFetch draws to
+  something faster, @link(SuggestedViewLayers) says which layers to turn
+  on for it, and @link(TViewOptions.DrawingSuggestionMade) records that
+  this has been done, so it is done once only. @link(VIEW_LAYERS_BY_COST)
+  lists the layers from the most demanding to the least, for telling the
+  user which to turn off first if the map is slow.
+
   Written with Neon: every public property of @link(TViewOptions) is saved,
   so a new choice only needs a new property. The file is written to a
   temporary file first and renamed over the old one.
@@ -22,7 +30,8 @@ unit GDEMViewOptions;
 interface
 
 uses
-  System.SysUtils;
+  System.SysUtils,
+  GDEMGpuPreference;
 
 const
   { The view choices file, in the settings folder. }
@@ -32,6 +41,43 @@ type
   { @abstract(Raised when the view choices cannot be read or written.) }
   EViewOptionsError = class(Exception);
 
+  { @abstract(One of the things the View menu can show on the map.) }
+  TViewLayer = (
+    { Coastlines. }
+    vlCoastlines,
+    { Country borders. }
+    vlBorders,
+    { Town and city names. }
+    vlPlaces,
+    { The high-resolution map. }
+    vlMapTiles,
+    { The tint of tiles that have data. }
+    vlAvailableTiles,
+    { The tint of downloaded tiles. }
+    vlDownloadedTiles,
+    { The user's markers. }
+    vlMarkers);
+
+  { @abstract(A set of @link(TViewLayer) values.) }
+  TViewLayers = set of TViewLayer;
+
+const
+  { Every layer. }
+  ALL_VIEW_LAYERS = [Low(TViewLayer)..High(TViewLayer)];
+
+  { The layers from the most demanding to draw to the least, when drawing
+    on the GPU: the 1:50m coastline (about 60,000 points zoomed in), then
+    the borders, then up to 250 town names placed and drawn each frame,
+    then the high-resolution map (tiles decoded as they come into view,
+    cheap to draw on a GPU), then the two tints (one bitmap stretch each),
+    then the markers. Estimated from the timings of the lines and of
+    filling pixels, not measured for every layer; on the CPU the
+    high-resolution map and the tints, which fill the window, would come
+    higher. }
+  VIEW_LAYERS_BY_COST: array[0..6] of TViewLayer = (vlCoastlines, vlBorders,
+    vlPlaces, vlMapTiles, vlAvailableTiles, vlDownloadedTiles, vlMarkers);
+
+type
   { @abstract(What the View menu shows on the map.)
 
     Only public properties are saved. }
@@ -51,6 +97,8 @@ type
     FShowPlaces: Boolean;
     { Backing field for @link(ShowMarkers). }
     FShowMarkers: Boolean;
+    { Backing field for @link(DrawingSuggestionMade). }
+    FDrawingSuggestionMade: Boolean;
   public
     { Sets the defaults: tile tints and markers on, the other layers
       off. }
@@ -91,7 +139,31 @@ type
 
     { The user's markers are drawn. On by default. }
     property ShowMarkers: Boolean read FShowMarkers write FShowMarkers;
+
+    { @true once layers have been turned on to suit a faster way of
+      drawing (see @link(SuggestedViewLayers)), so it happens only the
+      first time. @false by default. }
+    property DrawingSuggestionMade: Boolean read FDrawingSuggestionMade
+      write FDrawingSuggestionMade;
   end;
+
+{ The layers to turn on the first time the user chooses how GDEMFetch
+  draws, for that choice:
+  @unorderedList(
+    @item(on the CPU: none, since the defaults suit it;)
+    @item(on the GPU on Windows with the High performance graphics
+      processor: every layer;)
+    @item(on the GPU on Windows otherwise (Let Windows decide, or Power
+      saving, usually the graphics built into the processor): borders,
+      coastlines and the high-resolution map, but not town and city names;)
+    @item(on the GPU on macOS (Metal): every layer;)
+    @item(elsewhere (Linux draws only on the CPU): none.)
+  )
+  @param(AOnGpu @true if drawing on the GPU was chosen.)
+  @param(AGpuPreference Windows' graphics processor choice; ignored
+    elsewhere.)
+  @returns(The layers; empty if nothing should change.) }
+function SuggestedViewLayers(AOnGpu: Boolean; AGpuPreference: TGpuPreference): TViewLayers;
 
 implementation
 
@@ -109,6 +181,21 @@ begin
   Result := TNeonConfiguration.Camel
     .SetPrettyPrint(True)
     .SetRaiseExceptions(True);
+end;
+
+function SuggestedViewLayers(AOnGpu: Boolean; AGpuPreference: TGpuPreference): TViewLayers;
+begin
+  Result := [];
+  if not AOnGpu then
+    Exit;
+  {$IF defined(MSWINDOWS)}
+  if AGpuPreference = TGpuPreference.HighPerformance then
+    Result := ALL_VIEW_LAYERS
+  else
+    Result := [vlBorders, vlCoastlines, vlMapTiles];
+  {$ELSEIF defined(MACOS) and not defined(IOS)}
+  Result := ALL_VIEW_LAYERS;
+  {$ENDIF}
 end;
 
 { TViewOptions }

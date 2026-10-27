@@ -19,6 +19,10 @@ reports, per unit:
   - @link(...) targets that are not declared anywhere in the project
   - fields declared after a method or property in the same section of a
     class, which Delphi rejects (E2169)
+  - a type (class, record, interface, set or enumeration) declared in the
+    interface while the section is const or var, as happens when a const
+    block is added among the types without a new `type` after it; Delphi
+    then fails with a cascade of errors starting with E2029
   - a unit in lib, or in common, that uses FMX or a unit in any ui folder:
     those must stay free of the user interface, so other programs can
     reuse them
@@ -44,6 +48,8 @@ DECL_KW = re.compile(r'^\s*(class\s+)?(procedure|function|constructor|destructor
 TYPE_DECL = re.compile(r'^\s*([A-Za-z_]\w*)(<[^>]*>)?\s*=\s*(?!\s*$)', re.I)
 FIELD = re.compile(r'^\s*(class\s+var\s+)?([A-Za-z_]\w*(\s*,\s*[A-Za-z_]\w*)*)\s*:\s*[^=]', re.I)
 ENUM_VAL = re.compile(r'^\s*([A-Za-z_]\w*)\s*[,)]')
+TYPE_BODY = re.compile(r'^[A-Za-z_]\w*(<[^>]*>)?\s*=\s*(class\b|record\b|packed\s+record\b|interface\b'
+                       r'|set\s+of\b|reference\s+to\b|\()', re.I)
 SECTION = re.compile(r'^\s*(type|const|var|resourcestring|private|protected|public|published|strict\s+private|strict\s+protected)\s*$', re.I)
 
 declared = set()
@@ -107,6 +113,7 @@ for f in files:
     paren_depth = 0
     in_class = False
     seen_member = False
+    top_section = ''
     for i in range(start + 1, end):
         raw = lines[i]
         line = strip_strings(raw)
@@ -129,11 +136,16 @@ for f in files:
             if s.endswith(';'):
                 in_uses = False
             continue
+        if not in_class and top_section in ('const', 'var') and TYPE_BODY.match(s):
+            problems.append(f'{label(f)}:{i+1}: type declared in a {top_section} section; '
+                            f'is a `type` missing above it? {s[:50]}')
         if re.match(r'^[A-Za-z_]\w*(<[^>]*>)?\s*=\s*class\b(?!.*;\s*$)', s, re.I) \
                 and not re.search(r'=\s*class\s+of\b', s, re.I):
             in_class, seen_member = True, False
         if SECTION.match(s):
             seen_member = False
+            if not in_class:
+                top_section = s.lower()
             continue
         if re.match(r'^end\s*;', s, re.I) or s in ('end;', 'end'):
             in_class = False
