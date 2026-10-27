@@ -146,6 +146,12 @@ otherwise use showed only the first letter of each menu and item.
 | View | High-Resolution Map | Draws the tile set instead of the plain map (greyed out when there is no tile set) |
 | View | Show Towns and Cities / Show Markers | The place names and the markers drawn on the map |
 | View | Copy Log / Clear Log | Copy the Debug tab's log to the clipboard, or empty it |
+
+What the View menu shows is remembered from one run to the next. Out of
+the box the tile tints and markers are shown, and the layers that cost the
+most to draw without a GPU (country borders, coastlines, the
+high-resolution map, and town and city names) are off: tick the ones you
+want.
 | Markers | Add Marker at Map Centre... | Asks for a name and puts a marker in the middle of the map |
 | Markers | Edit Markers... | Lists the markers, to go to, rename or delete them |
 
@@ -314,6 +320,40 @@ Escape closes the list.
 
 The search runs on every letter typed, over about 8,200 names, in a few
 milliseconds; see `GDEMSearch.pas`.
+
+#### Easter eggs
+
+[additions.md](additions.md) explains every way to add places (markers,
+easter eggs, towns and countries), how to find a place's position, and how
+names are matched.
+
+The search also finds a few places that are never drawn on the map. They
+are kept in `maps/easter_eggs.json`, linked into the program as the
+`EASTEREGGS` resource, so to add one, add an entry and rebuild:
+
+```json
+{
+  "format": 1,
+  "places": [
+    {
+      "name": "Somewhere",
+      "lat": 12.3456,
+      "lon": -65.4321,
+      "sizeKm": 5,
+      "aliases": ["Other name", "Another"],
+      "note": "Shown on the Debug tab and the status bar when found."
+    }
+  ]
+}
+```
+
+`name`, `lat` and `lon` are needed (degrees, south and west negative).
+`sizeKm` is how much to show round it when found; leave it out (or 0) to
+move there at the current zoom, as for a town. `aliases` are other words
+that find it, matched like any other name, with the same forgiveness of
+spelling mistakes. `note` is optional. An entry with no name or a
+position off the map is left out with a `WARNING:` on the Debug tab; the
+others still load.
 
 ### Markers
 
@@ -531,6 +571,7 @@ Removable drives are normally mounted under `/media/<user>/` or
 | Tile index (`tileindex.bin`) | Same folder as the settings |
 | Download reports (`Reports/download-*.log`) | Same folder as the settings |
 | Markers (`markers.json`) | Same folder as the settings |
+| What the View menu shows (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
 | Windows' graphics processor choice | Windows only: the registry value named after the program's path in `HKEY_CURRENT_USER\Software\Microsoft\DirectX\UserGpuPreferences`; see [Drawing](#drawing) |
 | Downloaded tiles | The **data folder**, chosen in File > Settings. Default: `ASTGTM` in your documents folder. |
 
@@ -782,6 +823,7 @@ the size of the one before.
 | `delphi-neon/` | Neon JSON library (git submodule) |
 | `tools/pasdoc_check.py` | Checks the units of `GDEMFetch/`, `TileMaker/` and `common/` follow the PasDoc and layout rules; see [Notes for Claude](#notes-for-claude) |
 | `tools/build_vectors.py` | Builds `maps/world_vectors.bin` from Natural Earth; see [Borders and coastlines](#borders-and-coastlines) |
+| `additions.md` | How to add places the search finds: markers, easter eggs, towns and countries |
 | `CLAUDE.md` | Handover notes: the project's current state, test results and lessons learned, for picking the work up in a new conversation |
 | `docs/` | Ignored for development |
 | `models/` | Ignored for development |
@@ -813,6 +855,8 @@ it:
 | `GDEMVectors` | `TWorldVectors`: country borders, coastlines and country names, country extents for zooming, and towns and cities (`TGeoPlace`) |
 | `GDEMSearch` | `TPlaceSearch`: finds countries, towns and cities and markers by name, forgiving spelling mistakes |
 | `GDEMMarkers` | `TMarkerList`: the user's markers, kept in `markers.json` with Neon |
+| `GDEMViewOptions` | `TViewOptions`: what the View menu shows, kept in `view.json` with Neon |
+| `GDEMEasterEggs` | Reads the hidden places the search finds, from the `EASTEREGGS` resource (`maps/easter_eggs.json`) with Neon |
 | `GDEMSettings` | Loads and saves `settings.json` with Neon |
 | `GDEMCancel` | `TCancelToken`, shared by the Cancel button and background jobs |
 | `GDEMAwake` | `TKeepAwake`, which keeps the computer from sleeping while a job runs |
@@ -856,7 +900,8 @@ reports any that do. Each program's `.dpr` lists them with
 | `GDEMTileCache` | `TTileCache`: a tile set's tiles, decoded with Skia when first needed and kept, the least recently used dropped first; a level can be kept for good (used by GDEMFetch) |
 
 The world map image `maps/world_1080x540.jpg` is linked into GDEMFetch as
-the `WORLDMAP` RCDATA resource, and `maps/world_vectors.bin` as
+the `WORLDMAP` RCDATA resource, `maps/easter_eggs.json` as `EASTEREGGS`,
+and `maps/world_vectors.bin` as
 `WORLDVECTORS`, so nothing needs deploying beside the program. The image
 is an equirectangular projection: 3 pixels per degree, longitude -180 at
 the left and latitude 90 at the top.

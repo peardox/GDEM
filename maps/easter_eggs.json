@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "places": [
+    {
+      "name": "Area 51",
+      "lat": 37.2333,
+      "lon": -115.8083,
+      "sizeKm": 12,
+      "aliases": ["Groom Lake", "Dreamland", "Homey Airport", "Paradise Ranch", "UFO", "Aliens", "Little Green Men", "The truth is out there"],
+      "note": "UFOs, conspiracy theories and a very long runway. Nothing to see here."
+    },
+    {
+      "name": "Squid Game island",
+      "lat": 37.0969,
+      "lon": 126.0783,
+      "sizeKm": 4,
+      "aliases": ["Seongapdo", "Squid Game", "Red Light Green Light", "Mugunghwa", "Player 456"],
+      "note": "Seongapdo, the private island filmed for the games. Red light... green light."
+    }
+  ]
+}

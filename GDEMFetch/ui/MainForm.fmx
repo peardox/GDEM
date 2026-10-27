@@ -94,25 +94,21 @@ object frmMain: TfrmMain
       end
       object mnuShowBorders: TMenuItem
         AutoCheck = True
-        IsChecked = True
         Text = 'Show Country Borders'
         OnClick = mnuShowBordersClick
       end
       object mnuShowCoastlines: TMenuItem
         AutoCheck = True
-        IsChecked = True
         Text = 'Show Coastlines'
         OnClick = mnuShowCoastlinesClick
       end
       object mnuShowMapTiles: TMenuItem
         AutoCheck = True
-        IsChecked = True
         Text = 'High-Resolution Map'
         OnClick = mnuShowMapTilesClick
       end
       object mnuShowPlaces: TMenuItem
         AutoCheck = True
-        IsChecked = True
         Text = 'Show Towns and Cities'
         OnClick = mnuShowPlacesClick
       end

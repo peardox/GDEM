@@ -734,12 +734,12 @@ type
       @link(TileIndex). @nil draws none. }
     property Vectors: TWorldVectors read FVectors write SetVectors;
 
-    { Whether country borders are drawn. On by default; has no effect
-      until @link(Vectors) is set. }
+    { Whether country borders are drawn. Off by default, as they cost time
+      to draw without a GPU; has no effect until @link(Vectors) is set. }
     property ShowBorders: Boolean read FShowBorders write SetShowBorders;
 
-    { Whether coastlines are drawn. On by default; has no effect until
-      @link(Vectors) is set. }
+    { Whether coastlines are drawn. Off by default, as they cost time to
+      draw without a GPU; has no effect until @link(Vectors) is set. }
     property ShowCoastlines: Boolean read FShowCoastlines write SetShowCoastlines;
 
     { The selected block of tiles. Changed by dragging on the map or by
@@ -791,11 +791,12 @@ type
       only the map image. }
     property MapTiles: TTileCache read FMapTiles write SetMapTiles;
 
-    { Whether @link(MapTiles) is drawn. On by default. }
+    { Whether @link(MapTiles) is drawn. Off by default, as it costs time to
+      draw without a GPU. }
     property ShowMapTiles: Boolean read FShowMapTiles write SetShowMapTiles;
 
-    { Whether towns and cities from @link(Vectors) are labelled. On by
-      default. }
+    { Whether towns and cities from @link(Vectors) are labelled. Off by
+      default, as labels cost time to draw without a GPU. }
     property ShowPlaces: Boolean read FShowPlaces write SetShowPlaces;
 
     { The user's markers, drawn with their names. Not owned, like
@@ -946,8 +947,9 @@ begin
   FSelection := TTileRect.Empty;
   FShowAvailableTiles := True;
   FShowDownloadedTiles := True;
-  FShowBorders := True;
-  FShowCoastlines := True;
+  // The layers that are costly to draw without a GPU start off
+  FShowBorders := False;
+  FShowCoastlines := False;
   FUseSkiaPaths := True;
   {$IFDEF SKIA}
   FLayerPaths := TDictionary<TGeoLayer, TArray<TLinePiece>>.Create;
@@ -961,12 +963,12 @@ begin
   FStatsTimer.Enabled := False;
   FStatsTimer.Interval := STATS_IDLE_INTERVAL;
   FStatsTimer.OnTimer := StatsTimerTick;
-  FShowMapTiles := True;
+  FShowMapTiles := False;
   FTileTimer := TTimer.Create(Self);
   FTileTimer.Enabled := False;
   FTileTimer.Interval := TILE_LOAD_INTERVAL;
   FTileTimer.OnTimer := TileTimerTick;
-  FShowPlaces := True;
+  FShowPlaces := False;
   FShowMarkers := True;
   FLabelWidths := TDictionary<Integer, Single>.Create;
 end;

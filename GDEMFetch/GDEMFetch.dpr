@@ -31,6 +31,9 @@
     @item(@link(GDEMSearch) finds countries, places and markers by name,
       forgiving spelling mistakes; @link(GDEMMarkers) keeps the user's
       markers, which @link(MarkersForm) lists for renaming and deleting.)
+    @item(@link(GDEMViewOptions) remembers what the View menu shows.)
+    @item(@link(GDEMEasterEggs) reads a few hidden places for the search
+      to find.)
     @item(@link(GDEMDrawing) tells Skia whether to draw on the GPU or the
       CPU, before the program starts up.)
     @item(@link(GDEMGpuPreference) reads and sets Windows' choice of
@@ -72,7 +75,9 @@ uses
   GDEMTileCache in '..\common\GDEMTileCache.pas',
   GDEMMarkers in 'lib\GDEMMarkers.pas',
   GDEMSearch in 'lib\GDEMSearch.pas',
-  MarkersForm in 'ui\MarkersForm.pas' {frmMarkers};
+  MarkersForm in 'ui\MarkersForm.pas' {frmMarkers},
+  GDEMViewOptions in 'lib\GDEMViewOptions.pas',
+  GDEMEasterEggs in 'lib\GDEMEasterEggs.pas';
 
 {$R *.res}
 { The world map image and its borders and coastlines, built from the

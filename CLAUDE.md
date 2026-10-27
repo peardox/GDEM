@@ -569,6 +569,36 @@ hit Paris's, drawn first. Labels now try right, left, above, below
 Toronto and Washington, D.C. The owner lives in Manchester (min zoom 5.0,
 labelled from about 23 px/degree).
 
+Then, at the owner's request, the View menu is remembered and the layers
+start off, since they slow the program without a GPU: `lib/GDEMViewOptions`
+(new, `TViewOptions`, Neon class with public properties like
+`TGDEMSettings`, `view.json` in the settings folder, atomic write; missing
+members keep the constructor's defaults). Off by default: borders,
+coastlines, high-resolution map, towns and cities (also the map
+control's own defaults and the `.fmx` ticks); on: both tile tints and
+markers (my choice: the tints are what the map is for and cost one
+bitmap stretch; markers are the user's own). Kept out of `settings.json`
+because that file existing means "set up", so writing it on a first run
+would skip the first-run Settings dialog. `TfrmMain.LoadViewOptions`
+(in `FormCreate` after `LoadMapTiles`) ticks the menu and sets the map;
+each View toggle handler calls `SaveViewOptions`.
+
+Easter eggs (owner's idea; owner chose a JSON file): `maps/easter_eggs.json`,
+the `EASTEREGGS` RCDATA resource (`RcItem` plus disabled `DeployFile`
+entries like `world_vectors.bin`), read by `lib/GDEMEasterEggs`
+(`ParseEasterEggs`, `LoadEasterEggs`; Neon records; bad entries skipped
+and reported). `TSearchKind.skEgg` (between countries and places); names
+and aliases searchable, text gets the country from `CountryAt`; never
+drawn. `GoToHit` zooms to a `sizeKm` box (or pans), rings it, and puts
+the note on the Debug tab and in `lblHover`; only problems are logged
+at start-up, to keep them a surprise. Area 51: 37.2333, -115.8083
+(Wikipedia), 12 km. Squid Game island: Seongapdo, 37.0969, 126.0783,
+4 km: the owner's Google Maps link, Plus Code `8Q9833WH+Q8`, decoded by
+hand (no `openlocationcode` package on pip here); 0.3 km from a
+summary site's figure, while latlong.net's 37.2558, 126.3068 is 27 km off
+(near Yeongheungdo). Python port of the search: `area 51`, `ufo`,
+`groom lake`, `seongapdo`, `squid gaem` and the rest find them first.
+
 Things to check when built: that `TControl.OnMouseDown` can be assigned
 from `MainForm` (it should be public), that Ctrl + click on macOS is not
 turned into a right click by the system (Cmd + click is the documented

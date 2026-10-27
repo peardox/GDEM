@@ -87,7 +87,7 @@ uses
   FMX.Controls.Presentation, FMX.Menus, FMX.TabControl, FMX.ListBox,
   GDEMCancel, GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex,
   GDEMStore, GDEMThemes, GDEMReport, GDEMVectors, GDEMTileCache, GDEMMarkers,
-  GDEMSearch, ProgressForm;
+  GDEMSearch, GDEMViewOptions, GDEMEasterEggs, ProgressForm;
 
 const
   { Name of the RCDATA resource holding the world map image. }
@@ -103,6 +103,10 @@ const
   { Width of the list of search matches, in pixels: wider than the search
     box, as a place's full name can be long. }
   SEARCH_LIST_WIDTH = 460;
+
+  { Kilometres in a degree of latitude, near enough, for sizing the view
+    round an easter egg. }
+  KM_PER_DEGREE = 111.32;
 
 type
   { The work done by a job, run on a background thread.
@@ -372,9 +376,18 @@ type
       on @link(FMap). }
     FMarkers: TMarkerList;
 
-    { Finds countries, places and markers by name; rebuilt when the markers
-      change. }
+    { What the View menu shows, remembered between runs; loaded at
+      start-up and saved whenever a View item is ticked or unticked. }
+    FViewOptions: TViewOptions;
+
+    { Finds countries, places, markers and easter eggs by name; rebuilt when
+      the markers change. }
     FSearch: TPlaceSearch;
+
+    { Hidden places only the search finds, from the
+      @code(EASTER_EGGS_RESOURCE) resource; empty if it could not be
+      read. }
+    FEasterEggs: TArray<TEasterEgg>;
 
     { The matches for what is in @link(edtSearch), in the order shown in
       @link(FSearchList). }
@@ -513,6 +526,15 @@ type
       plain map image is drawn, and the log says which. }
     procedure LoadMapTiles;
 
+    { Reads the remembered View choices into @link(FViewOptions), or keeps
+      the defaults (with a warning if the file cannot be read), then ticks
+      the View menu and sets up the map to match. }
+    procedure LoadViewOptions;
+
+    { Copies the View menu's ticks into @link(FViewOptions) and writes
+      them, logging a warning if they cannot be written. }
+    procedure SaveViewOptions;
+
     { Reads the markers file into @link(FMarkers), logging how many, or a
       warning if it cannot be read. }
     procedure LoadMarkers;
@@ -522,7 +544,12 @@ type
       @returns(@true if saved; a failure is reported.) }
     function SaveMarkers: Boolean;
 
-    { Refills @link(FSearch) from the countries, places and markers. }
+    { Reads the easter eggs into @link(FEasterEggs), logging only what goes
+      wrong, so they stay a surprise. }
+    procedure LoadEasterEggs;
+
+    { Refills @link(FSearch) from the countries, places, markers and
+      easter eggs. }
     procedure RebuildSearch;
 
     { Searches for what is in @link(edtSearch) and shows the matches. }
@@ -963,9 +990,12 @@ begin
     ApplyThemeSetting(False);
 
   LoadMapTiles;
+  FViewOptions := TViewOptions.Create;
+  LoadViewOptions;
   FMarkers := TMarkerList.Create;
   LoadMarkers;
   FMap.Markers := FMarkers;
+  LoadEasterEggs;
   FSearch := TPlaceSearch.Create;
   RebuildSearch;
   // Over the map, under the search box; not focusable, so clicking it
@@ -1014,6 +1044,7 @@ begin
   FMap.Markers := nil;
   FMarkers.Free;
   FSearch.Free;
+  FViewOptions.Free;
   FStore.Free;
   FSettings.Free;
   FTileIndex.Free;
@@ -1200,6 +1231,49 @@ begin
   end;
 end;
 
+{ View choices }
+
+procedure TfrmMain.LoadViewOptions;
+begin
+  try
+    FViewOptions.Load;
+  except
+    on E: Exception do
+      AddLog('WARNING: ' + E.Message.TrimRight(['.']) + '; using the default view');
+  end;
+  mnuShowTiles.IsChecked := FViewOptions.ShowAvailableTiles;
+  mnuShowDownloaded.IsChecked := FViewOptions.ShowDownloadedTiles;
+  mnuShowBorders.IsChecked := FViewOptions.ShowBorders;
+  mnuShowCoastlines.IsChecked := FViewOptions.ShowCoastlines;
+  mnuShowMapTiles.IsChecked := FViewOptions.ShowMapTiles;
+  mnuShowPlaces.IsChecked := FViewOptions.ShowPlaces;
+  mnuShowMarkers.IsChecked := FViewOptions.ShowMarkers;
+  FMap.ShowAvailableTiles := FViewOptions.ShowAvailableTiles;
+  FMap.ShowDownloadedTiles := FViewOptions.ShowDownloadedTiles;
+  FMap.ShowBorders := FViewOptions.ShowBorders;
+  FMap.ShowCoastlines := FViewOptions.ShowCoastlines;
+  FMap.ShowMapTiles := FViewOptions.ShowMapTiles;
+  FMap.ShowPlaces := FViewOptions.ShowPlaces;
+  FMap.ShowMarkers := FViewOptions.ShowMarkers;
+end;
+
+procedure TfrmMain.SaveViewOptions;
+begin
+  FViewOptions.ShowAvailableTiles := mnuShowTiles.IsChecked;
+  FViewOptions.ShowDownloadedTiles := mnuShowDownloaded.IsChecked;
+  FViewOptions.ShowBorders := mnuShowBorders.IsChecked;
+  FViewOptions.ShowCoastlines := mnuShowCoastlines.IsChecked;
+  FViewOptions.ShowMapTiles := mnuShowMapTiles.IsChecked;
+  FViewOptions.ShowPlaces := mnuShowPlaces.IsChecked;
+  FViewOptions.ShowMarkers := mnuShowMarkers.IsChecked;
+  try
+    FViewOptions.Save;
+  except
+    on E: Exception do
+      AddLog('WARNING: ' + E.Message.TrimRight(['.']) + '; the View menu will not be remembered');
+  end;
+end;
+
 { Markers and search }
 
 procedure TfrmMain.LoadMarkers;
@@ -1228,9 +1302,27 @@ begin
   FMap.MarkersChanged;
 end;
 
+procedure TfrmMain.LoadEasterEggs;
+var
+  LSkipped: TArray<string>;
+  LReason: string;
+begin
+  try
+    FEasterEggs := GDEMEasterEggs.LoadEasterEggs(LSkipped);
+    for LReason in LSkipped do
+      AddLog('WARNING: easter egg left out: ' + LReason);
+  except
+    on E: Exception do
+    begin
+      FEasterEggs := nil;
+      AddLog('WARNING: ' + E.Message.TrimRight(['.']));
+    end;
+  end;
+end;
+
 procedure TfrmMain.RebuildSearch;
 begin
-  FSearch.Build(FVectors, FMarkers);
+  FSearch.Build(FVectors, FMarkers, FEasterEggs);
   // The indexes of shown matches may have changed
   if (FSearchList <> nil) and FSearchList.Visible then
     RunSearch;
@@ -1288,6 +1380,8 @@ var
   LExtent: TRectF;
   LPlace: TGeoPlace;
   LMarker: TMapMarker;
+  LEgg: TEasterEgg;
+  LHalfLat, LHalfLon: Double;
 begin
   HideSearchList;
   case AHit.Kind of
@@ -1313,6 +1407,27 @@ begin
         LMarker := FMarkers[AHit.Index];
         FMap.CentreOn(LMarker.Lat, LMarker.Lon);
         FMap.ShowHighlight(LMarker.Lat, LMarker.Lon);
+      end;
+    skEgg:
+      begin
+        LEgg := FEasterEggs[AHit.Index];
+        if LEgg.SizeKm > 0 then
+        begin
+          // Half the size each way: a degree of latitude is about 111 km,
+          // and a degree of longitude that times the cosine of the latitude
+          LHalfLat := LEgg.SizeKm / 2 / KM_PER_DEGREE;
+          LHalfLon := LHalfLat / Max(Cos(DegToRad(LEgg.Lat)), 0.01);
+          FMap.ZoomToArea(LEgg.Lat + LHalfLat, LEgg.Lat - LHalfLat,
+            LEgg.Lon - LHalfLon, LEgg.Lon + LHalfLon);
+        end
+        else
+          FMap.CentreOn(LEgg.Lat, LEgg.Lon);
+        FMap.ShowHighlight(LEgg.Lat, LEgg.Lon);
+        if LEgg.Note <> '' then
+        begin
+          AddLog(LEgg.Name + ': ' + LEgg.Note);
+          lblHover.Text := LEgg.Note;
+        end;
       end;
   end;
   // Show what was chosen, without searching for it again
@@ -1427,11 +1542,13 @@ end;
 procedure TfrmMain.mnuShowPlacesClick(Sender: TObject);
 begin
   FMap.ShowPlaces := mnuShowPlaces.IsChecked;
+  SaveViewOptions;
 end;
 
 procedure TfrmMain.mnuShowMarkersClick(Sender: TObject);
 begin
   FMap.ShowMarkers := mnuShowMarkers.IsChecked;
+  SaveViewOptions;
 end;
 
 procedure TfrmMain.mnuAddMarkerClick(Sender: TObject);
@@ -1694,26 +1811,31 @@ end;
 procedure TfrmMain.mnuShowTilesClick(Sender: TObject);
 begin
   FMap.ShowAvailableTiles := mnuShowTiles.IsChecked;
+  SaveViewOptions;
 end;
 
 procedure TfrmMain.mnuShowDownloadedClick(Sender: TObject);
 begin
   FMap.ShowDownloadedTiles := mnuShowDownloaded.IsChecked;
+  SaveViewOptions;
 end;
 
 procedure TfrmMain.mnuShowBordersClick(Sender: TObject);
 begin
   FMap.ShowBorders := mnuShowBorders.IsChecked;
+  SaveViewOptions;
 end;
 
 procedure TfrmMain.mnuShowCoastlinesClick(Sender: TObject);
 begin
   FMap.ShowCoastlines := mnuShowCoastlines.IsChecked;
+  SaveViewOptions;
 end;
 
 procedure TfrmMain.mnuShowMapTilesClick(Sender: TObject);
 begin
   FMap.ShowMapTiles := mnuShowMapTiles.IsChecked;
+  SaveViewOptions;
 end;
 
 procedure TfrmMain.mnuCopyLogClick(Sender: TObject);

@@ -20,6 +20,10 @@
       @code(edinbrugh). The mistakes allowed grow with what is typed (see
       @link(TPlaceSearch.MaxMistakes)), none below four letters.)
   )
+  The easter eggs (see @code(GDEMEasterEggs)) are found the same way, by
+  name or by any of their other names, though they are never drawn on the
+  map.
+
   A place is also found by its other names, such as @code(Antioch) for
   Antakya; the list then shows that name after the place.
 
@@ -39,7 +43,7 @@ interface
 
 uses
   System.SysUtils, System.Generics.Collections,
-  GDEMVectors, GDEMMarkers;
+  GDEMVectors, GDEMMarkers, GDEMEasterEggs;
 
 const
   { Most matches returned unless asked otherwise. }
@@ -52,6 +56,8 @@ type
     skMarker,
     { A country; see @code(TWorldVectors.Countries). }
     skCountry,
+    { An easter egg: a hidden place; see @code(GDEMEasterEggs). }
+    skEgg,
     { A town or city; see @code(TWorldVectors.Places). }
     skPlace
   );
@@ -75,8 +81,8 @@ type
   TSearchHit = record
     { What it is. }
     Kind: TSearchKind;
-    { Its index: in the marker list, @code(TWorldVectors.Countries) or
-      @code(TWorldVectors.Places). }
+    { Its index: in the marker list, @code(TWorldVectors.Countries), the
+      easter eggs or @code(TWorldVectors.Places). }
     Index: Integer;
     { How to show it in a list, such as @code(London, Ontario, Canada),
       @code(Jersey (country)) or @code(Home (marker)). }
@@ -162,11 +168,13 @@ type
       @returns(0 below 4 letters, 1 below 7, 2 below 11, then 3.) }
     class function MaxMistakes(ALength: Integer): Integer; static;
 
-    { Fills the search with every country, town and city, and marker,
-      replacing what was there.
+    { Fills the search with every country, town and city, marker and
+      easter egg, replacing what was there.
       @param(AVectors The countries and places; may be @nil.)
-      @param(AMarkers The markers; may be @nil.) }
-    procedure Build(AVectors: TWorldVectors; AMarkers: TMarkerList);
+      @param(AMarkers The markers; may be @nil.)
+      @param(AEggs The easter eggs; may be empty.) }
+    procedure Build(AVectors: TWorldVectors; AMarkers: TMarkerList;
+      const AEggs: TArray<TEasterEgg>);
 
     { Finds what matches a query, best first.
       @param(AQuery As typed.)
@@ -314,13 +322,14 @@ begin
     AList.Add(LEntry);
 end;
 
-procedure TPlaceSearch.Build(AVectors: TWorldVectors; AMarkers: TMarkerList);
+procedure TPlaceSearch.Build(AVectors: TWorldVectors; AMarkers: TMarkerList;
+  const AEggs: TArray<TEasterEgg>);
 var
   LIndex: Integer;
   LCountries: TGeoLayer;
   LPlace: TGeoPlace;
   LEntries: TList<TSearchEntry>;
-  LName, LOther: string;
+  LName, LOther, LText, LCountry: string;
 begin
   LEntries := TList<TSearchEntry>.Create;
   try
@@ -335,6 +344,23 @@ begin
         for LIndex := 0 to High(LCountries.Features) do
           AddEntry(LEntries, skCountry, LIndex, LCountries.Features[LIndex].Name,
             LCountries.Features[LIndex].Name + COUNTRY_SUFFIX, 0);
+    end;
+    for LIndex := 0 to High(AEggs) do
+    begin
+      // Named with the country it is in, where the outlines hold it
+      LText := AEggs[LIndex].Name;
+      if AVectors <> nil then
+      begin
+        LCountry := AVectors.CountryAt(AEggs[LIndex].Lat, AEggs[LIndex].Lon);
+        if LCountry <> '' then
+          LText := LText + ', ' + LCountry;
+      end;
+      AddEntry(LEntries, skEgg, LIndex, AEggs[LIndex].Name, LText, LIndex);
+      for LOther in AEggs[LIndex].Aliases do
+        AddEntry(LEntries, skEgg, LIndex, LOther, LText + ' (' + LOther + ')', LIndex);
+    end;
+    if AVectors <> nil then
+    begin
       for LIndex := 0 to High(AVectors.Places) do
       begin
         LPlace := AVectors.Places[LIndex];
