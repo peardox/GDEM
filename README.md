@@ -617,6 +617,37 @@ leaked block and what it holds to `GDEMFetch_MemoryManager_EventLog.txt`
 start-up, so it only ever holds the last run's leaks; no file means
 nothing leaked. On other platforms the system's memory manager is used.
 
+### Memory and graphics in the log
+
+At start-up the Debug tab lists the computer's memory, the program's own
+use of it, and each graphics processor with its memory, for example:
+
+```
+Memory: 63.6 GB, 41.2 GB available
+This program: 212 MB in memory (peak 230 MB), 96 MB allocated
+GPU 1: NVIDIA GeForce RTX 5090 Laptop GPU, 23.6 GB own memory, 31.8 GB shared; this program may use 22.9 GB, this program uses 120 MB
+GPU 2: Intel(R) Graphics, 128 MB own memory, 31.8 GB shared; ...
+```
+
+A second after the 3D view shows a tile, a `3D: memory after showing
+...` line gives what is in use then, so the cost of a detail setting (or,
+later, of several tiles) can be read off. What is known depends on the
+system:
+
+- **Windows:** everything. "May use" is the budget Windows gives the
+  program on that graphics processor (Windows 10 and later), "uses" the
+  program's own use of it, and "allocated" FastMM5's count of the bytes
+  the program holds.
+- **macOS:** memory from the kernel; each Metal device with its name,
+  whether it shares memory with the processor (Apple silicon), the working
+  set Metal recommends at most ("may use") and what the program has
+  allocated on it.
+- **Linux:** memory from `/proc`; graphics cards from `/sys/class/drm`.
+  AMD cards give their memory and how much all programs use; NVIDIA cards
+  give their name and memory if `nvidia-smi` is installed; Intel graphics
+  share the system memory. There is no per-program figure for the
+  graphics processor.
+
 ## Deploying
 
 The world map, its high-resolution tile set, and its borders and
@@ -1033,6 +1064,7 @@ reports any that do. Each program's `.dpr` lists them with
 | `GDEMTileSet` | `TTileSet`, a tile set's description, read and written as `tileset.json` with Neon |
 | `GDEMTileCache` | `TTileCache`: a tile set's tiles, from its folder or packed in a zip, decoded with Skia when first needed and kept, the least recently used dropped first; a level can be kept for good (used by GDEMFetch) |
 | `GDEMGeoTiff` | `TGeoTiff`: reads GeoTIFF files such as the downloaded tiles, in pure Pascal; see [Reading the tiles](#reading-the-tiles) |
+| `GDEMSystemInfo` | The system memory (`ReadMemoryInfo`), the program's use of it (`ReadProgramMemory`, with the memory manager's count through `ProgramHeapReader`), and each graphics processor with its memory (`ReadGpuInfo`), on Windows, macOS and Linux; `DescribeSystem` and `DescribeMemoryUse` for the log; see [Memory and graphics in the log](#memory-and-graphics-in-the-log) |
 
 The world map image `maps/world_1080x540.jpg` is linked into GDEMFetch as
 the `WORLDMAP` RCDATA resource, `maps/easter_eggs.json` as `EASTEREGGS`,

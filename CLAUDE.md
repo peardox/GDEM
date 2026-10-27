@@ -6,8 +6,9 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 27 October 2026, late evening, before the owner's push of
-the 3D work.
+Last updated: 27 October 2026, late evening, after the owner's push of
+the 3D work (`d25e46b` "Mountains, Pan, Less crap UI", checked identical
+to the delivered files), with the memory and GPU unit since.
 
 ## State at the end of 27 October 2026
 
@@ -45,6 +46,48 @@ Items 5 to 8 compiled (the owner's build reported only the hints of item
 8), but have not been reported on in use. macOS and Linux have not run
 any of items 2 to 8. Sections below that say "Not yet built" were written
 before the owner's builds. No known bugs.
+
+### Memory and graphics processors (27 October 2026, after `d25e46b`)
+
+Asked for by the owner as metrics for showing several tiles in 3D, and
+put in `common/` as it has many uses: `common/GDEMSystemInfo.pas` (no
+FMX; in GDEMFetch's `.dpr` and `.dproj`). Not yet built.
+
+- `ReadMemoryInfo` (`TMemoryInfo`: Total, Available):
+  `GlobalMemoryStatusEx`; macOS `sysctl hw.memsize` and
+  `host_statistics64` (free + inactive + speculative pages times
+  `hw.pagesize`); Linux `/proc/meminfo` MemTotal, MemAvailable.
+- `ReadProgramMemory` (`TProgramMemoryInfo`: Resident, PeakResident,
+  Allocated): `K32GetProcessMemoryInfo` working set and peak; macOS
+  `task_info` `MACH_TASK_BASIC_INFO` (20) resident size and max; Linux
+  `/proc/self/status` VmRSS, VmHWM. Allocated comes from the
+  `ProgramHeapReader` variable, which GDEMFetch's `.dpr` sets on Windows
+  to `FastMM_GetUsageSummary.AllocatedBytes` (the owner suggested
+  FastMM5; it knows only the program's heap, not the system's memory, and
+  is Windows only, so the unit cannot use it directly). The summary walks
+  the heap, so it is for occasional logging, not every frame.
+- `ReadGpuInfo` (`TGpuInfo`: Name, VendorId, DedicatedMemory,
+  SharedMemory, Budget, Used, UsedByThisProgram, UnifiedMemory): Windows
+  DXGI declared in the unit (`CreateDXGIFactory1`, `EnumAdapters1`,
+  `GetDesc1`, software adapter skipped; `IDXGIAdapter3`
+  `QueryVideoMemoryInfo` node 0, local group, for Budget and
+  CurrentUsage; vtables declared in Microsoft's order up to the last
+  method called); macOS Metal `MTLCopyAllDevices` with typed
+  `objc_msgSend` (`name`, `hasUnifiedMemory`,
+  `recommendedMaxWorkingSetSize`, `currentAllocatedSize`; vendor guessed
+  from the name); Linux `/sys/class/drm/cardN/device` vendor and device,
+  AMD `mem_info_vram_total`/`_used`/`mem_info_gtt_total`, NVIDIA through
+  `nvidia-smi` via `popen` (only if an NVIDIA card is there), Intel 0 own
+  memory.
+- `DescribeSystem` lines are logged by `TfrmMain.LogSystem` after
+  `LogDisplays` in `RunStartup`; `DescribeMemoryUse` is logged
+  `MEMORY_MEASURE_DELAY` (1 s) after each 3D build
+  (`TThread.ForceQueue` with a delay), as `3D: memory after showing
+  <tile>: ...`, so the pieces have been drawn and sent to the GPU.
+- To check: the start-up lines on all three systems (both of the
+  laptop's GPUs on Windows, Apple silicon and Intel Macs); the 3D line at
+  each detail, which gives the memory cost per tile for planning several
+  tiles.
 
 ### The map jumping while dragging (fixed 27 October 2026)
 

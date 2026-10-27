@@ -264,6 +264,7 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <DCCReference Include="..\common\GDEMTileSet.pas"/>
         <DCCReference Include="..\common\GDEMTileCache.pas"/>
         <DCCReference Include="..\common\GDEMGeoTiff.pas"/>
+        <DCCReference Include="..\common\GDEMSystemInfo.pas"/>
         <DCCReference Include="lib\GDEMMarkers.pas"/>
         <DCCReference Include="lib\GDEMSearch.pas"/>
         <DCCReference Include="ui\MarkersForm.pas">

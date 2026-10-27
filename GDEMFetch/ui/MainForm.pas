@@ -115,6 +115,11 @@ const
   { Kilometres shown round a mountain found by the search. }
   PEAK_VIEW_KM = 40;
 
+  { Milliseconds after the 3D view is built before its memory use is
+    logged, so the frames drawn meanwhile have sent it to the graphics
+    processor. }
+  MEMORY_MEASURE_DELAY = 1000;
+
 type
   { The work done by a job, run on a background thread.
     @param(AToken Check this at safe points; cancelling the job sets it.) }
@@ -748,6 +753,11 @@ type
       from the log. }
     procedure LogDisplays;
 
+    { Logs the computer's memory, this program's use of it, and each
+      graphics processor with its memory, from @link(DescribeSystem), at
+      start-up. }
+    procedure LogSystem;
+
     { Adds a marker where the map was Ctrl + clicked (Cmd + clicked).
       @param(Sender The map view.)
       @param(ALat Latitude clicked.)
@@ -1050,7 +1060,7 @@ uses
   Winapi.Windows,
   {$ENDIF}
   GDEMTiles, GDEMDownloadBatch, GDEMDrawing, GDEMMapTiles, GDEMTileSet, GDEMGpuPreference,
-  GDEMTerrain, SettingsForm, MarkersForm;
+  GDEMTerrain, GDEMSystemInfo, SettingsForm, MarkersForm;
 
 { TfrmMain }
 
@@ -1193,6 +1203,7 @@ procedure TfrmMain.RunStartup;
 begin
   AddLog(DescribeDrawing);
   LogDisplays;
+  LogSystem;
   // Each of these waits for the user (or the download) before the next
   if not FHaveSettings then
     ShowSettings(nil)
@@ -1681,6 +1692,13 @@ begin
        FormatFloat('#,##0', FTerrainView.TriangleCount), FTerrainView.PieceCount,
        LGrid.MinHeight, LGrid.MaxHeight, ChosenTerrainHeights, LReadMs,
        LWatch.ElapsedMilliseconds]));
+    // Measured a second later, once the pieces have been drawn and so sent
+    // to the graphics processor
+    TThread.ForceQueue(nil,
+      procedure
+      begin
+        AddLog('3D: memory after showing ' + LTile + ': ' + DescribeMemoryUse);
+      end, MEMORY_MEASURE_DELAY);
   except
     on E: Exception do
     begin
@@ -2073,6 +2091,14 @@ begin
         Key := 0;
       end;
   end;
+end;
+
+procedure TfrmMain.LogSystem;
+var
+  LLine: string;
+begin
+  for LLine in DescribeSystem do
+    AddLog(LLine);
 end;
 
 procedure TfrmMain.LogDisplays;

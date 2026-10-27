@@ -45,6 +45,9 @@
     @item(@link(GDEMGeoTiff), in @code(common), reads the downloaded
       GeoTIFF tiles; @link(GDEMTerrain) makes a tile's surface from them,
       and @link(GDEMTerrainView) shows it on the 3D tab with Gorilla3D.)
+    @item(@link(GDEMSystemInfo), in @code(common), reads the computer's
+      memory and graphics processors, and this program's use of them, for
+      the log.)
     @item(On Windows, FastMM5 (a submodule in @code(FastMM5)) is the
       memory manager; with @code(REPORT_LEAKS) defined, leaks are reported
       at shut-down.)
@@ -89,6 +92,7 @@ uses
   GDEMTileSet in '..\common\GDEMTileSet.pas',
   GDEMTileCache in '..\common\GDEMTileCache.pas',
   GDEMGeoTiff in '..\common\GDEMGeoTiff.pas',
+  GDEMSystemInfo in '..\common\GDEMSystemInfo.pas',
   GDEMMarkers in 'lib\GDEMMarkers.pas',
   GDEMSearch in 'lib\GDEMSearch.pas',
   MarkersForm in 'ui\MarkersForm.pas' {frmMarkers},
@@ -119,6 +123,15 @@ begin
   FastMM_LogToFileEvents := FastMM_LogToFileEvents +
     [mmetUnexpectedMemoryLeakSummary, mmetUnexpectedMemoryLeakDetail];
   {$ENDIF}
+  {$ENDIF}
+  {$IF DEFINED(MSWINDOWS)}
+  // FastMM5's count of the bytes allocated, for the memory lines in the
+  // log (GDEMSystemInfo)
+  ProgramHeapReader :=
+    function: Int64
+    begin
+      Result := Int64(FastMM_GetUsageSummary(50).AllocatedBytes);
+    end;
   {$ENDIF}
   // Skia, on the GPU or the CPU as File > Settings says; it must be set
   // before Application.Initialize
