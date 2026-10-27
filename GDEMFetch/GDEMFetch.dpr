@@ -33,6 +33,7 @@ program GDEMFetch;
 uses
   System.StartUpCopy,
   FMX.Forms,
+  FMX.Skia,
   MainForm in 'MainForm.pas' {frmMain},
   GDEMDownloader in 'GDEMDownloader.pas',
   GDEMCMR in 'GDEMCMR.pas',
@@ -62,6 +63,7 @@ uses
 {$R '..\styles\GDEMThemes.res'}
 
 begin
+  GlobalUseSkia := True;
   Application.Initialize;
   Application.CreateForm(TfrmMain, frmMain);
   Application.Run;

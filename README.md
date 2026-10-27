@@ -555,7 +555,12 @@ got to, what has been tested and what was learned along the way.
   RCDATA line to `GDEMThemes.rc`, then a value to `TGDEMTheme` and its
   row in `THEMES` in `GDEMThemes.pas`.
 - Write files atomically: write a temporary file, then rename it.
-- Never put credentials in source code or log output.
+- Never put credentials in source code or log output. Exception messages
+  can carry the address that failed, and NASA's signed download addresses
+  hold the user name and a signature in their query string, so
+  `TfrmMain.AddLog`, `TfrmMain.ReportError` and `TDownloadReport.Add` pass
+  everything through `HideURLQueries` (in `GDEMReport`). Write log lines
+  only through those.
 - Look tiles up in CMR by area (`bounding_box`), not by name, whenever
   there are more than a few: wildcard name searches are slow for CMR to
   answer, and the whole world took 230 of them. `LookUpTiles` chooses;

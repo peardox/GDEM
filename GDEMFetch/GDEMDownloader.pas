@@ -545,7 +545,7 @@ implementation
 
 uses
   System.IOUtils, System.StrUtils, System.Math, System.RegularExpressions,
-  GDEMCMR, GDEMTiles;
+  GDEMCMR, GDEMTiles, GDEMReport;
 
 const
   { Most redirects to follow before giving up on a download. }
@@ -950,7 +950,8 @@ begin
       on E: Exception do
       begin
         CheckCancelled;
-        LProblem := E.Message;
+        // The message may hold the address with its query string
+        LProblem := HideURLQueries(E.Message);
         Result := nil;
       end;
     end;
@@ -1356,7 +1357,7 @@ end;
 function TGDEMDownloader.DownloadFile(const AURL, ADestFile: string): Int64;
 var
   LFailures, LResumes, LRateWaits, LWaitMs: Integer;
-  LName, LTempFile: string;
+  LName, LTempFile, LProblem: string;
   LBefore, LAfter: Int64;
   LCancelled: TFunc<Boolean>;
 begin
@@ -1419,8 +1420,11 @@ begin
         on E: Exception do
         begin
           CheckCancelled;
+          // Some platforms put the signed download address in the message;
+          // its query string holds the user name and signature
+          LProblem := HideURLQueries(E.Message).TrimRight(['.']);
           if FThrottle <> nil then
-            FThrottle.ReportProblem(E.Message, 0);
+            FThrottle.ReportProblem(LProblem, 0);
           if TFile.Exists(LTempFile) then
             LAfter := TFile.GetSize(LTempFile)
           else
@@ -1433,9 +1437,9 @@ begin
             Inc(LFailures);
           if LFailures >= DOWNLOAD_ATTEMPTS then
             raise EGDEMError.CreateFmt('Could not download %s after %d tries: %s',
-              [LName, LFailures + LResumes, E.Message.TrimRight(['.'])]);
+              [LName, LFailures + LResumes, LProblem]);
           Log(Format('  downloading %s failed (%s); trying again',
-            [LName, E.Message.TrimRight(['.'])]));
+            [LName, LProblem]));
           LWaitMs := DOWNLOAD_RETRY_DELAY_MS * LFailures;
         end;
       end;

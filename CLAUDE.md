@@ -6,7 +6,7 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 26 October 2026.
+Last updated: 27 October 2026.
 
 ## Starting a new conversation
 
@@ -101,25 +101,33 @@ pushed. The session of 26 October 2026 added, in order:
   3473.
 - `CLAUDE.md` (this file), `tools/pasdoc_check.py`.
 
-Anything delivered after that commit is in the conversation, not here:
-ask the owner whether it has been applied before changing the same units.
+Two later commits on GitHub, `3f31426` and `e1391d8` ("Handover world"),
+hold the last of that session's work and this file.
+
+The session of 27 October 2026 added:
+
+- `MainForm`: Fetch selection now counts the tiles it leaves out because
+  they are already downloaded and passes the number down
+  (`FetchTiles`, `StartFetch`, `RunDownloads`, parameter `AAlready`), so
+  the summary's "were already here" covers the whole selection. Before,
+  only tiles the job itself found in the data folder were counted, which
+  is how the whole-world run below seemed to have lost a tile.
+- `GDEMReport.HideURLQueries`: on macOS a timed-out download's error
+  message held the whole signed CloudFront address, user name
+  (`A-userid`) and signature included, and it went into the report. The
+  query string of any web address is now replaced by `?...` in
+  `TDownloadReport.Add`, `TfrmMain.AddLog` and `TfrmMain.ReportError`, and
+  at the downloader's two catch points (`DownloadFile` and the CMR
+  search), so retry messages and the errors raised from them are clean
+  wherever they go. Checked against the whole-world report: one line
+  changed, the S81E086 time-out.
+
+Anything delivered after that is in the conversation, not here: ask the
+owner whether it has been applied before changing the same units.
 
 ### Next, as far as is known
 
-1. **One tile missing from the whole-world download.** The Mac run (see
-   below) got 22,911 tiles, but the index lists 22,912 and the summary
-   said 0 had no data, so one was outside the selection, probably at its
-   edge (the 180 degree column or the 83 degree rows). Fetching a
-   whole-world selection again downloads just that tile and names it; if
-   it was inside a whole-world drag, check how the selection is clipped
-   there.
-2. **First real run of the block lookup.** It was written without being
-   able to reach CMR from the sandbox. The report should show
-   "Asking NASA CMR for every tile from ... to ..." then "page N of M"
-   lines, and the Debug tab "Looked up ... in ...: N have data" should
-   take seconds, not minutes. If it falls back to "asking by name
-   instead", the bounding box query needs looking at.
-3. **Borders and country selection in use.** Built and pushed; nothing
+1. **Borders and country selection in use.** Built and pushed; nothing
    reported wrong yet. Things to watch: that the lines match the map,
    that panning and zooming stay smooth (the 1:50m coastline is 60,000
    points; only lines on screen are drawn, and points under a pixel apart
@@ -127,16 +135,16 @@ ask the owner whether it has been applied before changing the same units.
    selection of a country across 180 degrees (Fiji, Russia), and that
    right-drag still pans. Colours: borders pink `$FFFF80AB`, coastlines
    white at 55%.
-4. **GeoTIFF reader** in pure Pascal for the `_dem` and `_num` files
+2. **GeoTIFF reader** in pure Pascal for the `_dem` and `_num` files
    (LZW, 256 x 256 tiles, Int16 and UInt8, 3601 x 3601, 8 overviews).
    <https://github.com/peardox/volatile> has older decoding logic to
    reuse, but uses a Windows-only libtiff binding, so take the logic only.
-5. **High-resolution map** from `maps/8081_earthmap10k.jpg` (10800 x
+3. **High-resolution map** from `maps/8081_earthmap10k.jpg` (10800 x
    5400, gitignored, so not in a fresh clone), cut into tiles loaded as
    the user zooms. Natural Earth's 1:10m borders and coastlines would suit
    it; add them as more layers in `tools/build_vectors.py`.
-6. **3D tab**: content to come once tiles can be read.
-7. Smaller ideas offered but not taken up: parallel workers and the
+4. **3D tab**: content to come once tiles can be read.
+5. Smaller ideas offered but not taken up: parallel workers and the
    progress dialog for moving the data folder; a macOS `.icns` and a
    Linux `.desktop` file; a menu item to open the Reports folder.
 
@@ -176,7 +184,17 @@ ask the owner whether it has been applied before changing the same units.
   which alone took many minutes): `Downloaded 22911 tile(s), 383.1 GB, in
   1 h 46 min at 62 MB/s, up to 16 at a time; 0 were already here, 0 have
   no data, 0 failed.` No cut-backs or failures; keep-awake and App Nap
-  handling held for the whole run.
+  handling held for the whole run. Twelve HTTP 502s, one 429 and one
+  time-out were ridden out by retrying. The index lists 22,912 tiles; the missing one
+  was `N50W002`, downloaded earlier by name and so left out of the job by
+  Fetch selection, not lost at the selection's edge. Comparing the
+  owner's `tileindex.bin` and `downloaded.bin` afterwards showed all
+  22,912 present. Both files use the same layout, so comparing them bit
+  for bit is the quick way to check a data folder is complete.
+- **Block lookup** (`bounding_box`) tested on 27 October 2026 against the
+  real CMR, with a whole-world selection into an empty data folder: it
+  works, with no fallback to names. The old name lookup took 6 minutes
+  for the whole world (230 requests).
 - Measured on the owner's line: 1 at a time about 3 MB/s; 3 about
   12 MB/s; 6 about 15 MB/s; 12 about 26 MB/s (36 tiles); 16 about
   56 MB/s (100 tiles, 2.1 GB in 38 s, no errors, no cut-backs). With the

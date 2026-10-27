@@ -348,7 +348,9 @@ type
       @link(RunStartup) downloads one. }
     FNeedIndexBuild: Boolean;
 
-    { Adds a line to @link(memLog). Safe to call from any thread.
+    { Adds a line to @link(memLog). Safe to call from any thread. Query
+      strings in web addresses are hidden first (see @link(HideURLQueries)),
+      as error messages can carry signed download addresses.
       @param(Msg The line to add.) }
     procedure AddLog(const Msg: string);
 
@@ -356,7 +358,8 @@ type
       dialog. Safe to call from any thread. The dialog is queued, so it
       appears once the main thread is free (after the window has been shown,
       when called during start-up). Nothing is shown while the window is
-      closing.
+      closing. Query strings in web addresses are hidden from both (see
+      @link(HideURLQueries)).
       @param(AMessage Description of the problem.) }
     procedure ReportError(const AMessage: string);
 
@@ -592,15 +595,21 @@ type
 
     { Downloads tiles, asking for a bearer token first if none is saved,
       and making sure the data folder is available.
-      @param(ATiles Tile names such as @code(N50W002).) }
-    procedure FetchTiles(const ATiles: TArray<string>);
+      @param(ATiles Tile names such as @code(N50W002).)
+      @param(AAlready Tiles the caller left out of @code(ATiles) because
+        they were already downloaded, counted in the summary's "already
+        here".) }
+    procedure FetchTiles(const ATiles: TArray<string>; AAlready: Integer = 0);
 
     { Starts a job that downloads tiles one after another into the data
       folder. Tiles with no data are logged and skipped, and so are tiles
       already downloaded. The job stops at the first error, when cancelled,
       or before free space would fall below the reserve.
-      @param(ATiles Tile names such as @code(N50W002).) }
-    procedure StartFetch(const ATiles: TArray<string>);
+      @param(ATiles Tile names such as @code(N50W002).)
+      @param(AAlready Tiles the caller left out of @code(ATiles) because
+        they were already downloaded, counted in the summary's "already
+        here".) }
+    procedure StartFetch(const ATiles: TArray<string>; AAlready: Integer = 0);
 
     { The work of a download job, run on its background thread by
       @link(StartFetch). Skips tiles already in the data folder, asks CMR
@@ -620,10 +629,15 @@ type
       @param(AReserve Bytes that must be left free on the data drive.)
       @param(ASpeed How hard to push NASA's servers; sets how many files
         download at once to begin with and at most.)
+      @param(AAlready Tiles left out of @code(ATiles) before the job began
+        because they were already downloaded. They are added to the tiles
+        this job finds already downloaded, so the summary's "already here"
+        accounts for the whole selection.)
       @raises(EGDEMError if the job had to stop early.)
       @raises(EOperationCancelled if cancelled.) }
     procedure RunDownloads(AToken: TCancelToken; const ATiles: TArray<string>;
-      const ABearer: string; AStore: TGDEMStore; AReserve: Int64; ASpeed: TDownloadSpeed);
+      const ABearer: string; AStore: TGDEMStore; AReserve: Int64; ASpeed: TDownloadSpeed;
+      AAlready: Integer);
   end;
 
 var
@@ -747,7 +761,8 @@ procedure TfrmMain.AddLog(const Msg: string);
 var
   LMsg: string;
 begin
-  LMsg := Msg;
+  // Error messages may hold a signed download address
+  LMsg := HideURLQueries(Msg);
   TThread.Queue(nil,
     procedure
     begin
@@ -783,7 +798,7 @@ procedure TfrmMain.ReportError(const AMessage: string);
 var
   LMsg: string;
 begin
-  LMsg := AMessage;
+  LMsg := HideURLQueries(AMessage);
   AddLog('ERROR: ' + LMsg);
   if FCloseWhenIdle then
     Exit;
@@ -1920,21 +1935,30 @@ procedure TfrmMain.btnFetchSelectionClick(Sender: TObject);
 var
   LCandidates, LTiles: TArray<string>;
   LTile, LQuestion, LSpace: string;
-  LSouth, LWest, LCount: Integer;
+  LSouth, LWest, LCount, LAlready: Integer;
   LFree, LNeeded: Int64;
 begin
-  // Only tiles with data (when that is known) and not yet downloaded
+  // Only tiles with data (when that is known) and not yet downloaded. The
+  // downloaded ones are counted, so the job's summary can say so: a
+  // whole-world fetch once reported "0 were already here" while leaving
+  // out one tile that was.
   if FTileIndex.IsEmpty then
     LCandidates := SelectedTileNames(nil)
   else
     LCandidates := SelectedTileNames(FTileIndex);
   SetLength(LTiles, Length(LCandidates));
   LCount := 0;
+  LAlready := 0;
   for LTile in LCandidates do
-    if TryParseTileName(LTile, LSouth, LWest) and not FDownloaded.Has(LSouth, LWest) then
+    if TryParseTileName(LTile, LSouth, LWest) then
     begin
-      LTiles[LCount] := LTile;
-      Inc(LCount);
+      if FDownloaded.Has(LSouth, LWest) then
+        Inc(LAlready)
+      else
+      begin
+        LTiles[LCount] := LTile;
+        Inc(LCount);
+      end;
     end;
   SetLength(LTiles, LCount);
 
@@ -1965,7 +1989,7 @@ begin
     LQuestion := Format('Download %d tile(s), about %s?', [LCount, FormatBytes(LNeeded)]);
 
   if (LCount <= CONFIRM_TILE_COUNT) and (LSpace = '') then
-    FetchTiles(LTiles)
+    FetchTiles(LTiles, LAlready)
   else
     TDialogService.MessageDialog(LQuestion + LSpace,
       TMsgDlgType.mtConfirmation, [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo],
@@ -1973,36 +1997,39 @@ begin
       procedure(const AResult: TModalResult)
       begin
         if AResult = mrYes then
-          FetchTiles(LTiles);
+          FetchTiles(LTiles, LAlready);
       end);
 end;
 
-procedure TfrmMain.FetchTiles(const ATiles: TArray<string>);
+procedure TfrmMain.FetchTiles(const ATiles: TArray<string>; AAlready: Integer);
 var
   LTiles: TArray<string>;
+  LAlready: Integer;
 begin
   LTiles := ATiles;
+  LAlready := AAlready;
   if FSettings.BearerToken = '' then
     ShowSettings(
       procedure
       begin
-        FetchTiles(LTiles);
+        FetchTiles(LTiles, LAlready);
       end)
   else
     WithStore(
       procedure
       begin
-        StartFetch(LTiles);
+        StartFetch(LTiles, LAlready);
       end);
 end;
 
-procedure TfrmMain.StartFetch(const ATiles: TArray<string>);
+procedure TfrmMain.StartFetch(const ATiles: TArray<string>; AAlready: Integer);
 var
   LTiles: TArray<string>;
   LBearer: string;
   LStore: TGDEMStore;
   LReserve: Int64;
   LSpeed: TDownloadSpeed;
+  LAlready: Integer;
 begin
   if (FSettings.BearerToken = '') or (Length(ATiles) = 0) then
     Exit;
@@ -2015,18 +2042,20 @@ begin
   LStore := FStore;
   LReserve := ReserveBytes;
   LSpeed := DownloadSpeedFromKey(FSettings.DownloadSpeed);
+  LAlready := AAlready;
 
   RunJob('Download',
     procedure(AToken: TCancelToken)
     begin
-      RunDownloads(AToken, LTiles, LBearer, LStore, LReserve, LSpeed);
+      RunDownloads(AToken, LTiles, LBearer, LStore, LReserve, LSpeed, LAlready);
     end,
     nil,
     'Downloading tiles');
 end;
 
 procedure TfrmMain.RunDownloads(AToken: TCancelToken; const ATiles: TArray<string>;
-  const ABearer: string; AStore: TGDEMStore; AReserve: Int64; ASpeed: TDownloadSpeed);
+  const ABearer: string; AStore: TGDEMStore; AReserve: Int64; ASpeed: TDownloadSpeed;
+  AAlready: Integer);
 var
   LTodo, LQueueList, LFolders: TList<string>;
   LTile, LFolder: string;
@@ -2058,8 +2087,9 @@ begin
   LURLs := nil;
   try
   try
-    // 1. Tiles already in the data folder need nothing from NASA
-    LAlready := 0;
+    // 1. Tiles already in the data folder need nothing from NASA. Those
+    // the caller left out are counted too.
+    LAlready := AAlready;
     for LTile in ATiles do
     begin
       AToken.Check;
