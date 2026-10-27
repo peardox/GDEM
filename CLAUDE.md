@@ -122,29 +122,115 @@ The session of 27 October 2026 added:
   wherever they go. Checked against the whole-world report: one line
   changed, the S81E086 time-out.
 
+The owner then enabled Skia (`8ebe65f` "Added Skia": `FMX.Skia` and
+`GlobalUseSkia := True` in the `.dpr`, the `SKIA` define, and Deployment
+entries for `sk4d.dll` and `libsk4d.so`), because scrolling the map had
+become sluggish. Then:
+
+- `GDEMWorldMap`: borders and coastlines drawn from cached Skia paths
+  (`LayerPath`, `PaintLayerSkia`, `FLayerPaths`, `UseSkiaPaths`), built
+  once per layer in degrees (x = lon + 180, y = 90 - lat) and drawn per
+  map copy with `Concat(Scaling * Translation)` on
+  `TSkCanvasCustom(Canvas).Canvas`; stroke width is divided by the scale.
+  The old per-frame `TPathData` code is the fallback. Frame timing:
+  `TMapPaintStats`, `OnPaintStats`, `BeginMeasuring` and `EndMeasuring`
+  around drags, pans and wheel zooms (ended 1 s after the last notch);
+  `Paint` times `PaintMap`, the former body.
+- `MainForm`: View > Draw Lines from Cached Paths and View > Log Drawing
+  Times, used for the timings below and then removed at the owner's
+  request, with `MapPaintStats`. The map's `UseSkiaPaths` and
+  `OnPaintStats` stay, unused, for measuring again (for the
+  high-resolution map, say): assign `OnPaintStats` to a handler that logs
+  the `TMapPaintStats`.
+- README: Requirements, View menu, a new Drawing section, Deploying (the
+  Skia libraries) and the code rules.
+
+Owner's timings (Windows, same moves and zooms each way):
+
+- CPU (`TSkRasterCanvas`): 14 to 21 frames a second; 33 to 50 ms a frame,
+  of which only 3 to 21 ms was lines: the rest was pixel filling
+  (stretching the world image and the tint bitmap across the window) and,
+  outside `Paint`, copying the CPU image to the window. Whole-world cached
+  paths were slower than building per frame (13 to 21 ms against 5 to
+  9 ms).
+- GPU (`TVkCanvas`, after `GlobalUseSkiaRasterWhenAvailable := False`):
+  34 to 125 frames a second; everything but the lines about 0.1 ms. Lines
+  zoomed out: cached 4.2 to 4.9 ms, built 8 to 11 ms. Zoomed in (1:50m):
+  cached 13 to 17 ms, built 5 to 10 ms, because the whole-world path was
+  drawn when a few hundred points were on screen.
+
+So, in the same session:
+
+- `GDEMDrawing` (new; in the `.dpr` and `.dproj`): `ConfigureDrawing`,
+  called instead of `GlobalUseSkia := True` before
+  `Application.Initialize`, reads `TGDEMSettings.Drawing` (`GPU` or `CPU`,
+  default `GPU`) and sets `GlobalUseSkiaRasterWhenAvailable` on Windows or
+  `GlobalUseMetal` on macOS. `DescribeDrawing` is logged at the start of
+  `RunStartup` with `TCanvasManager.DefaultCanvas.ClassName`, which Skia
+  sets to the canvas it chose. Settings has a Drawing row under Theme
+  (form 24 pixels taller; hidden and shrunk back on Linux, where Skia has
+  no GPU canvas). macOS Metal is untested.
+- `GDEMWorldMap`: cached paths cut into 10 degree squares
+  (`TLinePiece`, `LayerPieces`, `LINE_PIECE_DEGREES`); a segment crossing
+  into another square belongs to the square it starts in, whose bounds
+  include its end, and the next piece starts there. Checked in Python on
+  the real layers: every segment kept (coast50 58,987), bounds always
+  hold their segments; coast50 is 355 pieces, and a view of the British
+  Isles draws 2 of them (1,514 of 61,428 points).
+- The owner's Windows machine is a laptop with an RTX 5090 Mobile and
+  the Intel graphics of a Core Ultra 9 275HX. GPU drawing showed no lag;
+  CPU drawing lagged. Gorilla3D (planned for the 3D tab) gains a lot
+  from the Windows GPU preference. Windows calls the choices High
+  performance, Power saving and Let Windows decide.
+- `GDEMGpuPreference` (new; in the `.dpr` and `.dproj`): ported from
+  Sprite3D's `src/common/GpuPreference.pas`, with these differences:
+  scoped `TGpuPreference` (`Automatic`, `PowerSaving`,
+  `HighPerformance`) with keys and captions; compiles on every platform
+  (read and write return False off Windows); and it changes only the
+  `GpuPreference=N` part of the registry value, keeping others such as
+  Windows 11's `SwapEffectUpgradeEnable=1`, where Sprite3D overwrote the
+  whole value. `TGDEMSettings.GpuPreference` (default `Automatic`).
+  Settings has a Graphics row under Drawing (form now 600 high; rows
+  hidden and the form shrunk where unavailable); OK writes the registry
+  only if the choice changed. `ConfigureDrawing` writes the registry at
+  start-up when the setting is Power saving or High performance and
+  differs (so a new build path gets it), never for Automatic;
+  `DescribeDrawing` adds the preference read at start-up and any change.
+  Whether a change written before `Application.Initialize` counts in the
+  same run is unknown; the log says "from the next start" to be safe.
+  Whether the preference steers Vulkan and OpenGL as well as DirectX is
+  for the owner to see in Task Manager's GPU engine column.
+
+Next: the owner's timings of the cut pieces on the GPU, zoomed out and
+zoomed in, and a check of the Graphics setting on the laptop.
+
 Anything delivered after that is in the conversation, not here: ask the
 owner whether it has been applied before changing the same units.
 
 ### Next, as far as is known
 
-1. **Borders and country selection in use.** Built and pushed; nothing
-   reported wrong yet. Things to watch: that the lines match the map,
-   that panning and zooming stay smooth (the 1:50m coastline is 60,000
-   points; only lines on screen are drawn, and points under a pixel apart
-   are skipped), the country name in the status bar, right-click
+1. **Skia drawing**: GPU is now the default, with Windows' graphics
+   processor choice in Settings (see above). Still to do: timings of the
+   cut pieces; the Graphics setting tried on the laptop; macOS with
+   Metal.
+2. **Borders and country selection in use.** Built and pushed; nothing
+   reported wrong yet, except that panning became sluggish, which item 1
+   addresses. Things to watch: that the lines match the map (now also
+   when drawn from the cached Skia paths), the country name in the status
+   bar, right-click
    selection of a country across 180 degrees (Fiji, Russia), and that
    right-drag still pans. Colours: borders pink `$FFFF80AB`, coastlines
    white at 55%.
-2. **GeoTIFF reader** in pure Pascal for the `_dem` and `_num` files
+3. **GeoTIFF reader** in pure Pascal for the `_dem` and `_num` files
    (LZW, 256 x 256 tiles, Int16 and UInt8, 3601 x 3601, 8 overviews).
    <https://github.com/peardox/volatile> has older decoding logic to
    reuse, but uses a Windows-only libtiff binding, so take the logic only.
-3. **High-resolution map** from `maps/8081_earthmap10k.jpg` (10800 x
+4. **High-resolution map** from `maps/8081_earthmap10k.jpg` (10800 x
    5400, gitignored, so not in a fresh clone), cut into tiles loaded as
    the user zooms. Natural Earth's 1:10m borders and coastlines would suit
    it; add them as more layers in `tools/build_vectors.py`.
-4. **3D tab**: content to come once tiles can be read.
-5. Smaller ideas offered but not taken up: parallel workers and the
+5. **3D tab**: content to come once tiles can be read.
+6. Smaller ideas offered but not taken up: parallel workers and the
    progress dialog for moving the data folder; a macOS `.icns` and a
    Linux `.desktop` file; a menu item to open the Reports folder.
 

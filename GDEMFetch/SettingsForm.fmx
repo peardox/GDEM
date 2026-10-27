@@ -3,7 +3,7 @@ object frmSettings: TfrmSettings
   Top = 0
   BorderIcons = [biSystemMenu]
   Caption = 'Settings'
-  ClientHeight = 552
+  ClientHeight = 600
   ClientWidth = 560
   Position = MainFormCenter
   FormFactor.Width = 320
@@ -77,7 +77,7 @@ object frmSettings: TfrmSettings
     Margins.Right = 12.000000000000000000
     Margins.Bottom = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 504.000000000000000000
+    Position.Y = 552.000000000000000000
     Size.Width = 536.000000000000000000
     Size.Height = 36.000000000000000000
     Size.PlatformDefault = False
@@ -114,7 +114,7 @@ object frmSettings: TfrmSettings
     Margins.Left = 12.000000000000000000
     Margins.Right = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 484.000000000000000000
+    Position.Y = 532.000000000000000000
     Size.Width = 536.000000000000000000
     Size.Height = 20.000000000000000000
     Size.PlatformDefault = False
@@ -129,7 +129,7 @@ object frmSettings: TfrmSettings
     Margins.Top = 8.000000000000000000
     Margins.Right = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 324.000000000000000000
+    Position.Y = 372.000000000000000000
     Size.Width = 536.000000000000000000
     Size.Height = 160.000000000000000000
     Size.PlatformDefault = False
@@ -251,7 +251,7 @@ object frmSettings: TfrmSettings
     Position.X = 12.000000000000000000
     Position.Y = 276.000000000000000000
     Size.Width = 536.000000000000000000
-    Size.Height = 40.000000000000000000
+    Size.Height = 88.000000000000000000
     Size.PlatformDefault = False
     TabOrder = 5
     object lblTheme: TLabel
@@ -269,6 +269,62 @@ object frmSettings: TfrmSettings
       Size.Height = 24.000000000000000000
       Size.PlatformDefault = False
       TabOrder = 0
+    end
+    object lblDrawing: TLabel
+      StyledSettings = [Family, Size, FontColor]
+      Position.Y = 41.000000000000000000
+      Size.Width = 80.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Drawing'
+    end
+    object cbDrawing: TComboBox
+      Position.X = 88.000000000000000000
+      Position.Y = 40.000000000000000000
+      Size.Width = 200.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 1
+    end
+    object lblDrawingHint: TLabel
+      Anchors = [akLeft, akTop, akRight]
+      StyledSettings = [Family, Style, FontColor]
+      Position.X = 296.000000000000000000
+      Position.Y = 41.000000000000000000
+      Size.Width = 240.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.Font.Size = 11.000000000000000000
+      TextSettings.Trimming = Character
+      Text = 'Takes effect when GDEMFetch next starts'
+    end
+    object lblGpu: TLabel
+      StyledSettings = [Family, Size, FontColor]
+      Position.Y = 65.000000000000000000
+      Size.Width = 80.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Graphics'
+    end
+    object cbGpu: TComboBox
+      Position.X = 88.000000000000000000
+      Position.Y = 64.000000000000000000
+      Size.Width = 200.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 2
+    end
+    object lblGpuHint: TLabel
+      Anchors = [akLeft, akTop, akRight]
+      StyledSettings = [Family, Style, FontColor]
+      Position.X = 296.000000000000000000
+      Position.Y = 65.000000000000000000
+      Size.Width = 240.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.Font.Size = 11.000000000000000000
+      TextSettings.Trimming = Character
+      Text = 'Which GPU Windows uses; from the next start'
     end
   end
   object memToken: TMemo

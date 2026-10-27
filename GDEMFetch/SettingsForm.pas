@@ -10,7 +10,15 @@
     @item(how much free space downloads must leave on that drive;)
     @item(how many files an import copies at once, and how fast tiles are
       downloaded: Slow, Medium or Fast, see @link(TDownloadSpeed);)
-    @item(the theme, the program's look; see @link(GDEMThemes).)
+    @item(the theme, the program's look; see @link(GDEMThemes);)
+    @item(whether the program draws on the GPU or the CPU, see
+      @link(GDEMDrawing), which takes effect at the next start. Not shown
+      where Skia has no GPU drawing (Linux);)
+    @item(on Windows, which graphics processor Windows starts the program
+      on: let Windows decide, power saving or high performance, see
+      @link(GDEMGpuPreference). It is written to Windows' own setting as
+      soon as OK is pressed, if it changed, and takes effect at the next
+      start.)
   )
 
   The token, free-space setting and theme are saved by the dialog itself;
@@ -38,6 +46,10 @@ uses
 const
   { The choices offered for how many files an import copies at once. }
   IMPORT_WORKER_CHOICES: array[0..7] of Integer = (1, 2, 4, 6, 8, 10, 12, 16);
+
+  { Height of the Drawing row under the theme, in pixels, removed where
+    there is no choice to offer (see @link(GPU_DRAWING_AVAILABLE)). }
+  DRAWING_ROW_HEIGHT = 24;
 
   { Page where an Earthdata Login user generates a bearer token. }
   EARTHDATA_TOKEN_URL = 'https://urs.earthdata.nasa.gov';
@@ -106,6 +118,19 @@ type
     lblTheme: TLabel;
     { The theme, in the order of @code(TGDEMTheme). }
     cbTheme: TComboBox;
+    { Caption for @link(cbDrawing). }
+    lblDrawing: TLabel;
+    { Where the program draws, in the order of @link(TDrawingMode). }
+    cbDrawing: TComboBox;
+    { Says that @link(cbDrawing) takes effect at the next start. }
+    lblDrawingHint: TLabel;
+    { Caption for @link(cbGpu). }
+    lblGpu: TLabel;
+    { Which graphics processor Windows starts the program on, in the order
+      of @link(TGpuPreference). }
+    cbGpu: TComboBox;
+    { Says what @link(cbGpu) does and when it takes effect. }
+    lblGpuHint: TLabel;
     { Shows where the settings file is stored. }
     lblLocation: TLabel;
     { Holds the OK and Cancel buttons. }
@@ -196,7 +221,7 @@ implementation
 {$R *.fmx}
 
 uses
-  System.IOUtils, System.Math, GDEMBrowser, GDEMThemes;
+  System.IOUtils, System.Math, GDEMBrowser, GDEMThemes, GDEMDrawing, GDEMGpuPreference;
 
 { TfrmSettings }
 
@@ -205,10 +230,42 @@ var
   LTheme: TGDEMTheme;
   LWorkers: Integer;
   LSpeed: TDownloadSpeed;
+  LMode: TDrawingMode;
+  LPreference: TGpuPreference;
 begin
   lblToken.TextSettings.Font.Style := [TFontStyle.fsBold];
   lblDataFolder.TextSettings.Font.Style := [TFontStyle.fsBold];
   lblTheme.TextSettings.Font.Style := [TFontStyle.fsBold];
+  lblDrawing.TextSettings.Font.Style := [TFontStyle.fsBold];
+  cbDrawing.Items.Clear;
+  for LMode := Low(TDrawingMode) to High(TDrawingMode) do
+    cbDrawing.Items.Add(DRAWING_MODE_CAPTIONS[LMode]);
+  if not GPU_DRAWING_AVAILABLE then
+  begin
+    // Nothing to choose: Skia only draws on the CPU here
+    lblDrawing.Visible := False;
+    cbDrawing.Visible := False;
+    lblDrawingHint.Visible := False;
+    layTheme.Height := layTheme.Height - DRAWING_ROW_HEIGHT;
+    ClientHeight := ClientHeight - DRAWING_ROW_HEIGHT;
+    // The graphics row moves up into its place
+    lblGpu.Position.Y := lblGpu.Position.Y - DRAWING_ROW_HEIGHT;
+    cbGpu.Position.Y := cbGpu.Position.Y - DRAWING_ROW_HEIGHT;
+    lblGpuHint.Position.Y := lblGpuHint.Position.Y - DRAWING_ROW_HEIGHT;
+  end;
+  lblGpu.TextSettings.Font.Style := [TFontStyle.fsBold];
+  cbGpu.Items.Clear;
+  for LPreference := Low(TGpuPreference) to High(TGpuPreference) do
+    cbGpu.Items.Add(GPU_PREFERENCE_CAPTIONS[LPreference]);
+  if not GPU_PREFERENCE_AVAILABLE then
+  begin
+    // Only Windows chooses between graphics processors for a program
+    lblGpu.Visible := False;
+    cbGpu.Visible := False;
+    lblGpuHint.Visible := False;
+    layTheme.Height := layTheme.Height - DRAWING_ROW_HEIGHT;
+    ClientHeight := ClientHeight - DRAWING_ROW_HEIGHT;
+  end;
   cbTheme.Items.Clear;
   for LTheme := Low(TGDEMTheme) to High(TGDEMTheme) do
     cbTheme.Items.Add(ThemeCaption(LTheme));
@@ -320,6 +377,8 @@ begin
   LForm.SetImportWorkers(ASettings.ImportWorkers);
   LForm.cbDownloadSpeed.ItemIndex := Ord(DownloadSpeedFromKey(ASettings.DownloadSpeed));
   LForm.cbTheme.ItemIndex := Ord(ThemeFromKey(ASettings.Theme));
+  LForm.cbDrawing.ItemIndex := Ord(DrawingModeFromKey(ASettings.Drawing));
+  LForm.cbGpu.ItemIndex := Ord(GpuPreferenceFromKey(ASettings.GpuPreference));
   LForm.UpdateOK;
 
   // Reads the dialog and saves the settings. It does not free the form or
@@ -338,6 +397,18 @@ begin
             DOWNLOAD_SPEED_KEYS[TDownloadSpeed(LForm.cbDownloadSpeed.ItemIndex)];
         if LForm.cbTheme.ItemIndex >= 0 then
           ASettings.Theme := ThemeKey(TGDEMTheme(LForm.cbTheme.ItemIndex));
+        if GPU_DRAWING_AVAILABLE and (LForm.cbDrawing.ItemIndex >= 0) then
+          ASettings.Drawing := DRAWING_MODE_KEYS[TDrawingMode(LForm.cbDrawing.ItemIndex)];
+        // Windows' own setting is only touched when the choice changes, so
+        // one made in Windows' Settings stands until it is changed here
+        if GPU_PREFERENCE_AVAILABLE and (LForm.cbGpu.ItemIndex >= 0) and
+           (TGpuPreference(LForm.cbGpu.ItemIndex) <> GpuPreferenceFromKey(ASettings.GpuPreference)) then
+        begin
+          ASettings.GpuPreference := GPU_PREFERENCE_KEYS[TGpuPreference(LForm.cbGpu.ItemIndex)];
+          if not WriteGpuPreference(TGpuPreference(LForm.cbGpu.ItemIndex)) then
+            ShowMessage('Could not change Windows'' graphics setting for GDEMFetch. ' +
+              'It can be set in Windows Settings > System > Display > Graphics.');
+        end;
         try
           ASettings.Save;
           LSaved := True;

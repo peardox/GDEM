@@ -42,8 +42,22 @@
   Country borders and coastlines from a @link(TWorldVectors) can be drawn
   over the map (@link(TWorldMapView.Vectors)): the 1:110m data while much of
   the world is in view, the more detailed 1:50m data once a degree is at
-  least @code(FINE_DETAIL_PIXELS_PER_DEGREE) pixels across. Only lines on
-  screen are drawn, and points closer together than a pixel are skipped.
+  least @code(FINE_DETAIL_PIXELS_PER_DEGREE) pixels across.
+
+  When FMX draws with Skia (@code(GlobalUseSkia), and the project's
+  @code(SKIA) define), each layer is turned into Skia paths once, in
+  degrees, one for each @code(LINE_PIECE_DEGREES) square of the world that
+  its lines pass through (see @link(TLinePiece)). Every frame draws only the
+  pieces on screen, with a matrix that moves and scales them into place
+  (@link(TWorldMapView.UseSkiaPaths)). Otherwise, as before, each frame
+  builds a path of only the lines on screen, skipping points closer
+  together than a pixel. The 1:50m coastline alone is about 60,000 points,
+  and drawing all of it every frame, even from a cached path, was slower
+  when zoomed in than building just the visible part.
+
+  @link(TWorldMapView.OnPaintStats) reports how long frames take to draw
+  while the map is dragged, panned or zoomed, for comparing ways of
+  drawing.
 
   The control is created in code, so no design-time package is needed. }
 unit GDEMWorldMap;
@@ -52,6 +66,10 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.Types, System.UITypes,
+  System.Generics.Collections,
+  {$IFDEF SKIA}
+  System.Skia,
+  {$ENDIF}
   FMX.Types, FMX.Controls, FMX.Graphics,
   GDEMTiles, GDEMTileIndex, GDEMVectors;
 
@@ -69,6 +87,68 @@ type
     @param(ALat Latitude clicked, in degrees.)
     @param(ALon Longitude clicked, from -180 to 180.) }
   TMapPointEvent = procedure(Sender: TObject; ALat, ALon: Double) of object;
+
+  { @abstract(How long the map took to draw during one stretch of
+    movement.)
+
+    A stretch starts when a drag or pan starts, or with a wheel zoom, and
+    ends when the button is released, or a second after the last wheel
+    zoom. Only frames drawn during it are counted, so frames drawn just to
+    move the outline of the tile under the pointer are not.
+
+    The times are what the program spent in @code(Paint). When Skia draws
+    on the CPU (@code(TSkRasterCanvas)) that includes the drawing itself;
+    on a GPU canvas much of the work happens later, on the graphics card,
+    so compare @link(Seconds) and @link(Frames) (the frame rate) as
+    well. }
+  TMapPaintStats = record
+    { Frames drawn. }
+    Frames: Integer;
+    { Time from the start of the first frame to the end of the last, in
+      seconds. }
+    Seconds: Double;
+    { Average time to draw a frame, in milliseconds. }
+    AverageMs: Double;
+    { Longest time to draw a frame, in milliseconds. }
+    WorstMs: Double;
+    { Average time per frame spent on borders and coastlines, in
+      milliseconds; part of @link(AverageMs). }
+    LinesMs: Double;
+    { @true if borders and coastlines were drawn from cached Skia paths in
+      every frame, @false if they were built afresh in any of them. }
+    SkiaLines: Boolean;
+    { Class name of the canvas drawn on, which says how FMX draws:
+      @code(TSkRasterCanvas) is Skia on the CPU; other @code(TSk...) or
+      @code(TGl...), @code(TMtl...) and Vulkan canvases are Skia on the
+      GPU; anything else is FMX's own canvas, without Skia. }
+    CanvasName: string;
+  end;
+
+  { Reports how long the map took to draw.
+    @param(Sender The map view.)
+    @param(AStats The times.) }
+  TMapPaintStatsEvent = procedure(Sender: TObject; const AStats: TMapPaintStats) of object;
+
+  {$IFDEF SKIA}
+  { @abstract(The lines of a vector layer inside one square of the world,
+    as a Skia path.)
+
+    A layer is cut into squares @code(LINE_PIECE_DEGREES) on a side, so a
+    frame can skip the squares that are off screen. A line that crosses
+    from one square into the next is cut there: the segment that crosses
+    belongs to the square it starts in, and the next piece starts where it
+    ends, so the line has no gaps. Coordinates are those of
+    @link(TWorldMapView.LayerPieces): degrees from the map's top-left
+    corner. }
+  TLinePiece = record
+    { The lines. }
+    Path: ISkPath;
+    { The smallest rectangle holding every point of @link(Path), including
+      the ends of segments that cross out of the square, so a piece is
+      never skipped while part of it is on screen. }
+    Bounds: TRectF;
+  end;
+  {$ENDIF}
 
   { What a mouse drag is currently doing. }
   TMapDragMode = (
@@ -156,6 +236,37 @@ type
     FShowBorders: Boolean;
     { Backing field for @link(ShowCoastlines). }
     FShowCoastlines: Boolean;
+    { Backing field for @link(UseSkiaPaths). }
+    FUseSkiaPaths: Boolean;
+    {$IFDEF SKIA}
+    { Each vector layer as Skia paths, one per square of the world, built
+      the first time the layer is drawn (see @link(LayerPieces)). Keyed by
+      layer, which @link(FVectors) owns; emptied when @link(Vectors)
+      changes. }
+    FLayerPaths: TDictionary<TGeoLayer, TArray<TLinePiece>>;
+    {$ENDIF}
+    { Backing field for @link(OnPaintStats). }
+    FOnPaintStats: TMapPaintStatsEvent;
+    { @true during a stretch of movement whose frames are being timed. }
+    FMeasuring: Boolean;
+    { The times so far in the current stretch; @code(AverageMs) and
+      @code(LinesMs) hold totals until the stretch ends. }
+    FStats: TMapPaintStats;
+    { @code(TStopwatch) time stamp at the start of the stretch's first
+      frame. }
+    FFirstFrameStamp: Int64;
+    { @code(TStopwatch) time stamp at the end of the stretch's last frame. }
+    FLastFrameStamp: Int64;
+    { Milliseconds spent on borders and coastlines in the frame being
+      drawn. }
+    FFrameLinesMs: Double;
+    { Whether the frame being drawn has drawn a layer from a cached Skia
+      path. }
+    FFrameSkiaLines: Boolean;
+    { Whether the frame being drawn has built a layer's path afresh. }
+    FFrameBuiltLines: Boolean;
+    { Ends a stretch of wheel zooming a second after the last notch. }
+    FStatsTimer: TTimer;
 
     { Ends a selection made of separate tiles, leaving
       @link(FSelection) as it is. }
@@ -286,6 +397,54 @@ type
       @param(AEast Easternmost longitude on screen, not wrapped.) }
     procedure PaintLayer(ALayer: TGeoLayer; AColor: TAlphaColor;
       AOpacity, AThickness: Single; ANorth, ASouth, AWest, AEast: Double);
+
+    {$IFDEF SKIA}
+    { A vector layer cut into Skia paths, one per square of the world its
+      lines pass through (see @link(TLinePiece)), built and kept the first
+      time it is asked for. Points are in degrees from the map's top-left
+      corner: x is longitude + 180 and y is 90 - latitude, so one matrix
+      puts them on the screen.
+      @param(ALayer The layer.)
+      @returns(The pieces, in no particular order.) }
+    function LayerPieces(ALayer: TGeoLayer): TArray<TLinePiece>;
+
+    { Draws the pieces of a vector layer that are on screen from their
+      cached Skia paths (see @link(LayerPieces)), on every copy of the map
+      that is showing, when the canvas is a Skia canvas.
+      @param(ALayer The layer.)
+      @param(AColor Line colour.)
+      @param(AOpacity Line opacity, from 0 to 1.)
+      @param(AThickness Line width, in pixels.)
+      @param(ANorth Northernmost latitude on screen.)
+      @param(ASouth Southernmost latitude on screen.)
+      @param(AWest Westernmost longitude on screen, not wrapped.)
+      @param(AEast Easternmost longitude on screen, not wrapped.)
+      @returns(@true if it was drawn; @false if the canvas is not a Skia
+        canvas, so the caller should draw it another way.) }
+    function PaintLayerSkia(ALayer: TGeoLayer; AColor: TAlphaColor;
+      AOpacity, AThickness: Single; ANorth, ASouth, AWest, AEast: Double): Boolean;
+    {$ENDIF}
+
+    { Draws everything: the map, tints, shading, borders and coastlines,
+      grid, hover outline and selection. Called by @link(Paint), which
+      times it. }
+    procedure PaintMap;
+
+    { Writer for @link(UseSkiaPaths).
+      @param(AValue @true to draw borders and coastlines from cached Skia
+        paths when the canvas allows.) }
+    procedure SetUseSkiaPaths(AValue: Boolean);
+
+    { Starts timing frames, if @link(OnPaintStats) is set and timing has
+      not already started. }
+    procedure BeginMeasuring;
+
+    { Ends timing and fires @link(OnPaintStats) if any frames were drawn. }
+    procedure EndMeasuring;
+
+    { Ends a stretch of wheel zooming, unless a drag has started meanwhile.
+      @param(Sender The timer.) }
+    procedure StatsTimerTick(Sender: TObject);
 
     { Converts a local point to a map position for dragging: the latitude
       is clamped to just inside the poles, and the longitude is not wrapped.
@@ -473,12 +632,27 @@ type
     { Fired by a right click that does not move the map: a right-drag still
       moves it. }
     property OnRightClick: TMapPointEvent read FOnRightClick write FOnRightClick;
+
+    { Whether borders and coastlines are drawn from Skia paths built once
+      and kept, rather than paths built afresh for every frame. On by
+      default. It only has an effect when FMX draws with Skia; turning it
+      off is for comparing the two ways with @link(OnPaintStats). }
+    property UseSkiaPaths: Boolean read FUseSkiaPaths write SetUseSkiaPaths;
+
+    { Fired at the end of each drag, pan or run of wheel zooms with how
+      long its frames took to draw. Frames are only timed while this is
+      set. }
+    property OnPaintStats: TMapPaintStatsEvent read FOnPaintStats write FOnPaintStats;
   end;
 
 implementation
 
 uses
-  System.Math;
+  System.Math, System.Math.Vectors, System.Diagnostics
+  {$IFDEF SKIA}
+  , FMX.Skia.Canvas
+  {$ENDIF}
+  ;
 
 const
   { Colour drawn behind the map, visible when it is smaller than the
@@ -535,6 +709,17 @@ const
   EDGE_SCROLL_MAX_STEP = 40;
   { Time between auto-scroll steps, in milliseconds. }
   EDGE_SCROLL_INTERVAL = 30;
+  { How long after the last wheel zoom its frame times are reported, in
+    milliseconds. }
+  STATS_IDLE_INTERVAL = 1000;
+  { Size of the squares vector layers are cut into for drawing with Skia,
+    in degrees (see @link(TLinePiece)). Smaller squares skip more of the
+    lines off screen but mean more paths to draw when zoomed out. }
+  LINE_PIECE_DEGREES = 10;
+  { Number of squares across the world. }
+  LINE_PIECE_COLUMNS = 360 div LINE_PIECE_DEGREES;
+  { Number of squares from pole to pole. }
+  LINE_PIECE_ROWS = 180 div LINE_PIECE_DEGREES;
 
 { TWorldMapView }
 
@@ -551,11 +736,19 @@ begin
   FShowDownloadedTiles := True;
   FShowBorders := True;
   FShowCoastlines := True;
+  FUseSkiaPaths := True;
+  {$IFDEF SKIA}
+  FLayerPaths := TDictionary<TGeoLayer, TArray<TLinePiece>>.Create;
+  {$ENDIF}
   FSelectionMask := TTileIndex.Create;
   FScrollTimer := TTimer.Create(Self);
   FScrollTimer.Enabled := False;
   FScrollTimer.Interval := EDGE_SCROLL_INTERVAL;
   FScrollTimer.OnTimer := ScrollTimerTick;
+  FStatsTimer := TTimer.Create(Self);
+  FStatsTimer.Enabled := False;
+  FStatsTimer.Interval := STATS_IDLE_INTERVAL;
+  FStatsTimer.OnTimer := StatsTimerTick;
 end;
 
 destructor TWorldMapView.Destroy;
@@ -564,6 +757,9 @@ begin
   FSelectionMask.Free;
   FTileOverlay.Free;
   FMap.Free;
+  {$IFDEF SKIA}
+  FLayerPaths.Free;
+  {$ENDIF}
   inherited;
 end;
 
@@ -600,7 +796,20 @@ end;
 procedure TWorldMapView.SetVectors(AValue: TWorldVectors);
 begin
   FVectors := AValue;
+  // The cached paths belong to the old layers
+  {$IFDEF SKIA}
+  FLayerPaths.Clear;
+  {$ENDIF}
   Repaint;
+end;
+
+procedure TWorldMapView.SetUseSkiaPaths(AValue: Boolean);
+begin
+  if FUseSkiaPaths <> AValue then
+  begin
+    FUseSkiaPaths := AValue;
+    Repaint;
+  end;
 end;
 
 procedure TWorldMapView.SetShowBorders(AValue: Boolean);
@@ -1049,6 +1258,15 @@ var
 begin
   if ALayer = nil then
     Exit;
+  {$IFDEF SKIA}
+  if FUseSkiaPaths and
+     PaintLayerSkia(ALayer, AColor, AOpacity, AThickness, ANorth, ASouth, AWest, AEast) then
+  begin
+    FFrameSkiaLines := True;
+    Exit;
+  end;
+  {$ENDIF}
+  FFrameBuiltLines := True;
   LPath := TPathData.Create;
   try
     for LCopy := Floor((AWest + 180) / 360) to Floor((AEast + 180) / 360) do
@@ -1091,13 +1309,220 @@ begin
   end;
 end;
 
+{$IFDEF SKIA}
+function TWorldMapView.LayerPieces(ALayer: TGeoLayer): TArray<TLinePiece>;
+var
+  LBuilders: array of ISkPathBuilder;
+  LBounds: array of TRectF;
+  LFeature, LPart, LPoint, LCell, LNext, LCount: Integer;
+  LPoints: TArray<TPointF>;
+  LAt: TPointF;
+
+  { The square a point is in, counting west to east, then north to south.
+    Points on the far edges count as inside.
+    @param(APoint A point in path coordinates.)
+    @returns(Its square's number.) }
+  function CellOf(const APoint: TPointF): Integer;
+  begin
+    Result := EnsureRange(Floor(APoint.Y / LINE_PIECE_DEGREES), 0, LINE_PIECE_ROWS - 1) *
+      LINE_PIECE_COLUMNS +
+      EnsureRange(Floor(APoint.X / LINE_PIECE_DEGREES), 0, LINE_PIECE_COLUMNS - 1);
+  end;
+
+  { Adds a point to a square's bounds, starting its path if it has none.
+    @param(ACell The square.)
+    @param(APoint The point, in path coordinates.) }
+  procedure Grow(ACell: Integer; const APoint: TPointF);
+  begin
+    if LBuilders[ACell] = nil then
+    begin
+      LBuilders[ACell] := TSkPathBuilder.Create;
+      LBounds[ACell] := TRectF.Create(APoint, APoint);
+    end
+    else
+    begin
+      LBounds[ACell].Left := Min(LBounds[ACell].Left, APoint.X);
+      LBounds[ACell].Right := Max(LBounds[ACell].Right, APoint.X);
+      LBounds[ACell].Top := Min(LBounds[ACell].Top, APoint.Y);
+      LBounds[ACell].Bottom := Max(LBounds[ACell].Bottom, APoint.Y);
+    end;
+  end;
+
+begin
+  if FLayerPaths.TryGetValue(ALayer, Result) then
+    Exit;
+  SetLength(LBuilders, LINE_PIECE_COLUMNS * LINE_PIECE_ROWS);
+  SetLength(LBounds, LINE_PIECE_COLUMNS * LINE_PIECE_ROWS);
+  for LFeature := 0 to High(ALayer.Features) do
+    for LPart := 0 to High(ALayer.Features[LFeature].Parts) do
+    begin
+      LPoints := ALayer.Features[LFeature].Parts[LPart].Points;
+      if Length(LPoints) = 0 then
+        Continue;
+      LAt := PointF(LPoints[0].X + 180, 90 - LPoints[0].Y);
+      LCell := CellOf(LAt);
+      Grow(LCell, LAt);
+      LBuilders[LCell].MoveTo(LAt);
+      for LPoint := 1 to High(LPoints) do
+      begin
+        LAt := PointF(LPoints[LPoint].X + 180, 90 - LPoints[LPoint].Y);
+        // The segment belongs to the square it starts in, even if it ends
+        // in another
+        Grow(LCell, LAt);
+        LBuilders[LCell].LineTo(LAt);
+        LNext := CellOf(LAt);
+        if LNext <> LCell then
+        begin
+          // Carry on in the new square from where the segment ended
+          LCell := LNext;
+          Grow(LCell, LAt);
+          LBuilders[LCell].MoveTo(LAt);
+        end;
+      end;
+    end;
+
+  SetLength(Result, Length(LBuilders));
+  LCount := 0;
+  for LCell := 0 to High(LBuilders) do
+    if LBuilders[LCell] <> nil then
+    begin
+      Result[LCount].Path := LBuilders[LCell].Detach;
+      Result[LCount].Bounds := LBounds[LCell];
+      Inc(LCount);
+    end;
+  SetLength(Result, LCount);
+  FLayerPaths.Add(ALayer, Result);
+end;
+
+function TWorldMapView.PaintLayerSkia(ALayer: TGeoLayer; AColor: TAlphaColor;
+  AOpacity, AThickness: Single; ANorth, ASouth, AWest, AEast: Double): Boolean;
+var
+  LCanvas: ISkCanvas;
+  LPieces: TArray<TLinePiece>;
+  LPaint: ISkPaint;
+  LScaleX, LScaleY, LMargin: Single;
+  LCopy, LPiece: Integer;
+  LVisible: TRectF;
+begin
+  // Every Skia canvas FMX draws on, CPU or GPU, is a TSkCanvasCustom, and
+  // its Skia canvas already holds this control's position and clipping
+  if not (Canvas is TSkCanvasCustom) then
+    Exit(False);
+  LCanvas := TSkCanvasCustom(Canvas).Canvas;
+  if LCanvas = nil then
+    Exit(False);
+  Result := True;
+  LPieces := LayerPieces(ALayer);
+
+  // Screen pixels per degree; the same both ways for a 2:1 map image
+  LScaleX := MapWidth / 360 * FScale;
+  LScaleY := MapHeight / 180 * FScale;
+  LPaint := TSkPaint.Create(TSkPaintStyle.Stroke);
+  LPaint.AntiAlias := True;
+  LPaint.Color := AColor;
+  LPaint.AlphaF := TAlphaColorRec(AColor).A / 255 * AOpacity;
+  // The width is in the path's units, degrees, as the matrix scales it too
+  LPaint.StrokeWidth := AThickness / LScaleX;
+
+  // A line's width either side, so a line just off screen still shows its
+  // edge
+  LMargin := LPaint.StrokeWidth;
+
+  for LCopy := Floor((AWest + 180) / 360) to Floor((AEast + 180) / 360) do
+  begin
+    // What is on screen of this copy, in the pieces' coordinates
+    LVisible := TRectF.Create(AWest + 180 - LCopy * 360 - LMargin, 90 - ANorth - LMargin,
+      AEast + 180 - LCopy * 360 + LMargin, 90 - ASouth + LMargin);
+    LCanvas.Save;
+    try
+      // Degrees to pixels, then onto this copy of the map; the paths'
+      // origin is the map's top-left corner, as for GeoToScreen
+      LCanvas.Concat(TMatrix.CreateScaling(LScaleX, LScaleY) *
+        TMatrix.CreateTranslation(FOrigin.X + LCopy * 360 * LScaleX, FOrigin.Y));
+      for LPiece := 0 to High(LPieces) do
+        // Compared by hand, as a straight east-west or north-south line
+        // has bounds with no height or width
+        if (LPieces[LPiece].Bounds.Right >= LVisible.Left) and
+           (LPieces[LPiece].Bounds.Left <= LVisible.Right) and
+           (LPieces[LPiece].Bounds.Bottom >= LVisible.Top) and
+           (LPieces[LPiece].Bounds.Top <= LVisible.Bottom) then
+          LCanvas.DrawPath(LPieces[LPiece].Path, LPaint);
+    finally
+      LCanvas.Restore;
+    end;
+  end;
+end;
+{$ENDIF}
+
 procedure TWorldMapView.Paint;
+var
+  LStart, LEnd: Int64;
+  LMs: Double;
+begin
+  FFrameLinesMs := 0;
+  FFrameSkiaLines := False;
+  FFrameBuiltLines := False;
+  LStart := TStopwatch.GetTimeStamp;
+  PaintMap;
+  if not FMeasuring then
+    Exit;
+  LEnd := TStopwatch.GetTimeStamp;
+  LMs := (LEnd - LStart) * 1000 / TStopwatch.Frequency;
+  if FStats.Frames = 0 then
+    FFirstFrameStamp := LStart;
+  FLastFrameStamp := LEnd;
+  Inc(FStats.Frames);
+  FStats.AverageMs := FStats.AverageMs + LMs;
+  FStats.LinesMs := FStats.LinesMs + FFrameLinesMs;
+  FStats.WorstMs := Max(FStats.WorstMs, LMs);
+  if FFrameBuiltLines or not FFrameSkiaLines then
+    FStats.SkiaLines := False;
+  FStats.CanvasName := Canvas.ClassName;
+end;
+
+procedure TWorldMapView.BeginMeasuring;
+begin
+  if FMeasuring or not Assigned(FOnPaintStats) then
+    Exit;
+  FMeasuring := True;
+  FStats := Default(TMapPaintStats);
+  FStats.SkiaLines := True;
+end;
+
+procedure TWorldMapView.EndMeasuring;
+var
+  LStats: TMapPaintStats;
+begin
+  FStatsTimer.Enabled := False;
+  if not FMeasuring then
+    Exit;
+  FMeasuring := False;
+  if FStats.Frames = 0 then
+    Exit;
+  LStats := FStats;
+  LStats.Seconds := (FLastFrameStamp - FFirstFrameStamp) / TStopwatch.Frequency;
+  LStats.AverageMs := LStats.AverageMs / LStats.Frames;
+  LStats.LinesMs := LStats.LinesMs / LStats.Frames;
+  if Assigned(FOnPaintStats) then
+    FOnPaintStats(Self, LStats);
+end;
+
+procedure TWorldMapView.StatsTimerTick(Sender: TObject);
+begin
+  FStatsTimer.Enabled := False;
+  // A drag that started during the zooming is reported when it ends
+  if FDragMode = mdNone then
+    EndMeasuring;
+end;
+
+procedure TWorldMapView.PaintMap;
 var
   LClient: TRectF;
   LNorth, LWest, LSouth, LEast, LLat, LLon: Double;
   LCopy, LFirstCopy, LLastCopy: Integer;
   LTop, LBottom, LEdge: Single;
   LDetail: TGeoDetail;
+  LLinesStart: Int64;
 begin
   LClient := LocalRect;
   Canvas.Fill.Kind := TBrushKind.Solid;
@@ -1141,6 +1566,7 @@ begin
   // Borders and coastlines, over the map and tints but under the grid
   if FVectors <> nil then
   begin
+    LLinesStart := TStopwatch.GetTimeStamp;
     if ScreenPixelsPerDegree >= FINE_DETAIL_PIXELS_PER_DEGREE then
       LDetail := gdFine
     else
@@ -1151,6 +1577,7 @@ begin
     if FShowBorders then
       PaintLayer(FVectors.Borders(LDetail), BORDER_COLOR, BORDER_OPACITY, 1.25,
         LNorth, LSouth, LWest, LEast);
+    FFrameLinesMs := (TStopwatch.GetTimeStamp - LLinesStart) * 1000 / TStopwatch.Frequency;
   end;
 
   PaintGrid(TRectF.Create(LWest, LNorth, LEast, LSouth));
@@ -1269,6 +1696,7 @@ begin
   if FMap = nil then
     Exit;
   FMousePos := PointF(X, Y);
+  BeginMeasuring;
   if (Button = TMouseButton.mbLeft) and not (ssShift in Shift) then
   begin
     FDragMode := mdSelect;
@@ -1326,6 +1754,7 @@ begin
   FDragMode := mdNone;
   FScrollTimer.Enabled := False;
   Repaint;
+  EndMeasuring;
   if LWasSelecting and Assigned(FOnSelectionChanged) then
     FOnSelectionChanged(Self);
   if LRightClick and Assigned(FOnRightClick) and ScreenToGeo(PointF(X, Y), LLat, LLon) then
@@ -1339,6 +1768,14 @@ begin
   if FMap = nil then
     Exit;
   FAutoFit := False;
+  // Time the frames until a second after the last notch, or until a drag
+  // in progress ends
+  BeginMeasuring;
+  if FMeasuring and (FDragMode = mdNone) then
+  begin
+    FStatsTimer.Enabled := False;
+    FStatsTimer.Enabled := True;
+  end;
   // Zoom around the pointer, or the nearest point inside the control if a
   // drag has taken the pointer outside it
   SetScaleAt(FScale * Power(WHEEL_ZOOM_STEP, WheelDelta / 120),

@@ -141,6 +141,10 @@ type
     FImportWorkers: Integer;
     { Backing field for @link(DownloadSpeed). }
     FDownloadSpeed: string;
+    { Backing field for @link(Drawing). }
+    FDrawing: string;
+    { Backing field for @link(GpuPreference). }
+    FGpuPreference: string;
 
     { Writer for @link(DataFolder); trims spaces and any trailing path
       separator. It has no other side effects, because Neon may set
@@ -240,6 +244,23 @@ type
       @link(DownloadSpeedFromKey) to turn it into a speed. Defaults to
       @code(Medium). }
     property DownloadSpeed: string read FDownloadSpeed write FDownloadSpeed;
+
+    { Where the program draws, stored by key: @code(GPU) or @code(CPU); see
+      @code(TDrawingMode) in @code(GDEMDrawing). Read once at start-up, so a
+      change takes effect the next time the program starts. Kept as text so
+      that a value this version does not know can never stop the settings
+      loading. Defaults to @code(GPU). }
+    property Drawing: string read FDrawing write FDrawing;
+
+    { Which graphics processor Windows starts the program on, stored by
+      key: @code(Automatic) (let Windows decide), @code(PowerSaving) or
+      @code(HighPerformance); see @code(TGpuPreference) in
+      @code(GDEMGpuPreference). Windows keeps the real setting in the
+      registry, for each program file; this copy lets a new build, at a new
+      path, be given the same choice at start-up. Windows only. Kept as
+      text so that a value this version does not know can never stop the
+      settings loading. Defaults to @code(Automatic). }
+    property GpuPreference: string read FGpuPreference write FGpuPreference;
   end;
 
 implementation
@@ -364,6 +385,9 @@ begin
   FTheme := 'Default';
   FImportWorkers := DEFAULT_IMPORT_WORKERS;
   FDownloadSpeed := DOWNLOAD_SPEED_KEYS[DEFAULT_DOWNLOAD_SPEED];
+  // GDEMDrawing's default, written out so this unit needs no FMX
+  FDrawing := 'GPU';
+  FGpuPreference := 'Automatic';
 end;
 
 class function TGDEMSettings.DefaultDataFolder: string;

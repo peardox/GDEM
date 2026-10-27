@@ -50,6 +50,10 @@ GDEM on 3 December 2025, so older scripts that use it no longer work.
 - **Delphi 13** with FireMonkey (FMX). The build uses RAD Studio's
   `brcc32` and its FMX styles in `Redist\styles\Fmx` (see
   [Themes](#themes)); both come with every RAD Studio install.
+- **Skia**, which comes with Delphi 13. GDEMFetch draws with it, on the
+  GPU by default (`ConfigureDrawing` in `GDEMDrawing`, called from
+  `GDEMFetch.dpr`, and the `SKIA` define the IDE adds when Skia is enabled
+  for the project); see [Drawing](#drawing).
 - **Neon JSON library**, included as a git submodule in `delphi-neon/`.
   Clone with submodules (see below). The project's search path already
   points at `..\delphi-neon\Source`.
@@ -112,7 +116,7 @@ unreadable settings, a missing world map) are also shown in a dialog. The
 
 | Menu | Item | Does |
 |------|------|------|
-| File | Settings... | Bearer token, data folder, free-space reserve, files copied at once when importing, download speed, theme |
+| File | Settings... | Bearer token, data folder, free-space reserve, files copied at once when importing, download speed, theme, drawing (GPU or CPU), and on Windows which graphics processor to use |
 | File | Refresh Tile Index | Rebuilds the list of tiles that exist, from CMR |
 | Data | Import Existing Tiles... | Copies tiles you already have, from any folder, into the data folder. The originals are not changed. |
 | Data | Rescan Data Folder | Rebuilds the downloaded-tiles bitmap from the files, files any misplaced downloads into place, and removes leftovers and empty folders |
@@ -234,6 +238,74 @@ comments say which files it needs and how to run it. It holds five layers
 outlines with names), about 190,000 points in 790 KB. `GDEMVectors.pas`
 documents the format.
 
+### Drawing
+
+GDEMFetch draws with Skia, which comes with Delphi, rather than FMX's
+own canvases. **File > Settings > Drawing** chooses where:
+
+| Platform | GPU (the default) | CPU |
+|----------|-------------------|-----|
+| Windows | Vulkan when FMX's `GlobalUseVulkan` is on and the driver supports Vulkan 1.1, otherwise OpenGL; the CPU if neither works | Skia's CPU canvas (`GlobalUseSkiaRasterWhenAvailable`) |
+| macOS | Metal (`GlobalUseMetal`) | Skia's CPU canvas |
+| Linux | Not offered: Skia only draws on the CPU there | Skia's CPU canvas |
+
+The choice has to be made before the program starts up, so a change takes
+effect the next time GDEMFetch starts. The Debug tab says at start-up what
+was asked for and which canvas Skia is using, such as `Drawing with Skia:
+asked for the GPU, using TVkCanvas`. Choose the CPU if the graphics driver
+causes trouble.
+
+**File > Settings > Graphics** (Windows only) is Windows' own choice of
+graphics processor for GDEMFetch, the same as Windows Settings > System >
+Display > Graphics: **Let Windows decide** (the default), **Power
+saving** (usually the graphics built into the processor) or **High
+performance** (usually the separate graphics card). It matters on
+computers with both, such as most gaming laptops. Windows keeps it in the
+registry for each program file, under
+`HKEY_CURRENT_USER\Software\Microsoft\DirectX\UserGpuPreferences`, and
+reads it as the program starts, so:
+
+- choosing it in Settings writes Windows' setting straight away, and it
+  takes effect at the next start;
+- the choice is also kept in `settings.json`, and at every start GDEMFetch
+  makes Windows' setting match it, so a new build in a different folder
+  gets the same choice (from its second start). Let Windows decide leaves
+  Windows' setting alone, so a choice made in Windows' own Settings
+  stands;
+- only the `GpuPreference` part of the registry value is changed; other
+  Windows settings in it, such as the windowed games optimisation, are
+  kept.
+
+The start-up line on the Debug tab includes it, such as `Drawing with
+Skia: asked for the GPU, using TVkCanvas; Windows graphics processor: High
+performance`. Task Manager's Processes tab, with the GPU engine column
+shown, says which processor GDEMFetch is really using.
+
+Measured on Windows while panning and zooming the map: 14 to 21 frames a
+second on the CPU, 34 to 125 on the GPU. On the CPU most of each frame
+went on filling pixels (stretching the world image and the tile tints
+across the window); on the GPU that takes almost no time.
+
+Borders and coastlines are the costly part of the map on the GPU: the
+1:50m coastline alone is about 60,000 points. The first time a layer is
+drawn it is cut into 10 x 10 degree squares, each made into a Skia path
+in degrees, and each frame draws only the squares on screen, moved and
+scaled into place. Zoomed in over the British Isles, that is 2 of the
+coastline's 355 squares, about 1,500 of its points. Without Skia each
+frame works out every point on screen and builds a new path, as GDEMFetch
+did before.
+
+These choices were made from timings taken with two View menu items that
+have since been removed: one switched the cached paths off, the other
+logged frame times. The map can still time itself:
+`TWorldMapView.OnPaintStats` reports each drag, pan or run of wheel zooms
+(frames, frame rate, average and worst milliseconds, the share spent on
+borders and coastlines, and the canvas class), and
+`TWorldMapView.UseSkiaPaths` switches the cached paths off. Set either in
+code to measure again. On the GPU much of the work happens after the
+map's drawing code returns, so the frame rate is the fairer comparison
+there.
+
 ### Themes
 
 Choose the program's look under **File > Settings > Theme**:
@@ -267,11 +339,15 @@ look and behave alike.
 
 ## Deploying
 
-GDEMFetch needs **no extra files deployed** on any platform. The world map
-and its borders and coastlines are linked into the executable as
-resources, which Delphi does on Windows, macOS and Linux alike, and
-everything else (settings, the tile index, the data folder) is created at
-run time. The default Deployment Manager entries are all that is needed.
+The world map and its borders and coastlines are linked into the
+executable as resources, which Delphi does on Windows, macOS and Linux
+alike, and everything else (settings, the tile index, the data folder) is
+created at run time. The only file deployed beside the program is
+**Skia's library** on Windows and Linux: `sk4d.dll` (from RAD Studio's
+`bin` or `bin64`) and `libsk4d.so` (from `binlinux64`). The IDE added
+Deployment entries for them when Skia was enabled for the project; leave
+those ticked. On macOS Skia is linked into the program. The default
+Deployment Manager entries are all that is needed.
 
 The IDE adds files that are part of the project, such as the map image,
 `maps/world_vectors.bin` and `styles/buildstyles.cmd`, to the deployment
@@ -282,7 +358,7 @@ anything in the app's `Resources/StartUp` folder is copied out to the
 user's folders by `System.StartUpCopy`. If the Deployment Manager ever
 shows them ticked again, untick them.
 
-**Windows:** the executable on its own. Its icon, `GDEMFetch/gdem.ico`
+**Windows:** the executable and `sk4d.dll` beside it. Its icon, `GDEMFetch/gdem.ico`
 (16 to 256 pixels), is compiled into it, set as the project's main icon
 for both Windows targets.
 
@@ -298,8 +374,8 @@ for both Windows targets.
   under Project > Options > Application > Version Info.
 - To run it on Macs other than your own it must be signed and notarised.
 
-**Linux:** these must be installed on the target machine, not deployed
-with the program. Desktop distributions usually have them already.
+**Linux:** the executable and `libsk4d.so` beside it. These must also be
+installed on the target machine, not deployed with the program. Desktop distributions usually have them already.
 
 | Needed for | Package (Debian / Ubuntu) | Package (Fedora) |
 |------------|---------------------------|------------------|
@@ -317,6 +393,7 @@ Removable drives are normally mounted under `/media/<user>/` or
 | Settings (`settings.json`, holds the bearer token) | Windows: `%APPDATA%\GDEM`<br>macOS: `~/Library/Application Support/GDEM`<br>Linux: `$XDG_CONFIG_HOME/GDEM` or `~/.config/GDEM`<br>Android and iOS: `GDEM` in the app's documents folder |
 | Tile index (`tileindex.bin`) | Same folder as the settings |
 | Download reports (`Reports/download-*.log`) | Same folder as the settings |
+| Windows' graphics processor choice | Windows only: the registry value named after the program's path in `HKEY_CURRENT_USER\Software\Microsoft\DirectX\UserGpuPreferences`; see [Drawing](#drawing) |
 | Downloaded tiles | The **data folder**, chosen in File > Settings. Default: `ASTGTM` in your documents folder. |
 
 On macOS and Linux `settings.json` is readable by its owner only, because
@@ -438,6 +515,8 @@ Existing Tiles...** and choose that folder.
 | `GDEMReport` | `TDownloadReport`, the report file for each batch of downloads |
 | `GDEMAwake` | `TKeepAwake`, which keeps the computer from sleeping while a job runs |
 | `GDEMVectors` | `TWorldVectors`: country borders, coastlines and country names for the map; no FMX |
+| `GDEMDrawing` | `ConfigureDrawing`, called from the `.dpr` before `Application.Initialize`, which tells Skia to draw on the GPU or the CPU and applies the Windows graphics processor choice |
+| `GDEMGpuPreference` | Reads and sets Windows' graphics processor preference for the program (ported from Sprite3D's `GpuPreference`); does nothing on other platforms |
 | `GDEMDownloader` | Finds and downloads tiles |
 | `GDEMStore` | The data folder: block layout, downloaded-tiles bitmap, rescanning, moving, deleting, free space |
 | `GDEMCancel` | `TCancelToken`, shared by the Cancel button and background jobs |
@@ -494,6 +573,20 @@ got to, what has been tested and what was learned along the way.
   - No Windows-only units or calls without `{$IF}` alternatives for the
     other platforms.
   - Prefer pure Pascal to native libraries that would need deploying.
+    Skia is the exception: it comes with Delphi, and its library is
+    deployed by the entries the IDE adds.
+- **Drawing goes through Skia** where it matters for speed. Large,
+  unchanging shapes (the borders and coastlines) are built into Skia
+  objects once and drawn with a matrix each frame, through the Skia
+  canvas FMX draws on (`TSkCanvasCustom(Canvas).Canvas`, which already
+  holds the control's position and clipping). Cut them into regions with
+  bounds and draw only the regions on screen: drawing a whole-world path
+  every frame was slower when zoomed in than building just the visible
+  part. Keep a fallback through FMX's own canvas for when the canvas is
+  not a Skia one, and wrap Skia code in `{$IFDEF SKIA}`.
+- Anything Skia or FMX must know before start-up (the GPU or CPU choice)
+  goes in `ConfigureDrawing`, which reads the settings file itself, since
+  the main window has not loaded the settings yet.
 - **JSON uses Neon**, not hand-written `System.JSON` code. Map keys
   explicitly with `[NeonProperty('...')]` where they differ from the
   Delphi names, and turn on `RaiseExceptions` when reading.

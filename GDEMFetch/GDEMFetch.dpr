@@ -27,6 +27,10 @@
       runs.)
     @item(@link(GDEMVectors) holds the country borders, coastlines and
       country names drawn on the map.)
+    @item(@link(GDEMDrawing) tells Skia whether to draw on the GPU or the
+      CPU, before the program starts up.)
+    @item(@link(GDEMGpuPreference) reads and sets Windows' choice of
+      graphics processor for the program.)
   ) }
 program GDEMFetch;
 
@@ -51,7 +55,9 @@ uses
   GDEMThemes in 'GDEMThemes.pas',
   GDEMReport in 'GDEMReport.pas',
   GDEMAwake in 'GDEMAwake.pas',
-  GDEMVectors in 'GDEMVectors.pas';
+  GDEMVectors in 'GDEMVectors.pas',
+  GDEMDrawing in 'GDEMDrawing.pas',
+  GDEMGpuPreference in 'GDEMGpuPreference.pas';
 
 {$R *.res}
 { The world map image and its borders and coastlines, built from the
@@ -63,7 +69,9 @@ uses
 {$R '..\styles\GDEMThemes.res'}
 
 begin
-  GlobalUseSkia := True;
+  // Skia, on the GPU or the CPU as File > Settings says; it must be set
+  // before Application.Initialize
+  ConfigureDrawing;
   Application.Initialize;
   Application.CreateForm(TfrmMain, frmMain);
   Application.Run;

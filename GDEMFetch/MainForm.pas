@@ -654,7 +654,7 @@ uses
   {$IFDEF MSWINDOWS}
   Winapi.Windows,
   {$ENDIF}
-  GDEMTiles, SettingsForm;
+  GDEMTiles, GDEMDrawing, SettingsForm;
 
 { TfrmMain }
 
@@ -710,6 +710,7 @@ end;
 
 procedure TfrmMain.RunStartup;
 begin
+  AddLog(DescribeDrawing);
   // Each of these waits for the user (or the download) before the next
   if not FHaveSettings then
     ShowSettings(nil)
