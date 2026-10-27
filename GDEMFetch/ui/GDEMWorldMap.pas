@@ -27,6 +27,9 @@
       GDEMFetch uses it to select the country under the pointer, or with
       Shift to add it to the selection.)
     @item(The mouse wheel zooms in and out around the pointer.)
+    @item(Ctrl + click (Cmd + click on a Mac) fires
+      @link(TWorldMapView.OnMarkerClick); GDEMFetch uses it to add a
+      marker there.)
   )
 
   A grid is drawn over the map. Its spacing adapts to the zoom level, down
@@ -56,6 +59,15 @@
   and drawing all of it every frame, even from a cached path, was slower
   when zoomed in than building just the visible part.
 
+  Towns and cities from the same @link(TWorldVectors) are labelled
+  (@link(TWorldMapView.ShowPlaces)), more of them the further in the map is
+  zoomed, following Natural Earth's suggested zoom level for each and
+  leaving out any label that would overlap one already drawn. The user's
+  markers (@link(TWorldMapView.Markers)) are drawn over everything, with
+  their names. @link(TWorldMapView.ZoomToArea) and
+  @link(TWorldMapView.CentreOn) move the map to something found by a
+  search, and @link(TWorldMapView.ShowHighlight) rings it.
+
   @link(TWorldMapView.OnPaintStats) reports how long frames take to draw
   while the map is dragged, panned or zoomed, for comparing ways of
   drawing.
@@ -72,7 +84,7 @@ uses
   System.Skia,
   {$ENDIF}
   FMX.Types, FMX.Controls, FMX.Graphics,
-  GDEMTiles, GDEMTileIndex, GDEMVectors;
+  GDEMTiles, GDEMTileIndex, GDEMVectors, GDEMTileCache, GDEMMarkers;
 
 type
   { Reports the position under the mouse pointer.
@@ -269,6 +281,34 @@ type
     FFrameBuiltLines: Boolean;
     { Ends a stretch of wheel zooming a second after the last notch. }
     FStatsTimer: TTimer;
+    { Backing field for @link(MapTiles). Not owned. }
+    FMapTiles: TTileCache;
+    { Backing field for @link(ShowMapTiles). }
+    FShowMapTiles: Boolean;
+    { Asks for another frame while tiles on screen are still to be read,
+      so a few are read each frame rather than all at once. }
+    FTileTimer: TTimer;
+    { Backing field for @link(ShowPlaces). }
+    FShowPlaces: Boolean;
+    { Width of each place's label, by its index in
+      @code(TWorldVectors.Places), measured once; emptied when
+      @link(Vectors) changes. }
+    FLabelWidths: TDictionary<Integer, Single>;
+    { Backing field for @link(Markers). Not owned. }
+    FMarkers: TMarkerList;
+    { Backing field for @link(ShowMarkers). }
+    FShowMarkers: Boolean;
+    { @true while a point is ringed; see @link(ShowHighlight). }
+    FHighlight: Boolean;
+    { Latitude of the ringed point. }
+    FHighlightLat: Double;
+    { Longitude of the ringed point. }
+    FHighlightLon: Double;
+    { Backing field for @link(OnMarkerClick). }
+    FOnMarkerClick: TMapPointEvent;
+    { @true between pressing the left button with Ctrl (or Cmd) held and
+      releasing it. }
+    FMarkerClickPending: Boolean;
 
     { Ends a selection made of separate tiles, leaving
       @link(FSelection) as it is. }
@@ -378,7 +418,7 @@ type
     procedure PaintTileRect(const ATiles: TTileRect; AColor: TAlphaColor;
       AFillOpacity: Single; ALonShift: Integer);
 
-    { Draws one copy of the map image and its tile tint.
+    { Draws one copy of the map image.
       @param(ACopy Which copy: 0 is the one holding longitudes -180 to 180,
         -1 the one to its west, 1 the one to its east.)
       @param(ANorth Northernmost latitude on screen.)
@@ -447,6 +487,74 @@ type
     { Ends a stretch of wheel zooming, unless a drag has started meanwhile.
       @param(Sender The timer.) }
     procedure StatsTimerTick(Sender: TObject);
+
+    { Draws the high-resolution map from @link(MapTiles) over the visible
+      area, on every copy of the map showing: the tiles of the level that
+      suits the zoom (see @code(TTileSet.LevelFor)). A tile not yet in
+      memory is read, a few each frame; until then the matching part of a
+      coarser tile already in memory is drawn in its place, and failing
+      that the map image underneath shows. Enlarged tiles are drawn with a
+      smooth cubic filter, reduced ones with mipmaps. Does nothing without
+      tiles, with @link(ShowMapTiles) off, or on a canvas that is not
+      Skia's.
+      @param(ANorth Northernmost latitude on screen.)
+      @param(ASouth Southernmost latitude on screen.)
+      @param(AWest Westernmost longitude on screen, not wrapped.)
+      @param(AEast Easternmost longitude on screen, not wrapped.) }
+    procedure PaintMapTiles(ANorth, ASouth, AWest, AEast: Double);
+
+    { Writer for @link(MapTiles).
+      @param(AValue The tiles, or @nil.) }
+    procedure SetMapTiles(AValue: TTileCache);
+
+    { Writer for @link(ShowPlaces).
+      @param(AValue @true to label towns and cities.) }
+    procedure SetShowPlaces(AValue: Boolean);
+
+    { Writer for @link(Markers).
+      @param(AValue The markers, or @nil.) }
+    procedure SetMarkers(AValue: TMarkerList);
+
+    { Writer for @link(ShowMarkers).
+      @param(AValue @true to draw the markers.) }
+    procedure SetShowMarkers(AValue: Boolean);
+
+    { Draws a label: text on a dark box, so it can be read over any part of
+      the map.
+      @param(ARect Where the box goes.)
+      @param(AText The text.)
+      @param(AColor The text's colour.) }
+    procedure PaintLabel(const ARect: TRectF; const AText: string; AColor: TAlphaColor);
+
+    { The screen positions of a point on every copy of the map in view.
+      @param(ALat Latitude, in degrees.)
+      @param(ALon Longitude, in degrees.)
+      @param(AWest Westernmost longitude on screen, not wrapped.)
+      @param(AEast Easternmost longitude on screen, not wrapped.)
+      @returns(The positions; empty if the point is on no copy in view.) }
+    function PointCopies(ALat, ALon, AWest, AEast: Double): TArray<TPointF>;
+
+    { Labels the towns and cities in view that suit the zoom level, most
+      important first, skipping any whose label would overlap one already
+      drawn.
+      @param(ANorth Northernmost latitude on screen.)
+      @param(ASouth Southernmost latitude on screen.)
+      @param(AWest Westernmost longitude on screen, not wrapped.)
+      @param(AEast Easternmost longitude on screen, not wrapped.) }
+    procedure PaintPlaces(ANorth, ASouth, AWest, AEast: Double);
+
+    { Draws the markers with their names, and the ringed point.
+      @param(AWest Westernmost longitude on screen, not wrapped.)
+      @param(AEast Easternmost longitude on screen, not wrapped.) }
+    procedure PaintMarkers(AWest, AEast: Double);
+
+    { Writer for @link(ShowMapTiles).
+      @param(AValue @true to draw the high-resolution map.) }
+    procedure SetShowMapTiles(AValue: Boolean);
+
+    { Draws another frame, so more of the tiles on screen are read.
+      @param(Sender The timer.) }
+    procedure TileTimerTick(Sender: TObject);
 
     { Converts a local point to a map position for dragging: the latitude
       is clamped to just inside the poles, and the longitude is not wrapped.
@@ -556,6 +664,36 @@ type
       Does nothing when there is no selection. }
     procedure ZoomToSelection;
 
+    { Zooms and pans so an area fills most of the control, with a margin
+      round it, as far as the zoom allows: a tiny area (Vatican City,
+      Jersey) is centred at the closest zoom.
+      @param(ANorth Northern edge, in degrees.)
+      @param(ASouth Southern edge, in degrees.)
+      @param(AWest Western edge, in degrees; may be below -180.)
+      @param(AEast Eastern edge, in degrees; may be above 180, and is
+        east of AWest.) }
+    procedure ZoomToArea(ANorth, ASouth, AWest, AEast: Double);
+
+    { Pans so a point is in the middle of the control, at the current
+      zoom. Near the poles the map stops at its top or bottom edge, so the
+      point may be off centre.
+      @param(ALat Latitude, in degrees.)
+      @param(ALon Longitude, in degrees.) }
+    procedure CentreOn(ALat, ALon: Double);
+
+    { Rings a point on the map, such as a place found by a search, until
+      @link(ClearHighlight) or another call.
+      @param(ALat Latitude, in degrees.)
+      @param(ALon Longitude, in degrees.) }
+    procedure ShowHighlight(ALat, ALon: Double);
+
+    { Removes the ring drawn by @link(ShowHighlight). }
+    procedure ClearHighlight;
+
+    { Call after changing @link(Markers) in place, so the map shows the
+      change. }
+    procedure MarkersChanged;
+
     { Clears the selection and fires @link(OnSelectionChanged). }
     procedure ClearSelection;
 
@@ -645,12 +783,38 @@ type
       long its frames took to draw. Frames are only timed while this is
       set. }
     property OnPaintStats: TMapPaintStatsEvent read FOnPaintStats write FOnPaintStats;
+
+    { A high-resolution map to draw over the map image, as tiles at several
+      levels of detail (see @code(GDEMTileCache)). Its bounds are in
+      degrees, as for a world map in the equirectangular projection. Not
+      owned: the caller frees it after setting this to @nil. @nil draws
+      only the map image. }
+    property MapTiles: TTileCache read FMapTiles write SetMapTiles;
+
+    { Whether @link(MapTiles) is drawn. On by default. }
+    property ShowMapTiles: Boolean read FShowMapTiles write SetShowMapTiles;
+
+    { Whether towns and cities from @link(Vectors) are labelled. On by
+      default. }
+    property ShowPlaces: Boolean read FShowPlaces write SetShowPlaces;
+
+    { The user's markers, drawn with their names. Not owned, like
+      @link(TileIndex); call @link(MarkersChanged) after changing them.
+      @nil draws none. }
+    property Markers: TMarkerList read FMarkers write SetMarkers;
+
+    { Whether @link(Markers) are drawn. On by default. }
+    property ShowMarkers: Boolean read FShowMarkers write SetShowMarkers;
+
+    { Fired by a left click with Ctrl (or Cmd, on a Mac) held that does not
+      move: no selection is made. }
+    property OnMarkerClick: TMapPointEvent read FOnMarkerClick write FOnMarkerClick;
   end;
 
 implementation
 
 uses
-  System.Math, System.Math.Vectors, System.Diagnostics
+  System.Math, System.Math.Vectors, System.Diagnostics, GDEMTileSet
   {$IFDEF SKIA}
   , FMX.Skia.Canvas
   {$ENDIF}
@@ -714,6 +878,13 @@ const
   { How long after the last wheel zoom its frame times are reported, in
     milliseconds. }
   STATS_IDLE_INTERVAL = 1000;
+  { Most map tiles read from disk in one frame. Each takes about a
+    millisecond; the rest are read in the next frames, with coarser tiles
+    standing in meanwhile. }
+  MAX_TILE_LOADS_PER_FRAME = 6;
+  { Time between frames while map tiles are still being read, in
+    milliseconds. }
+  TILE_LOAD_INTERVAL = 15;
   { Size of the squares vector layers are cut into for drawing with Skia,
     in degrees (see @link(TLinePiece)). Smaller squares skip more of the
     lines off screen but mean more paths to draw when zoomed out. }
@@ -722,6 +893,45 @@ const
   LINE_PIECE_COLUMNS = 360 div LINE_PIECE_DEGREES;
   { Number of squares from pole to pole. }
   LINE_PIECE_ROWS = 180 div LINE_PIECE_DEGREES;
+  { Share of the control an area fills after @link(TWorldMapView.ZoomToArea),
+    leaving a margin round it. }
+  AREA_FILL = 0.85;
+  { Natural Earth's zoom levels are for web maps made of 256-pixel tiles:
+    a whole number of 256-pixel tiles round the world at each level. }
+  WEB_TILE_PIXELS = 256;
+  { Added to the map's zoom level before comparing with a place's
+    suggested one: above 0 labels more places, below 0 fewer. }
+  PLACE_ZOOM_BIAS = 0;
+  { Most places labelled at once, so a crowded view stays quick to draw. }
+  MAX_PLACE_LABELS = 250;
+  { Size of place labels' text, in points. }
+  PLACE_FONT_SIZE = 11;
+  { Colour of place labels' text. }
+  PLACE_TEXT_COLOR = $FFFFFFFF;
+  { Colour of a capital's label text. }
+  CAPITAL_TEXT_COLOR = $FFFFE082;
+  { Colour of the box behind labels. }
+  LABEL_BOX_COLOR = $FF000000;
+  { Opacity of the box behind labels. }
+  LABEL_BOX_OPACITY = 0.55;
+  { Radius of a place's dot, in pixels. }
+  PLACE_DOT_RADIUS = 2.5;
+  { Gap between a dot and its label, in pixels. }
+  LABEL_GAP = 4;
+  { Padding inside a label's box, in pixels. }
+  LABEL_PADDING = 3;
+  { Height of a label's box, in pixels. }
+  LABEL_HEIGHT = 16;
+  { Colour of markers. }
+  MARKER_COLOR = $FFFF3D00;
+  { Radius of a marker's dot, in pixels. }
+  MARKER_RADIUS = 6;
+  { Size of markers' names, in points. }
+  MARKER_FONT_SIZE = 12;
+  { Colour of the ring round a point found by a search. }
+  HIGHLIGHT_COLOR = $FFFFEB3B;
+  { Radius of that ring, in pixels. }
+  HIGHLIGHT_RADIUS = 13;
 
 { TWorldMapView }
 
@@ -751,6 +961,14 @@ begin
   FStatsTimer.Enabled := False;
   FStatsTimer.Interval := STATS_IDLE_INTERVAL;
   FStatsTimer.OnTimer := StatsTimerTick;
+  FShowMapTiles := True;
+  FTileTimer := TTimer.Create(Self);
+  FTileTimer.Enabled := False;
+  FTileTimer.Interval := TILE_LOAD_INTERVAL;
+  FTileTimer.OnTimer := TileTimerTick;
+  FShowPlaces := True;
+  FShowMarkers := True;
+  FLabelWidths := TDictionary<Integer, Single>.Create;
 end;
 
 destructor TWorldMapView.Destroy;
@@ -762,6 +980,7 @@ begin
   {$IFDEF SKIA}
   FLayerPaths.Free;
   {$ENDIF}
+  FLabelWidths.Free;
   inherited;
 end;
 
@@ -798,10 +1017,11 @@ end;
 procedure TWorldMapView.SetVectors(AValue: TWorldVectors);
 begin
   FVectors := AValue;
-  // The cached paths belong to the old layers
+  // The cached paths and label widths belong to the old data
   {$IFDEF SKIA}
   FLayerPaths.Clear;
   {$ENDIF}
+  FLabelWidths.Clear;
   Repaint;
 end;
 
@@ -1000,6 +1220,58 @@ begin
               GeoToScreen(FSelection.South, FSelection.East)) / 2;
   FOrigin := FOrigin + (PointF(Width / 2, Height / 2) - LCentre);
   ClampOrigin;
+  Repaint;
+end;
+
+procedure TWorldMapView.ZoomToArea(ANorth, ASouth, AWest, AEast: Double);
+var
+  LWidth, LHeight, LScale: Single;
+begin
+  if FMap = nil then
+    Exit;
+  FAutoFit := False;
+  // The area's size in map image pixels
+  LWidth := Max(AEast - AWest, 0) * MapWidth / 360;
+  LHeight := Max(ANorth - ASouth, 0) * MapHeight / 180;
+  LScale := MaxScale;
+  if LWidth > 0 then
+    LScale := Min(LScale, Width * AREA_FILL / LWidth);
+  if LHeight > 0 then
+    LScale := Min(LScale, Height * AREA_FILL / LHeight);
+  FScale := EnsureRange(LScale, MinScale, MaxScale);
+  CentreOn((ANorth + ASouth) / 2, (AWest + AEast) / 2);
+end;
+
+procedure TWorldMapView.CentreOn(ALat, ALon: Double);
+begin
+  if FMap = nil then
+    Exit;
+  FAutoFit := False;
+  FOrigin.X := Width / 2 - (ALon + 180) * MapWidth / 360 * FScale;
+  FOrigin.Y := Height / 2 - (90 - ALat) * MapHeight / 180 * FScale;
+  ClampOrigin;
+  Repaint;
+end;
+
+procedure TWorldMapView.ShowHighlight(ALat, ALon: Double);
+begin
+  FHighlight := True;
+  FHighlightLat := ALat;
+  FHighlightLon := ALon;
+  Repaint;
+end;
+
+procedure TWorldMapView.ClearHighlight;
+begin
+  if FHighlight then
+  begin
+    FHighlight := False;
+    Repaint;
+  end;
+end;
+
+procedure TWorldMapView.MarkersChanged;
+begin
   Repaint;
 end;
 
@@ -1225,10 +1497,6 @@ begin
   LDest := TRectF.Create(FOrigin + LShift + LSource.TopLeft * FScale,
                          FOrigin + LShift + LSource.BottomRight * FScale);
   Canvas.DrawBitmap(FMap, LSource, LDest, 1, False);
-
-  // Tint tiles that have data or are downloaded
-  if FTileOverlay <> nil then
-    PaintTileBitmap(FTileOverlay, TILE_TINT_OPACITY, ACopy, ANorth, ASouth, AWest, AEast);
 end;
 
 procedure TWorldMapView.PaintTileBitmap(ABitmap: TBitmap; AOpacity: Single;
@@ -1456,6 +1724,315 @@ begin
 end;
 {$ENDIF}
 
+procedure TWorldMapView.SetMapTiles(AValue: TTileCache);
+begin
+  FMapTiles := AValue;
+  FTileTimer.Enabled := False;
+  Repaint;
+end;
+
+procedure TWorldMapView.SetShowMapTiles(AValue: Boolean);
+begin
+  if FShowMapTiles <> AValue then
+  begin
+    FShowMapTiles := AValue;
+    Repaint;
+  end;
+end;
+
+procedure TWorldMapView.SetShowPlaces(AValue: Boolean);
+begin
+  if FShowPlaces <> AValue then
+  begin
+    FShowPlaces := AValue;
+    Repaint;
+  end;
+end;
+
+procedure TWorldMapView.SetMarkers(AValue: TMarkerList);
+begin
+  FMarkers := AValue;
+  Repaint;
+end;
+
+procedure TWorldMapView.SetShowMarkers(AValue: Boolean);
+begin
+  if FShowMarkers <> AValue then
+  begin
+    FShowMarkers := AValue;
+    Repaint;
+  end;
+end;
+
+procedure TWorldMapView.PaintLabel(const ARect: TRectF; const AText: string;
+  AColor: TAlphaColor);
+begin
+  Canvas.Fill.Kind := TBrushKind.Solid;
+  Canvas.Fill.Color := LABEL_BOX_COLOR;
+  Canvas.FillRect(ARect, 3, 3, AllCorners, LABEL_BOX_OPACITY);
+  Canvas.Fill.Color := AColor;
+  Canvas.FillText(ARect, AText, False, 1, [], TTextAlign.Center, TTextAlign.Center);
+end;
+
+function TWorldMapView.PointCopies(ALat, ALon, AWest, AEast: Double): TArray<TPointF>;
+var
+  LCopy: Integer;
+begin
+  Result := nil;
+  // Every whole turn east or west of the point that falls in view
+  for LCopy := Ceil((AWest - ALon) / 360) to Floor((AEast - ALon) / 360) do
+    Result := Result + [GeoToScreen(ALat, ALon + LCopy * 360)];
+end;
+
+procedure TWorldMapView.PaintPlaces(ANorth, ASouth, AWest, AEast: Double);
+var
+  LZoom: Double;
+  LPlaces: TArray<TGeoPlace>;
+  LIndex, LDrawn, LOther: Integer;
+  LPoint: TPointF;
+  LLabel, LDot: TRectF;
+  LTaken: TList<TRectF>;
+  LFree: Boolean;
+  LWidth: Single;
+  LColor: TAlphaColor;
+begin
+  if (FVectors = nil) or not FShowPlaces or (Length(FVectors.Places) = 0) then
+    Exit;
+  LPlaces := FVectors.Places;
+  // The web map zoom level that has as many pixels round the world
+  LZoom := Log2(Max(ScreenPixelsPerDegree, 0.01) * 360 / WEB_TILE_PIXELS) + PLACE_ZOOM_BIAS;
+  Canvas.Font.Size := PLACE_FONT_SIZE;
+  Canvas.Font.Style := [];
+  LDrawn := 0;
+  LTaken := TList<TRectF>.Create;
+  try
+    // Most important first, so when labels would collide the bigger place
+    // keeps its label
+    for LIndex := 0 to High(LPlaces) do
+    begin
+      if LPlaces[LIndex].MinZoom > LZoom then
+        // They are in order of zoom level, so no later one qualifies
+        Break;
+      if not InRange(LPlaces[LIndex].Lat, ASouth, ANorth) then
+        Continue;
+      for LPoint in PointCopies(LPlaces[LIndex].Lat, LPlaces[LIndex].Lon, AWest, AEast) do
+      begin
+        if not FLabelWidths.TryGetValue(LIndex, LWidth) then
+        begin
+          LWidth := Canvas.TextWidth(LPlaces[LIndex].Name);
+          FLabelWidths.Add(LIndex, LWidth);
+        end;
+        LDot := TRectF.Create(LPoint.X - PLACE_DOT_RADIUS, LPoint.Y - PLACE_DOT_RADIUS,
+          LPoint.X + PLACE_DOT_RADIUS, LPoint.Y + PLACE_DOT_RADIUS);
+        LLabel := TRectF.Create(LPoint.X + LABEL_GAP, LPoint.Y - LABEL_HEIGHT / 2,
+          LPoint.X + LABEL_GAP + LWidth + 2 * LABEL_PADDING, LPoint.Y + LABEL_HEIGHT / 2);
+        LFree := True;
+        for LOther := 0 to LTaken.Count - 1 do
+          if LTaken[LOther].IntersectsWith(LLabel) or LTaken[LOther].IntersectsWith(LDot) then
+          begin
+            LFree := False;
+            Break;
+          end;
+        if not LFree then
+          Continue;
+        LTaken.Add(LLabel);
+        LTaken.Add(LDot);
+        if LPlaces[LIndex].Capital then
+          LColor := CAPITAL_TEXT_COLOR
+        else
+          LColor := PLACE_TEXT_COLOR;
+        Canvas.Fill.Kind := TBrushKind.Solid;
+        Canvas.Fill.Color := LColor;
+        Canvas.FillEllipse(LDot, 1);
+        Canvas.Stroke.Kind := TBrushKind.Solid;
+        Canvas.Stroke.Color := LABEL_BOX_COLOR;
+        Canvas.Stroke.Thickness := 1;
+        Canvas.DrawEllipse(LDot, 0.8);
+        PaintLabel(LLabel, LPlaces[LIndex].Name, LColor);
+        Inc(LDrawn);
+      end;
+      if LDrawn >= MAX_PLACE_LABELS then
+        Break;
+    end;
+  finally
+    LTaken.Free;
+  end;
+end;
+
+procedure TWorldMapView.PaintMarkers(AWest, AEast: Double);
+var
+  LIndex: Integer;
+  LPoint: TPointF;
+  LDot, LLabel: TRectF;
+  LName: string;
+  LWidth: Single;
+begin
+  if FShowMarkers and (FMarkers <> nil) and (FMarkers.Count > 0) then
+  begin
+    Canvas.Font.Size := MARKER_FONT_SIZE;
+    Canvas.Font.Style := [TFontStyle.fsBold];
+    for LIndex := 0 to FMarkers.Count - 1 do
+    begin
+      LName := FMarkers[LIndex].Name;
+      LWidth := Canvas.TextWidth(LName);
+      for LPoint in PointCopies(FMarkers[LIndex].Lat, FMarkers[LIndex].Lon, AWest, AEast) do
+      begin
+        LDot := TRectF.Create(LPoint.X - MARKER_RADIUS, LPoint.Y - MARKER_RADIUS,
+          LPoint.X + MARKER_RADIUS, LPoint.Y + MARKER_RADIUS);
+        Canvas.Fill.Kind := TBrushKind.Solid;
+        Canvas.Fill.Color := MARKER_COLOR;
+        Canvas.FillEllipse(LDot, 1);
+        Canvas.Stroke.Kind := TBrushKind.Solid;
+        Canvas.Stroke.Color := TAlphaColors.White;
+        Canvas.Stroke.Thickness := 2;
+        Canvas.DrawEllipse(LDot, 1);
+        LLabel := TRectF.Create(LPoint.X + MARKER_RADIUS + LABEL_GAP,
+          LPoint.Y - LABEL_HEIGHT / 2 - 1,
+          LPoint.X + MARKER_RADIUS + LABEL_GAP + LWidth + 2 * LABEL_PADDING,
+          LPoint.Y + LABEL_HEIGHT / 2 + 1);
+        PaintLabel(LLabel, LName, TAlphaColors.White);
+      end;
+    end;
+    Canvas.Font.Style := [];
+  end;
+
+  if FHighlight then
+    for LPoint in PointCopies(FHighlightLat, FHighlightLon, AWest, AEast) do
+    begin
+      Canvas.Stroke.Kind := TBrushKind.Solid;
+      Canvas.Stroke.Color := HIGHLIGHT_COLOR;
+      Canvas.Stroke.Thickness := 3;
+      Canvas.DrawEllipse(TRectF.Create(LPoint.X - HIGHLIGHT_RADIUS, LPoint.Y - HIGHLIGHT_RADIUS,
+        LPoint.X + HIGHLIGHT_RADIUS, LPoint.Y + HIGHLIGHT_RADIUS), 1);
+      Canvas.Stroke.Thickness := 2;
+      Canvas.DrawEllipse(TRectF.Create(LPoint.X - 2 * HIGHLIGHT_RADIUS,
+        LPoint.Y - 2 * HIGHLIGHT_RADIUS, LPoint.X + 2 * HIGHLIGHT_RADIUS,
+        LPoint.Y + 2 * HIGHLIGHT_RADIUS), 0.45);
+    end;
+end;
+
+procedure TWorldMapView.TileTimerTick(Sender: TObject);
+begin
+  FTileTimer.Enabled := False;
+  Repaint;
+end;
+
+procedure TWorldMapView.PaintMapTiles(ANorth, ASouth, AWest, AEast: Double);
+{$IFDEF SKIA}
+var
+  LCanvas: ISkCanvas;
+  LTileSet: TTileSet;
+  LLevel, LColumns, LRows, LRow, LColumn, LUnwrapped, LFirstColumn, LLastColumn: Integer;
+  LFirstRow, LLastRow, LBudget, LUp, LAncestorRow, LAncestorColumn, LParts: Integer;
+  LTileWidth, LTileHeight, LScale, LPart, LDevicePixels: Double;
+  LDest, LSource: TRectF;
+  LImage: ISkImage;
+  LSampling: TSkSamplingOptions;
+  LWaiting: Boolean;
+begin
+  if (FMapTiles = nil) or not FShowMapTiles or not (Canvas is TSkCanvasCustom) then
+    Exit;
+  LCanvas := TSkCanvasCustom(Canvas).Canvas;
+  if LCanvas = nil then
+    Exit;
+  LTileSet := FMapTiles.TileSet;
+  // The display's own pixels, not the form's: on a scaled display (150%,
+  // or 2 on a Retina Mac) there are more of them, and they deserve the
+  // finer level
+  LDevicePixels := ScreenPixelsPerDegree * Max(Canvas.Scale, 1);
+  LLevel := LTileSet.LevelFor(LDevicePixels);
+  if LLevel < 0 then
+    Exit;
+  LColumns := LTileSet.Levels[LLevel].Columns;
+  LRows := LTileSet.Levels[LLevel].Rows;
+  // Each tile's size in degrees
+  LTileWidth := (LTileSet.Bounds.East - LTileSet.Bounds.West) / LColumns;
+  LTileHeight := (LTileSet.Bounds.North - LTileSet.Bounds.South) / LRows;
+  if (LTileWidth <= 0) or (LTileHeight <= 0) then
+    Exit;
+
+  // Screen pixels per tile pixel: above 1 the tiles are enlarged, past
+  // their own detail, which a smooth cubic filter suits; below 1 they are
+  // reduced, which mipmaps keep from shimmering
+  LScale := LDevicePixels / LTileSet.PixelsPerUnit(LLevel);
+  if LScale > 1.01 then
+    LSampling := TSkSamplingOptions.High
+  else
+    LSampling := TSkSamplingOptions.Create(TSkFilterMode.Linear, TSkMipmapMode.Linear);
+
+  // The tiles on screen. Columns are counted on without wrapping, so a
+  // column past either edge is on the next copy of the map; GeoToScreen
+  // puts it there.
+  LFirstRow := Max(0, Floor((LTileSet.Bounds.North - ANorth) / LTileHeight));
+  LLastRow := Min(LRows - 1, Ceil((LTileSet.Bounds.North - ASouth) / LTileHeight) - 1);
+  LFirstColumn := Floor((AWest - LTileSet.Bounds.West) / LTileWidth);
+  LLastColumn := Ceil((AEast - LTileSet.Bounds.West) / LTileWidth) - 1;
+
+  LBudget := MAX_TILE_LOADS_PER_FRAME;
+  LWaiting := False;
+  for LRow := LFirstRow to LLastRow do
+    for LUnwrapped := LFirstColumn to LLastColumn do
+    begin
+      LColumn := LUnwrapped mod LColumns;
+      if LColumn < 0 then
+        Inc(LColumn, LColumns);
+      // Corners from the same sums for neighbouring tiles, so their edges
+      // meet exactly and no gaps show
+      LDest := TRectF.Create(
+        GeoToScreen(LTileSet.Bounds.North - LRow * LTileHeight,
+          LTileSet.Bounds.West + LUnwrapped * LTileWidth),
+        GeoToScreen(LTileSet.Bounds.North - (LRow + 1) * LTileHeight,
+          LTileSet.Bounds.West + (LUnwrapped + 1) * LTileWidth));
+
+      LImage := FMapTiles.Find(LLevel, LRow, LColumn);
+      if (LImage = nil) and not FMapTiles.Tried(LLevel, LRow, LColumn) then
+      begin
+        if LBudget > 0 then
+        begin
+          LImage := FMapTiles.Load(LLevel, LRow, LColumn);
+          Dec(LBudget);
+        end
+        else
+          LWaiting := True;
+      end;
+      if LImage <> nil then
+      begin
+        LCanvas.DrawImageRect(LImage, LDest, LSampling);
+        Continue;
+      end;
+
+      // Meanwhile the matching part of the nearest coarser tile in memory:
+      // a level up, each tile covers 2 x 2 of these
+      for LUp := 1 to High(LTileSet.Levels) - LLevel do
+      begin
+        LAncestorRow := LRow shr LUp;
+        LAncestorColumn := LColumn shr LUp;
+        LImage := FMapTiles.Find(LLevel + LUp, LAncestorRow, LAncestorColumn);
+        if LImage = nil then
+          Continue;
+        LParts := 1 shl LUp;
+        LPart := LTileSet.TileSize / LParts;
+        LSource := TRectF.Create(
+          (LColumn - LAncestorColumn * LParts) * LPart,
+          (LRow - LAncestorRow * LParts) * LPart,
+          (LColumn - LAncestorColumn * LParts + 1) * LPart,
+          (LRow - LAncestorRow * LParts + 1) * LPart);
+        // Close: sample only inside the part, not its neighbours
+        LCanvas.DrawImageRect(LImage, LSource, LDest, TSkSamplingOptions.High, nil,
+          TSkSrcRectConstraint.Close);
+        Break;
+      end;
+    end;
+
+  // Read the rest over the next frames
+  if LWaiting then
+    FTileTimer.Enabled := True;
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
 procedure TWorldMapView.Paint;
 var
   LStart, LEnd: Int64;
@@ -1548,6 +2125,14 @@ begin
   for LCopy := LFirstCopy to LLastCopy do
     PaintMapCopy(LCopy, LNorth, LSouth, LWest, LEast);
 
+  // The high-resolution map over it, where there is one
+  PaintMapTiles(LNorth, LSouth, LWest, LEast);
+
+  // Tint tiles that have data or are downloaded
+  if FTileOverlay <> nil then
+    for LCopy := LFirstCopy to LLastCopy do
+      PaintTileBitmap(FTileOverlay, TILE_TINT_OPACITY, LCopy, LNorth, LSouth, LWest, LEast);
+
   // Shade the areas ASTER GDEM does not cover, across the whole width
   Canvas.Fill.Color := TAlphaColors.Black;
   LTop := GeoToScreen(LNorth, 0).Y;
@@ -1615,6 +2200,10 @@ begin
         PaintTileRect(FSelection, SELECTION_COLOR, 0, LCopy * 360)
       else
         PaintTileRect(FSelection, SELECTION_COLOR, 0.25, LCopy * 360);
+
+  // Names on top of everything, markers above towns and cities
+  PaintPlaces(LNorth, LSouth, LWest, LEast);
+  PaintMarkers(LWest, LEast);
 end;
 
 procedure TWorldMapView.UpdateDragSelection;
@@ -1698,6 +2287,14 @@ begin
   if FMap = nil then
     Exit;
   FMousePos := PointF(X, Y);
+  // Ctrl + click (Cmd + click on a Mac) marks a point rather than
+  // selecting; it is reported when the button is released
+  if (Button = TMouseButton.mbLeft) and ([ssCtrl, ssCommand] * Shift <> []) then
+  begin
+    FMarkerClickPending := True;
+    FDragStart := FMousePos;
+    Exit;
+  end;
   BeginMeasuring;
   if (Button = TMouseButton.mbLeft) and not (ssShift in Shift) then
   begin
@@ -1748,6 +2345,14 @@ var
   LLat, LLon: Double;
 begin
   inherited;
+  if FMarkerClickPending then
+  begin
+    FMarkerClickPending := False;
+    if (Button = TMouseButton.mbLeft) and (PointF(X, Y).Distance(FDragStart) <= CLICK_SLOP) and
+       Assigned(FOnMarkerClick) and ScreenToGeo(PointF(X, Y), LLat, LLon) then
+      FOnMarkerClick(Self, LLat, LLon, Shift);
+    Exit;
+  end;
   LWasSelecting := FDragMode = mdSelect;
   // A right press and release that barely moved is a click, not a pan
   LRightClick := (FDragMode = mdPan) and (FPanButton = TMouseButton.mbRight) and

@@ -26,12 +26,19 @@
       downloads to a report file.)
     @item(@link(GDEMAwake) keeps the computer from sleeping while a job
       runs.)
-    @item(@link(GDEMVectors) holds the country borders, coastlines and
-      country names drawn on the map.)
+    @item(@link(GDEMVectors) holds the country borders, coastlines,
+      country names and towns and cities drawn on the map.)
+    @item(@link(GDEMSearch) finds countries, places and markers by name,
+      forgiving spelling mistakes; @link(GDEMMarkers) keeps the user's
+      markers, which @link(MarkersForm) lists for renaming and deleting.)
     @item(@link(GDEMDrawing) tells Skia whether to draw on the GPU or the
       CPU, before the program starts up.)
     @item(@link(GDEMGpuPreference) reads and sets Windows' choice of
       graphics processor for the program.)
+    @item(@link(GDEMMapTiles) finds the tile set drawn as the
+      high-resolution map; @link(GDEMTileSet) (shared with TileMaker) and
+      @link(GDEMTileCache), in the repository's @code(common) folder, read
+      it.)
   ) }
 program GDEMFetch;
 
@@ -59,7 +66,13 @@ uses
   GDEMAwake in 'lib\GDEMAwake.pas',
   GDEMVectors in 'lib\GDEMVectors.pas',
   GDEMDrawing in 'ui\GDEMDrawing.pas',
-  GDEMGpuPreference in 'lib\GDEMGpuPreference.pas';
+  GDEMGpuPreference in 'lib\GDEMGpuPreference.pas',
+  GDEMMapTiles in 'lib\GDEMMapTiles.pas',
+  GDEMTileSet in '..\common\GDEMTileSet.pas',
+  GDEMTileCache in '..\common\GDEMTileCache.pas',
+  GDEMMarkers in 'lib\GDEMMarkers.pas',
+  GDEMSearch in 'lib\GDEMSearch.pas',
+  MarkersForm in 'ui\MarkersForm.pas' {frmMarkers};
 
 {$R *.res}
 { The world map image and its borders and coastlines, built from the

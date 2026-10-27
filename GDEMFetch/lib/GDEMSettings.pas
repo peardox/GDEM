@@ -153,6 +153,8 @@ type
     FDrawing: string;
     { Backing field for @link(GpuPreference). }
     FGpuPreference: string;
+    { Backing field for @link(MapTiles). }
+    FMapTiles: string;
 
     { Writer for @link(DataFolder); trims spaces and any trailing path
       separator. It has no other side effects, because Neon may set
@@ -274,6 +276,11 @@ type
       text so that a value this version does not know can never stop the
       settings loading. Defaults to @code(Automatic). }
     property GpuPreference: string read FGpuPreference write FGpuPreference;
+
+    { The folder of the tile set drawn as the high-resolution map (one
+      holding a @code(tileset.json) made by TileMaker). Empty, the default,
+      means look for one beside the program; see @code(GDEMMapTiles). }
+    property MapTiles: string read FMapTiles write FMapTiles;
   end;
 
 implementation
@@ -401,6 +408,7 @@ begin
   // GDEMDrawing's default, written out so this unit needs no FMX
   FDrawing := 'GPU';
   FGpuPreference := 'Automatic';
+  FMapTiles := '';
 end;
 
 class function TGDEMSettings.DefaultDataFolder: string;

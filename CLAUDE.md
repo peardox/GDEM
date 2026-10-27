@@ -294,9 +294,9 @@ owner whether it has been applied before changing the same units.
    (LZW, 256 x 256 tiles, Int16 and UInt8, 3601 x 3601, 8 overviews).
    <https://github.com/peardox/volatile> has older decoding logic to
    reuse, but uses a Windows-only libtiff binding, so take the logic only.
-4. **High-resolution map** from `maps/8081_earthmap10k.jpg` (10800 x
-   5400, gitignored, so not in a fresh clone), cut into tiles loaded as
-   the user zooms. Natural Earth's 1:10m borders and coastlines would suit
+4. **High-resolution map**: tile set made and drawn (see the TileMaker
+   and high-resolution map sections below); built and working. Search,
+   towns and cities, and markers followed (see below). Natural Earth's 1:10m borders and coastlines would suit
    it; add them as more layers in `tools/build_vectors.py`.
 5. **3D tab**: content to come once tiles can be read.
 6. Smaller ideas offered but not taken up: parallel workers and the
@@ -440,12 +440,132 @@ Pascal resampler and its wrapping are right; level 3 agrees on average
 not at tile borders. Stitched level 3 shows no seams. The step across the
 date line is the same in every level as in the source image itself.
 
-Next: GDEMFetch loads a tile set (chosen in Settings, or
-found beside the program) with `TTileSet.Load` and draws the level from
-`LevelFor`, decoding tiles on demand with a cache, the coarser level
-showing until a tile is ready, and level 0 enlarged past its own detail
-(the owner wants zoom beyond 1:1 for accurate selection and, later,
-drawing). With no tile set, the 1080 x 540 map stays.
+### High-resolution map in GDEMFetch (27 October 2026)
+
+GDEMFetch now draws the tile set (README, "The high-resolution map").
+Not yet built.
+
+- `common/GDEMTileCache` (new, no FMX): `TTileCache` opens a folder with
+  `TTileSet.Load`, decodes tiles with `TSkImage.MakeFromEncodedFile` then
+  `MakeRasterImage` (so drawing never decodes), keeps up to 400 unpinned
+  (least recently used dropped; a scan of the dictionary is enough at
+  this size), and remembers failed tiles so they are not retried.
+  `Find` only looks in memory, `Load` reads, `Tried` says whether `Load`
+  would read, `PreloadLevel` pins a level.
+- `lib/GDEMMapTiles` (new): `FindMapTiles(setting)`. The setting alone if
+  set; otherwise `tiles` beside the program, the macOS bundle's
+  `Resources/tiles`, then `maps/tiles` beside the program and up to 6
+  folders above (finds the repository's from `GDEMFetch/Win64/Debug`).
+  PAServer runs Mac and Linux builds from its own folder, so there the
+  owner must choose the folder in Settings or copy it beside the program.
+- `TGDEMSettings.MapTiles` (JSON `mapTiles`, default empty). Settings has
+  a "High-resolution map tiles" row at the bottom of the data layout,
+  with Browse and a line saying which tile set will be used (form 676
+  high; `layData` 236).
+- `TfrmMain.LoadMapTiles` (after settings load in `FormCreate`, and again
+  when Settings changes the folder) pins the smallest level and logs
+  `Map: tile set "...", W x H in N levels of S-pixel tiles, from ...`,
+  or a no-tile-set line. View > High-Resolution Map
+  (`mnuShowMapTiles`, disabled with no tile set) sets
+  `TWorldMapView.ShowMapTiles`.
+- `TWorldMapView.PaintMapTiles` (Skia only), after the base map copies
+  and before the tints: level from `LevelFor(ScreenPixelsPerDegree *
+  Canvas.Scale)` (device pixels, so 150% and Retina get the finer level);
+  rows and unwrapped columns of the view, each drawn into the rectangle
+  from `GeoToScreen` of its corners; `TSkSamplingOptions.High` (Mitchell)
+  when enlarging, linear with mipmaps when reducing. At most
+  `MAX_TILE_LOADS_PER_FRAME` (6) reads a frame; a tile not yet read shows
+  the matching part of the nearest coarser tile in memory
+  (`TSkSrcRectConstraint.Close`, so the part does not sample its
+  neighbours), and `FTileTimer` (15 ms) repaints to read more. The
+  existing `MAX_PIXELS_PER_DEGREE` of 400 already allows over 13x past
+  level 0's 30 pixels a degree, which the owner wanted.
+- Simulated in Python on the real `maps/tiles`: levels chosen as
+  expected (whole world on level 3, level 0 from 30 device pixels a
+  degree), every tile in view exists, ancestors' rows and columns are in
+  range, and the date line wraps.
+
+To watch for: a faint step at tile edges when enlarged far past 1:1
+(each tile is filtered on its own, so the cubic filter cannot see across
+the edge); if it shows, draw each tile 1 pixel larger with a source
+inset, or add a 1-pixel overlap in TileMaker. `OnPaintStats` can time
+panning with tiles.
+
+The owner built it (after two fixes: `GDEMTileSet` missing from
+`GDEMWorldMap`'s uses, and `Exit([...])` read as a set, E2001) and found
+it "nice + responsive".
+
+### Search, towns and cities, markers (27 October 2026)
+
+Asked for by the owner: a search box that zooms to a country (whole, with
+a margin, as far as zoom allows; Jersey cannot fill the screen) or pans to
+a place at the current zoom, fuzzy but fast, with a drop-down; and named
+markers (Home, Work) that the search finds. Not yet built.
+
+- `tools/build_vectors.py`: format version 2 adds a places section after
+  the layers, from `ne_10m_populated_places_simple.geojson` (7,342 places;
+  name, ASCII search name when the name is not ASCII, region, other names
+  from `namealt`/`namepar` joined by `|` (634 places), country as an index
+  into `countries50` by `ADM0_A3` then `ADMIN` name (3 unlinked:
+  Gibraltar, Tokelau, Svalbard), lon/lat, `min_zoom` x 10, capital flag,
+  `pop_max`), sorted by min zoom then population. `clean` drops `Cf`
+  marks and runs of spaces ("St.  Paul"). The rebuilt
+  `maps/world_vectors.bin` is 1.1 MB; the five layers are unchanged (an
+  identical rebuild of the old file was confirmed first, from the same
+  Natural Earth commit `ca96624`).
+- `GDEMVectors`: `TGeoPlace`, `TWorldVectors.Places`, `PlaceText`
+  (`London, Ontario, Canada`; a region equal to the name is left out),
+  reads versions 1 and 2. `TGeoLayer.FeatureExtent` /
+  `TWorldVectors.CountryExtent`: start from the largest part by area
+  (shoelace times cos latitude); large parts (25% of the main's area or
+  more) join within 4 x reach of the main or another large part; small
+  parts join within reach of those, but never of other small parts (so no
+  chaining along the Aleutians); reach = max(0.25 x main's larger side,
+  3 degrees); parts are shifted by whole turns towards the main part, so
+  Russia and Fiji are one piece (east > 180). Tuned in Python on all 242
+  countries: France without Guiana, US with Alaska only, Norway with
+  Svalbard but not Jan Mayen, Australia without Macquarie, Malaysia and
+  Indonesia whole.
+- `lib/GDEMSearch` (new): `TPlaceSearch.Fold` (lower-case ASCII words;
+  Latin-1 and Latin Extended-A accents through the `FOLD_LATIN` table,
+  generated from Unicode decompositions; apostrophes join letters; other
+  letters kept), match classes exact, prefix, word prefix, inside (2+
+  letters), fuzzy (optimal string alignment distance against the start of
+  each word, with an early exit; mistakes 0 below 4 letters, 1 below 7, 2
+  below 11, then 3). Ranked by class, mistakes, kind (marker, country,
+  place), shorter country name, place importance; one hit per place.
+  A Python port on the real data: `lodnon`, `edinbrugh`, `bejing`,
+  `kuala lumpar`, `jersy`, `new yrok`, `antioch`, `koln`, `st johns`,
+  `ndjamena`, `sao paulo` all find the right place first; Python took 35
+  to 150 ms a query, so Delphi should be a few ms.
+- `lib/GDEMMarkers` (new): `TMarkerList`, `markers.json` (Neon records,
+  format 1, atomic write) in the settings folder; `CleanName`.
+- `GDEMWorldMap`: `ZoomToArea` (AREA_FILL 0.85, clamped to
+  Min/MaxScale), `CentreOn`, `ShowHighlight`/`ClearHighlight` (yellow
+  rings), `ShowPlaces` (labels from Natural Earth's `min_zoom` against
+  log2(px per degree x 360 / 256), most important first, greedy overlap
+  test, at most 250, widths cached in `FLabelWidths`), `Markers`,
+  `ShowMarkers`, `MarkersChanged`, `OnMarkerClick` (Ctrl or Cmd + left
+  click that does not move; no selection is started). Labels and markers
+  are drawn last. Estimated labels over Europe in a 1400 x 800 view: 16
+  at 3 px/degree, 100 at 30, 143 at 60.
+- `MainForm`: `edtSearch` at the right of `layTop` (`lblSelection`
+  narrowed), `FSearchList` (a `TListBox` created in code over the map,
+  `CanFocus` False so clicking it keeps the edit focused, hidden on a map
+  mouse-down through `FMap.OnMouseDown`), keys in `edtSearchKeyDown`,
+  `GoToHit`; View > Find... (Ctrl+F), Show Towns and Cities, Show Markers;
+  new Markers menu (Add Marker at Map Centre..., Edit Markers...);
+  `AddMarkerAt` asks with `TDialogService.InputQuery`.
+- `ui/MarkersForm` (new): list with Go To, Rename..., Delete... (asks),
+  Close; saves at each change; reports back through `TMarkersClosedProc`.
+- `tools/pasdoc_check.py` now looks for `@abstract` in the whole unit
+  comment (the map's had grown past the 4,000 characters it read).
+
+Things to check when built: that `TControl.OnMouseDown` can be assigned
+from `MainForm` (it should be public), that Ctrl + click on macOS is not
+turned into a right click by the system (Cmd + click is the documented
+way there), the drop-down's position over the map on all three
+platforms, and the label drawing cost on the CPU canvas (`OnPaintStats`).
 
 ## NASA: what was found by testing
 
@@ -572,6 +692,11 @@ reasons are here.
   starting value it called unused (H2077) produced "might not have been
   initialized" (W1036). The fix in `DownloadFile` sets the value at the
   top of the loop and lets one path rely on it.
+- `Exit([A])` for a dynamic array result does not compile (E2001
+  "Ordinal type required"): the brackets are read as a set. Assign
+  `Result := [A]` and then `Exit`.
+- A `}` inside a `{ ... }` comment ends it, so JSON examples (or
+  `{$IFDEF}`) cannot go in PasDoc comments; describe the layout in words.
 - On macOS, `NSProcessInfo` `beginActivityWithOptions:reason:` with
   `NSActivityUserInitiated` prevents idle sleep and App Nap; the returned
   activity is retained until `endActivity:`.

@@ -3,7 +3,7 @@ object frmSettings: TfrmSettings
   Top = 0
   BorderIcons = [biSystemMenu]
   Caption = 'Settings'
-  ClientHeight = 600
+  ClientHeight = 676
   ClientWidth = 560
   Position = MainFormCenter
   FormFactor.Width = 320
@@ -77,7 +77,7 @@ object frmSettings: TfrmSettings
     Margins.Right = 12.000000000000000000
     Margins.Bottom = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 552.000000000000000000
+    Position.Y = 628.000000000000000000
     Size.Width = 536.000000000000000000
     Size.Height = 36.000000000000000000
     Size.PlatformDefault = False
@@ -114,7 +114,7 @@ object frmSettings: TfrmSettings
     Margins.Left = 12.000000000000000000
     Margins.Right = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 532.000000000000000000
+    Position.Y = 608.000000000000000000
     Size.Width = 536.000000000000000000
     Size.Height = 20.000000000000000000
     Size.PlatformDefault = False
@@ -131,7 +131,7 @@ object frmSettings: TfrmSettings
     Position.X = 12.000000000000000000
     Position.Y = 372.000000000000000000
     Size.Width = 536.000000000000000000
-    Size.Height = 160.000000000000000000
+    Size.Height = 236.000000000000000000
     Size.PlatformDefault = False
     TabOrder = 2
     object lblDataFolder: TLabel
@@ -244,6 +244,45 @@ object frmSettings: TfrmSettings
       TextSettings.Font.Size = 11.000000000000000000
       TextSettings.Trimming = Character
       Text = 'Fast suits fast lines; eases off if NASA objects'
+    end
+    object lblMapTiles: TLabel
+      StyledSettings = [Family, Size, FontColor]
+      Position.Y = 164.000000000000000000
+      Size.Width = 536.000000000000000000
+      Size.Height = 20.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'High-resolution map tiles (leave empty to find them automatically)'
+    end
+    object edtMapTiles: TEdit
+      Touch.InteractiveGestures = [LongTap, DoubleTap]
+      Anchors = [akLeft, akTop, akRight]
+      TabOrder = 5
+      Position.Y = 188.000000000000000000
+      Size.Width = 444.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      OnChangeTracking = MapTilesChangeTracking
+    end
+    object btnBrowseMapTiles: TButton
+      Anchors = [akTop, akRight]
+      Position.X = 452.000000000000000000
+      Position.Y = 187.000000000000000000
+      Size.Width = 84.000000000000000000
+      Size.Height = 26.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 6
+      Text = 'Browse...'
+      OnClick = btnBrowseMapTilesClick
+    end
+    object lblMapTilesFound: TLabel
+      Anchors = [akLeft, akTop, akRight]
+      StyledSettings = [Family, Style, FontColor]
+      Position.Y = 216.000000000000000000
+      Size.Width = 536.000000000000000000
+      Size.Height = 20.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.Font.Size = 11.000000000000000000
+      TextSettings.Trimming = Character
     end
   end
   object layTheme: TLayout

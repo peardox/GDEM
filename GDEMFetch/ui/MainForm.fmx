@@ -53,6 +53,14 @@ object frmMain: TfrmMain
     end
     object mnuView: TMenuItem
       Text = 'View'
+      object mnuFind: TMenuItem
+        ShortCut = 16454
+        Text = 'Find...'
+        OnClick = mnuFindClick
+      end
+      object mnuFindSep: TMenuItem
+        Text = '-'
+      end
       object mnuZoomIn: TMenuItem
         Text = 'Zoom In'
         OnClick = mnuZoomInClick
@@ -96,6 +104,24 @@ object frmMain: TfrmMain
         Text = 'Show Coastlines'
         OnClick = mnuShowCoastlinesClick
       end
+      object mnuShowMapTiles: TMenuItem
+        AutoCheck = True
+        IsChecked = True
+        Text = 'High-Resolution Map'
+        OnClick = mnuShowMapTilesClick
+      end
+      object mnuShowPlaces: TMenuItem
+        AutoCheck = True
+        IsChecked = True
+        Text = 'Show Towns and Cities'
+        OnClick = mnuShowPlacesClick
+      end
+      object mnuShowMarkers: TMenuItem
+        AutoCheck = True
+        IsChecked = True
+        Text = 'Show Markers'
+        OnClick = mnuShowMarkersClick
+      end
       object mnuLogSep: TMenuItem
         Text = '-'
       end
@@ -106,6 +132,17 @@ object frmMain: TfrmMain
       object mnuClearLog: TMenuItem
         Text = 'Clear Log'
         OnClick = mnuClearLogClick
+      end
+    end
+    object mnuMarkers: TMenuItem
+      Text = 'Markers'
+      object mnuAddMarker: TMenuItem
+        Text = 'Add Marker at Map Centre...'
+        OnClick = mnuAddMarkerClick
+      end
+      object mnuEditMarkers: TMenuItem
+        Text = 'Edit Markers...'
+        OnClick = mnuEditMarkersClick
       end
     end
   end
@@ -146,11 +183,24 @@ object frmMain: TfrmMain
       Anchors = [akLeft, akTop, akRight]
       Position.X = 228.000000000000000000
       Position.Y = 9.000000000000000000
-      Size.Width = 864.000000000000000000
+      Size.Width = 584.000000000000000000
       Size.Height = 22.000000000000000000
       Size.PlatformDefault = False
       TextSettings.Trimming = Character
       Text = 'Nothing selected'
+    end
+    object edtSearch: TEdit
+      Touch.InteractiveGestures = [LongTap, DoubleTap]
+      Anchors = [akTop, akRight]
+      TabOrder = 2
+      Position.X = 820.000000000000000000
+      Position.Y = 8.000000000000000000
+      Size.Width = 272.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+      TextPrompt = 'Find a country, place or marker'
+      OnChangeTracking = edtSearchChangeTracking
+      OnKeyDown = edtSearchKeyDown
     end
   end
   object layStatus: TLayout

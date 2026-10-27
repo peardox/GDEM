@@ -204,7 +204,8 @@ var
   LFound: Integer;
   LData: string;
 begin
-  Result := False;
+  // Every way out sets the result: the Exit, the end of the try, or the
+  // except
   LRegistry := TRegistry.Create(KEY_READ or KEY_WRITE);
   try
     try

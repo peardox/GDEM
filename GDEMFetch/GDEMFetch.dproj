@@ -74,7 +74,7 @@
         <DCC_F>false</DCC_F>
         <DCC_K>false</DCC_K>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
-        <DCC_UnitSearchPath>..\delphi-neon\Source;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>..\common;..\delphi-neon\Source;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <PreBuildEvent><![CDATA[call "$(PROJECTDIR)\..\styles\buildstyles.cmd" "$(BDS)"
 $(PreBuildEvent)]]></PreBuildEvent>
         <PreBuildEventIgnoreExitCode>False</PreBuildEventIgnoreExitCode>
@@ -260,6 +260,15 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <DCCReference Include="lib\GDEMVectors.pas"/>
         <DCCReference Include="ui\GDEMDrawing.pas"/>
         <DCCReference Include="lib\GDEMGpuPreference.pas"/>
+        <DCCReference Include="lib\GDEMMapTiles.pas"/>
+        <DCCReference Include="..\common\GDEMTileSet.pas"/>
+        <DCCReference Include="..\common\GDEMTileCache.pas"/>
+        <DCCReference Include="lib\GDEMMarkers.pas"/>
+        <DCCReference Include="lib\GDEMSearch.pas"/>
+        <DCCReference Include="ui\MarkersForm.pas">
+            <Form>frmMarkers</Form>
+            <FormType>fmx</FormType>
+        </DCCReference>
         <None Include="..\styles\GDEMThemes.rc"/>
         <None Include="..\styles\buildstyles.cmd"/>
         <RcItem Include="..\maps\world_1080x540.jpg">

@@ -1,15 +1,17 @@
-"""Builds maps/world_vectors.bin, the country borders, coastlines and
-country outlines GDEMFetch draws on its world map, from Natural Earth.
+"""Builds maps/world_vectors.bin, the country borders, coastlines,
+country outlines and towns and cities GDEMFetch draws on its world map,
+from Natural Earth.
 
 Natural Earth (https://www.naturalearthdata.com) is in the public domain.
 Get its GeoJSON files from https://github.com/nvkelso/natural-earth-vector
-(the geojson folder); only these five are needed:
+(the geojson folder); only these six are needed:
 
     ne_110m_admin_0_boundary_lines_land.geojson
     ne_50m_admin_0_boundary_lines_land.geojson
     ne_110m_coastline.geojson
     ne_50m_coastline.geojson
     ne_50m_admin_0_countries.geojson
+    ne_10m_populated_places_simple.geojson
 
 Usage, from the repository root:
 
@@ -19,7 +21,7 @@ The output is read by GDEMVectors.pas, which documents the same format.
 All numbers are little-endian.
 
     'GDVC'                magic
-    UInt16 version        1
+    UInt16 version        2
     UInt16 layer count
     for each layer:
       UInt8  kind         1 = lines, 2 = areas (closed rings)
@@ -35,6 +37,21 @@ All numbers are little-endian.
             Int16 dlon, Int16 dlat: the change from the previous point; or,
             if either change does not fit in -32767..32767, Int16 -32768
             followed by Int32 lon, Int32 lat of the point itself
+    UInt32 place count    (version 2 on)
+    for each place, most important first (smallest min zoom, then
+    largest population):
+      UInt16 name length, then the name in UTF-8
+      UInt16 key length, then the name in plain ASCII for searching, or
+             nothing when the name is plain ASCII already
+      UInt16 region length, then the region (state, province) in UTF-8
+      UInt16 length, then other names in UTF-8, separated by '|', such as
+             'Antioch' for Antakya (often empty)
+      UInt16 country: its feature's index in countries50, or 65535
+      Int32 lon, Int32 lat, in thousandths of a degree
+      UInt8  min zoom x 10: Natural Earth's web map zoom level (256-pixel
+             tiles) from which the place should be labelled
+      UInt8  flags: 1 = national capital
+      UInt32 population
 
 Points are rounded to a thousandth of a degree (about 110 m), far finer
 than the 1:50m data itself, and repeated points left by the rounding are
@@ -44,6 +61,7 @@ left out.
 import json
 import struct
 import sys
+import unicodedata
 from pathlib import Path
 
 UNITS = 1000          # points per degree
@@ -57,6 +75,96 @@ LAYERS = [
     ('coast50', 1, 'ne_50m_coastline.geojson', False),
     ('countries50', 2, 'ne_50m_admin_0_countries.geojson', True),
 ]
+
+PLACES_FILE = 'ne_10m_populated_places_simple.geojson'
+COUNTRIES_LAYER = 'countries50'
+NO_COUNTRY = 0xFFFF
+FLAG_CAPITAL = 1
+
+
+def clean(text):
+    """Drops invisible marks (Natural Earth has a few left-to-right marks)
+    and runs of spaces ('St.  Paul')."""
+    if not text:
+        return ''
+    text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Cf')
+    return ' '.join(text.split())
+
+
+def other_names(properties, name):
+    """Natural Earth's alternative names for a place: namealt (several
+    separated by commas) and namepar, without repeats or the name itself."""
+    result = []
+    for field in ('namealt', 'namepar'):
+        for alias in (properties.get(field) or '').split(','):
+            alias = clean(alias)
+            if alias and alias.lower() != name.lower() and \
+                    alias.lower() not in (a.lower() for a in result):
+                result.append(alias)
+    return '|'.join(result)
+
+
+def ascii_key(name, ascii_name):
+    """The name in plain ASCII, for searching: Natural Earth's own ASCII
+    name when it is ASCII, otherwise the name with its accents removed."""
+    if name.isascii():
+        return ''
+    if ascii_name and ascii_name.isascii():
+        return ascii_name
+    decomposed = unicodedata.normalize('NFKD', name)
+    return ''.join(ch for ch in decomposed if ch.isascii())
+
+
+def utf8_field(text):
+    encoded = text.encode('utf-8')
+    return struct.pack('<H', len(encoded)) + encoded
+
+
+def encode_places(source, countries):
+    """The places section: every populated place, linked to its country by
+    the country's ADM0_A3 code, or failing that its name."""
+    data = json.loads((source / PLACES_FILE).read_text(encoding='utf-8'))
+    by_code = {}
+    by_name = {}
+    for index, properties in enumerate(countries):
+        by_code.setdefault(properties.get('ADM0_A3'), index)
+        by_name.setdefault(properties.get('ADMIN'), index)
+    places = []
+    unlinked = 0
+    for feature in data['features']:
+        properties = feature['properties']
+        name = clean(properties['name'])
+        if not name:
+            continue
+        lon, lat = feature['geometry']['coordinates'][:2]
+        country = by_code.get(properties.get('adm0_a3'),
+                              by_name.get(properties.get('adm0name'), NO_COUNTRY))
+        if country == NO_COUNTRY:
+            unlinked += 1
+        places.append({
+            'name': name,
+            'key': ascii_key(name, clean(properties.get('nameascii'))),
+            'region': clean(properties.get('adm1name')),
+            'aliases': other_names(properties, name),
+            'country': country,
+            'lon': round(lon * UNITS),
+            'lat': round(lat * UNITS),
+            'zoom': round(float(properties['min_zoom']) * 10),
+            'flags': FLAG_CAPITAL if properties.get('adm0cap') else 0,
+            'population': max(0, int(properties.get('pop_max') or 0)),
+        })
+    places.sort(key=lambda p: (p['zoom'], -p['population'], p['name']))
+    out = bytearray(struct.pack('<I', len(places)))
+    for place in places:
+        out += utf8_field(place['name'])
+        out += utf8_field(place['key'])
+        out += utf8_field(place['region'])
+        out += utf8_field(place['aliases'])
+        out += struct.pack('<HiiBBI', place['country'], place['lon'], place['lat'],
+                           place['zoom'], place['flags'], place['population'])
+    print(f'places: {len(places)}, {unlinked} not linked to a country, '
+          f'{sum(1 for p in places if p["aliases"])} with other names')
+    return out
 
 
 def parts_of(geometry):
@@ -98,7 +206,8 @@ def encode_part(points):
 
 
 def build(source, target):
-    out = bytearray(b'GDVC' + struct.pack('<HH', 1, len(LAYERS)))
+    out = bytearray(b'GDVC' + struct.pack('<HH', 2, len(LAYERS)))
+    countries = []
     for name, kind, file_name, named in LAYERS:
         data = json.loads((source / file_name).read_text(encoding='utf-8'))
         features = []
@@ -110,6 +219,8 @@ def build(source, target):
                 continue
             label = feature['properties']['ADMIN'] if named else ''
             features.append((label, parts))
+            if name == COUNTRIES_LAYER:
+                countries.append(feature['properties'])
         if kind == 1:
             # Lines need no names, so one feature holds them all
             features = [('', [p for _, parts in features for p in parts])]
@@ -125,6 +236,7 @@ def build(source, target):
                 points += len(part)
         print(f'{name}: {len(features)} feature(s), '
               f'{sum(len(p) for _, p in features)} part(s), {points} point(s)')
+    out += encode_places(source, countries)
     target.write_bytes(out)
     print(f'wrote {target} ({len(out):,} bytes)')
 

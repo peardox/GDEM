@@ -14,6 +14,8 @@ world map) into a tile set: square tiles at several levels of detail,
 described by a `tileset.json`, for GDEMFetch to draw as you zoom. See
 [TileMaker](#tilemaker).
 
+![GDEMFetch World View](img/ScreenShot01.png)
+
 ## About the data
 
 ASTER GDEM V3 is published as one-degree tiles, 3601 x 3601 pixels each,
@@ -110,6 +112,10 @@ If you already cloned without submodules, run
 | Show or hide tiles that have data (cyan) | View > Show Available Tiles |
 | Show or hide downloaded tiles (green) | View > Show Downloaded Tiles |
 | Show or hide country borders (pink) and coastlines (white) | View > Show Country Borders, View > Show Coastlines |
+| Switch between the high-resolution map and the plain one | View > High-Resolution Map; see [The high-resolution map](#the-high-resolution-map) |
+| Find a country, town, city or marker | Type in the box at the right of the toolbar (View > Find..., Ctrl+F); see [Finding places](#finding-places) |
+| Add a marker, such as Home or Work | Ctrl + click the map (Cmd + click on a Mac), or Markers > Add Marker at Map Centre..., and give it a name; see [Markers](#markers) |
+| Show or hide town and city names, and markers | View > Show Towns and Cities, View > Show Markers |
 
 The status bar shows the position and tile under the pointer, whether
 that tile has data, and the country it is in. Progress messages and errors appear in the log on the
@@ -127,16 +133,21 @@ otherwise use showed only the first letter of each menu and item.
 
 | Menu | Item | Does |
 |------|------|------|
-| File | Settings... | Bearer token, data folder, how much of the drive to keep free, files copied at once when importing, download speed, theme, drawing (GPU or CPU), and on Windows which graphics processor to use |
+| File | Settings... | Bearer token, data folder, how much of the drive to keep free, files copied at once when importing, download speed, the high-resolution map's tile set, theme, drawing (GPU or CPU), and on Windows which graphics processor to use |
 | File | Refresh Tile Index | Rebuilds the list of tiles that exist, from CMR |
 | Data | Import Existing Tiles... | Copies tiles you already have, from any folder, into the data folder. The originals are not changed. |
 | Data | Move Existing Files... | The same, but deletes each original once it is safely in the data folder; see [Moving instead of copying](#moving-instead-of-copying) |
 | Data | Rescan Data Folder | Rebuilds the downloaded-tiles bitmap from the files, files any misplaced downloads into place, and removes leftovers and empty folders |
 | Data | Delete Selected Downloads... | Deletes the downloaded tiles inside the map selection |
+| View | Find... (Ctrl+F) | Puts the cursor in the search box; see [Finding places](#finding-places) |
 | View | Zoom In / Zoom Out / Whole World / Zoom to Selection | Map view |
 | View | Show Available Tiles / Show Downloaded Tiles | The cyan and green tile tints |
 | View | Show Country Borders / Show Coastlines | The borders and coastlines drawn over the map |
+| View | High-Resolution Map | Draws the tile set instead of the plain map (greyed out when there is no tile set) |
+| View | Show Towns and Cities / Show Markers | The place names and the markers drawn on the map |
 | View | Copy Log / Clear Log | Copy the Debug tab's log to the clipboard, or empty it |
+| Markers | Add Marker at Map Centre... | Asks for a name and puts a marker in the middle of the map |
+| Markers | Edit Markers... | Lists the markers, to go to, rename or delete them |
 
 **Fetch selection** downloads only tiles that have data and are not yet
 downloaded. It starts straight away, without asking: the progress dialog
@@ -252,13 +263,108 @@ domain, so no permission or credit is needed (credit is given anyway).
   outline's crossings of each row). An island smaller than a tile still
   gives its tile.
 
+Towns and cities come from Natural Earth's 1:10m populated places:
+7,342 of them, each with its region (state or province), country,
+population and, for 634, other names it goes by (Antioch for Antakya,
+Koln for Cologne). They are labelled on the map (View > Show Towns and
+Cities), more of them the further in you zoom: each is shown from the zoom
+level Natural Earth suggests for it, the most important first, and a
+label that would overlap one already drawn is left out. Capitals are
+labelled in yellow. Zoomed right out about 25 are named; over Europe at
+30 pixels a degree, about 100.
+
 The data is linked into the program as the `WORLDVECTORS` resource, built
 from `maps/world_vectors.bin`, so nothing is deployed. That file is made
 from Natural Earth's GeoJSON files by `tools/build_vectors.py`; its
 comments say which files it needs and how to run it. It holds five layers
 (1:110m and 1:50m borders, 1:110m and 1:50m coastlines, and 1:50m country
-outlines with names), about 190,000 points in 790 KB. `GDEMVectors.pas`
-documents the format.
+outlines with names), about 190,000 points, and the towns and cities, in
+1.1 MB. `GDEMVectors.pas` documents the format (version 2; version 1, from
+before the towns and cities, still reads).
+
+### Finding places
+
+The box at the right of the toolbar finds countries, towns and cities, and
+your [markers](#markers). Matches are listed under it as you type, best
+first; Up and Down move through them, Enter or a click goes to one, and
+Escape closes the list.
+
+- **A country** is zoomed to fit the window with a margin round it, as
+  far as the zoom allows (Vatican City and Jersey are too small to fill
+  it, so they are centred at the closest zoom). Far-flung parts are left
+  out: France is shown without French Guiana, the United States with
+  Alaska but without Hawaii. Countries across the 180 degree meridian,
+  such as Russia and Fiji, are shown whole.
+- **A town, city or marker** is moved to the middle of the map at the
+  zoom you are at, and ringed in yellow. Escape with the list closed, or
+  emptying the box, removes the ring.
+- **Spelling mistakes** are forgiven: `lodnon`, `edinbrugh`, `bejing` and
+  `kuala lumpar` all find the right place. Accents and punctuation do not
+  matter (`sao paulo`, `zurich`, `st johns`, `ndjamena`), and a place is
+  also found by its other names. Up to 3 letters must be typed exactly;
+  from 4 letters one mistake is allowed, from 7 two and from 11 three. A
+  mistake is a wrong, missing, extra or swapped letter.
+- **Order:** the whole name, then the start of the name, then the start
+  of a later word (`york` finds New York), then anywhere in the name, then
+  names with mistakes. Within each, markers come before countries, and
+  countries before towns and cities, which are in order of importance.
+  Places with the same name are told apart by region and country, such as
+  `London, Ontario, Canada`.
+
+The search runs on every letter typed, over about 8,200 names, in a few
+milliseconds; see `GDEMSearch.pas`.
+
+### Markers
+
+Markers are your own named places, such as Home or Work. **Ctrl + click**
+the map (**Cmd + click** on a Mac), or use **Markers > Add Marker at Map
+Centre...**, and give it a name. Markers are drawn in orange with their
+names over everything else, and the search box finds them.
+**Markers > Edit Markers...** lists them, to go to (double-click, or Go
+To), rename or delete them. They are kept in `markers.json` in the
+settings folder (see [Where files are kept](#where-files-are-kept)),
+saved as soon as they change.
+
+### The high-resolution map
+
+The map built into GDEMFetch is 1080 x 540 pixels, 3 per degree, which
+turns to blur once you zoom in. Where a [tile set](#tile-sets) made by
+[TileMaker](#tilemaker) can be found, GDEMFetch draws that over it
+instead: the repository's `maps/tiles` is the 10800 x 5400 world map,
+30 pixels per degree, in four levels.
+
+- **Which level:** the smallest one with at least as many pixels per
+  degree as the screen shows, counting the display's own pixels (so a
+  scaled or Retina display gets the sharper level sooner). Zoomed right
+  out that is the 1350 x 675 level, and from 30 screen pixels a degree
+  the full 10800 x 5400.
+- **Past full detail:** the map zooms on to 400 screen pixels a degree,
+  over 13 times the full image's own detail, so tiles and borders can be
+  picked out accurately. Enlarged tiles are drawn with a smooth cubic
+  filter rather than as blocks; reduced ones with mipmaps, so they do
+  not shimmer.
+- **Loading:** tiles are read from disk only when they come into view, at
+  most 6 a frame so panning stays smooth, and the rest over the next
+  frames. Until a tile is ready, the matching part of a coarser tile is
+  drawn enlarged in its place. The smallest level (18 tiles) is read at
+  start-up and kept, so there is always something to draw. Up to 400
+  other tiles (about 80 MB) are kept in memory, the least recently used
+  going first.
+- **Finding the tile set:** **File > Settings > High-resolution map
+  tiles** names its folder (the one holding `tileset.json`). Left empty,
+  as it is by default, GDEMFetch looks for a `tiles` folder beside the
+  program, then (on macOS) in the app's `Resources` folder, then for
+  `maps/tiles` beside the program and in each folder above it, up to six
+  levels. That last finds the repository's own tile set when GDEMFetch
+  runs from its build folder, such as `GDEMFetch/Win64/Debug`. The line
+  under the box says which tile set will be used.
+- The Debug tab says at start-up which tile set was loaded, such as
+  `Map: tile set "8081_earthmap10k", 10800 x 5400 in 4 levels of
+  225-pixel tiles, from ...`, or that none was found and the plain map is
+  drawn. Without a tile set, or with **View > High-Resolution Map**
+  unticked, GDEMFetch draws the 1080 x 540 map as before.
+- Tiles are drawn only when drawing with Skia, which GDEMFetch always
+  does.
 
 ### Drawing
 
@@ -371,6 +477,14 @@ Deployment entries for them when Skia was enabled for the project; leave
 those ticked. On macOS Skia is linked into the program. The default
 Deployment Manager entries are all that is needed.
 
+The high-resolution map's tile set (`maps/tiles`, 1530 files) is not
+deployed: on Windows GDEMFetch finds it in the repository from its build
+folder (see [The high-resolution map](#the-high-resolution-map)). On
+macOS and Linux, where PAServer runs the program from its own folder,
+either choose a copy of the tile set on that machine in Settings or put
+one beside the program as a folder named `tiles` (on macOS, in the app's
+`Contents/Resources`). Without one, the plain map is drawn.
+
 The IDE adds files that are part of the project, such as the map image,
 `maps/world_vectors.bin` and `styles/buildstyles.cmd`, to the deployment
 on its own. These are disabled in `GDEMFetch.dproj` for every platform:
@@ -415,6 +529,7 @@ Removable drives are normally mounted under `/media/<user>/` or
 | Settings (`settings.json`, holds the bearer token) | Windows: `%APPDATA%\GDEM`<br>macOS: `~/Library/Application Support/GDEM`<br>Linux: `$XDG_CONFIG_HOME/GDEM` or `~/.config/GDEM`<br>Android and iOS: `GDEM` in the app's documents folder |
 | Tile index (`tileindex.bin`) | Same folder as the settings |
 | Download reports (`Reports/download-*.log`) | Same folder as the settings |
+| Markers (`markers.json`) | Same folder as the settings |
 | Windows' graphics processor choice | Windows only: the registry value named after the program's path in `HKEY_CURRENT_USER\Software\Microsoft\DirectX\UserGpuPreferences`; see [Drawing](#drawing) |
 | Downloaded tiles | The **data folder**, chosen in File > Settings. Default: `ASTGTM` in your documents folder. |
 
@@ -662,7 +777,7 @@ the size of the one before.
 | `TileMaker/` | The TileMaker application, laid out the same way (see [TileMaker units](#tilemaker-units)) |
 | `common/` | Units shared by the programs: no FMX, and nothing from any program's folders (see [Common units](#common-units)) |
 | `styles/` | FMX styles for the themes, with the resource script and the pre-build script that builds them; see [Themes](#themes) |
-| `maps/` | World map images and vectors. `world_1080x540.jpg` and `world_vectors.bin` (borders and coastlines) are linked into GDEMFetch as resources. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository; `maps/tiles/` is the tile set TileMaker made from it (225-pixel JPEG tiles, four levels, 1530 tiles, 12 MB), which is. |
+| `maps/` | World map images and vectors. `world_1080x540.jpg` and `world_vectors.bin` (borders, coastlines, countries, and towns and cities) are linked into GDEMFetch as resources. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository; `maps/tiles/` is the tile set TileMaker made from it (225-pixel JPEG tiles, four levels, 1530 tiles, 12 MB), which is. |
 | `delphi-neon/` | Neon JSON library (git submodule) |
 | `tools/pasdoc_check.py` | Checks the units of `GDEMFetch/`, `TileMaker/` and `common/` follow the PasDoc and layout rules; see [Notes for Claude](#notes-for-claude) |
 | `tools/build_vectors.py` | Builds `maps/world_vectors.bin` from Natural Earth; see [Borders and coastlines](#borders-and-coastlines) |
@@ -694,12 +809,15 @@ it:
 | `GDEMDownloadBatch` | `TDownloadBatch`, a whole batch of downloads: lookup, parallel workers, retries and summary, reporting through events |
 | `GDEMReport` | `TDownloadReport`, the report file for each batch of downloads; `HideURLQueries` |
 | `GDEMStore` | The data folder: block layout, downloaded-tiles bitmap, importing, rescanning, moving, deleting, free space; `FormatByteSize` and `FormatDuration` |
-| `GDEMVectors` | `TWorldVectors`: country borders, coastlines and country names |
+| `GDEMVectors` | `TWorldVectors`: country borders, coastlines and country names, country extents for zooming, and towns and cities (`TGeoPlace`) |
+| `GDEMSearch` | `TPlaceSearch`: finds countries, towns and cities and markers by name, forgiving spelling mistakes |
+| `GDEMMarkers` | `TMarkerList`: the user's markers, kept in `markers.json` with Neon |
 | `GDEMSettings` | Loads and saves `settings.json` with Neon |
 | `GDEMCancel` | `TCancelToken`, shared by the Cancel button and background jobs |
 | `GDEMAwake` | `TKeepAwake`, which keeps the computer from sleeping while a job runs |
 | `GDEMBrowser` | Opens web links in the default browser on each platform |
 | `GDEMGpuPreference` | Reads and sets Windows' graphics processor preference for the program (ported from Sprite3D's `GpuPreference`); does nothing on other platforms |
+| `GDEMMapTiles` | `FindMapTiles`: finds the tile set for the high-resolution map, from Settings or beside the program |
 
 **ui/**
 
@@ -708,7 +826,8 @@ it:
 | `MainForm` | Main window: toolbar and menus over three tabs (Map, 3D, Debug), with progress and status bars; runs the jobs and shows their progress |
 | `SettingsForm` | Modal settings dialog |
 | `ProgressForm` | Modal progress dialog shown while data is downloaded or imported |
-| `GDEMWorldMap` | `TWorldMapView`, the zoomable map with tile selection, borders and coastlines |
+| `MarkersForm` | Modal dialog listing the markers, to go to, rename or delete them |
+| `GDEMWorldMap` | `TWorldMapView`, the zoomable map with tile selection, borders and coastlines, the high-resolution map's tiles (`MapTiles`), town and city names, markers, and `ZoomToArea` and `CentreOn` for the search |
 | `GDEMDrawing` | `ConfigureDrawing`, called from the `.dpr` before `Application.Initialize`, which tells Skia to draw on the GPU or the CPU and applies the Windows graphics processor choice |
 | `GDEMThemes` | The themes, and `ApplyTheme` |
 | `GDEMStyles` | Switches FMX styles at run time (ported from Sprite3D) |
@@ -733,6 +852,7 @@ reports any that do. Each program's `.dpr` lists them with
 | `GDEMFactors` | Prime factors, greatest common divisor, divisors, and planning levels of detail and tile sizes from an image's size |
 | `GDEMResample` | `TRGBA8Image`, and `ReduceImage`: shrinking by a whole factor with Lanczos-3 in linear light |
 | `GDEMTileSet` | `TTileSet`, a tile set's description, read and written as `tileset.json` with Neon |
+| `GDEMTileCache` | `TTileCache`: a tile set's tiles, decoded with Skia when first needed and kept, the least recently used dropped first; a level can be kept for good (used by GDEMFetch) |
 
 The world map image `maps/world_1080x540.jpg` is linked into GDEMFetch as
 the `WORLDMAP` RCDATA resource, and `maps/world_vectors.bin` as
@@ -747,12 +867,9 @@ the left and latitude 90 at the top.
   <https://github.com/peardox/volatile> can be reused. That project uses a
   Windows-only libtiff binding, so only its logic carries over, not the
   binding.
-- **High-resolution map:** `maps/8081_earthmap10k.jpg`, a 10800 x 5400
-  world map (30 pixels per degree, so each GDEM tile is 30 x 30 pixels),
-  cut into a tile set by [TileMaker](#tilemaker), for GDEMFetch to load
-  as the user zooms in, and to zoom past level 0's own detail for
-  accurate selection. The image is gitignored because of its size, so
-  GDEMFetch must cope with no tile set and keep its 1080 x 540 map.
+- **Finer borders:** Natural Earth's 1:10m borders and coastlines would
+  suit the [high-resolution map](#the-high-resolution-map) when zoomed in;
+  they can be added as more layers in `tools/build_vectors.py`.
 
 ## Notes for Claude
 

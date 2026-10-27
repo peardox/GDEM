@@ -1,5 +1,5 @@
-{ @abstract(Country borders, coastlines and country outlines for the world
-  map.)
+{ @abstract(Country borders, coastlines, country outlines and towns and
+  cities for the world map.)
 
   The data comes from Natural Earth (@url(https://www.naturalearthdata.com)),
   which is in the public domain, at two levels of detail: 1:110m for the
@@ -18,11 +18,14 @@
     @item(@code(countries50): each country's outline, as closed rings, with
       its name, used to name the country under the mouse pointer.)
   )
+  and, from version 2, Natural Earth's 1:10m populated places (towns and
+  cities, about 7,300), each with its region, country and population, for
+  labelling the map and for searching (see @link(TGeoPlace)).
 
   File format, all numbers little-endian:
   @preformatted(
 'GDVC'                magic
-UInt16 version        1
+UInt16 version        1 or 2
 UInt16 layer count
 for each layer:
   UInt8  kind         1 = lines, 2 = areas (closed rings)
@@ -37,6 +40,18 @@ for each layer:
       for each further point:
         Int16 dlon, Int16 dlat, the change from the previous point; or
         Int16 -32768 then Int32 lon, Int32 lat of the point itself
+UInt32 place count    (version 2 only)
+for each place, most important first:
+  UInt16 length, name in UTF-8
+  UInt16 length, name in plain ASCII for searching (empty when the name
+         is plain ASCII already)
+  UInt16 length, region in UTF-8 (may be empty)
+  UInt16 length, other names in UTF-8, separated by '|' (often empty)
+  UInt16 country: index in countries50, or 65535 for none
+  Int32 lon, Int32 lat, in thousandths of a degree
+  UInt8  min zoom x 10 (see TGeoPlace.MinZoom)
+  UInt8  flags: 1 = national capital
+  UInt32 population
   )
 
   Natural Earth splits everything at the 180 degree meridian, so no line or
@@ -59,8 +74,24 @@ const
   { First four bytes of the file. }
   VECTORS_MAGIC: array[0..3] of AnsiChar = ('G', 'D', 'V', 'C');
 
-  { The file version this unit reads. }
-  VECTORS_VERSION = 1;
+  { The newest file version this unit reads; it reads version 1, which has
+    no places, too. }
+  VECTORS_VERSION = 2;
+
+  { How far, as a share of the main part's larger side, a small part of a
+    country may lie from the main part (or a large part) and still be
+    counted in its extent (see @link(TGeoLayer.FeatureExtent)). }
+  EXTENT_REACH = 0.25;
+
+  { The least such distance, in degrees, so small island countries take in
+    their neighbouring islands. }
+  EXTENT_MIN_REACH = 3.0;
+
+  { A large part may lie this many times further away. }
+  EXTENT_FAR_FACTOR = 4.0;
+
+  { A part at least this share of the main part's area is a large part. }
+  EXTENT_LARGE_PART = 0.25;
 
   { Points are stored in these units per degree. }
   VECTORS_UNITS_PER_DEGREE = 1000;
@@ -98,6 +129,35 @@ type
     Bounds: TRectF;
   end;
 
+  { @abstract(A town or city.) }
+  TGeoPlace = record
+    { The name, such as @code(London). }
+    Name: string;
+    { The name in plain ASCII, for searching; empty when @link(Name) is
+      plain ASCII already. }
+    SearchName: string;
+    { The region it is in (state, province or county); may be empty. }
+    Region: string;
+    { Other names it goes by, such as @code(Antioch) for Antakya; often
+      empty. }
+    OtherNames: TArray<string>;
+    { Its country's index in @link(TWorldVectors.Countries), or -1 if it
+      has none in the data. }
+    Country: Integer;
+    { Latitude, in degrees. }
+    Lat: Double;
+    { Longitude, in degrees. }
+    Lon: Double;
+    { Natural Earth's suggestion for the web map zoom level (256-pixel
+      tiles, so 256 x 2^zoom pixels round the world) from which to label
+      it: about 2 for the largest capitals, up to 9 for small towns. }
+    MinZoom: Single;
+    { @true for a national capital. }
+    Capital: Boolean;
+    { Population, from Natural Earth; 0 if not known. }
+    Population: Integer;
+  end;
+
   { @abstract(One layer of the vector data.) }
   TGeoLayer = class
   private
@@ -133,6 +193,26 @@ type
       @param(ATiles Receives the tiles; tiles already in it are kept.) }
     procedure AddFeatureTiles(AFeature: Integer; ATiles: TTileIndex);
 
+    { The area to show for a feature. It starts from the largest part (by
+      area, for rings), the main part. A large part (at least
+      @link(EXTENT_LARGE_PART) of the main part's area) joins it if it lies
+      within @link(EXTENT_FAR_FACTOR) times the reach of the main part or
+      of a large part already joined; a small part joins if it lies within
+      the reach of either. The reach is @link(EXTENT_REACH) of the main
+      part's larger side, but at least @link(EXTENT_MIN_REACH) degrees.
+      Small parts never take others in, so a chain of small islands cannot
+      lead far away. So France is shown without French Guiana, the United
+      States with Alaska but without Hawaii or the far Aleutians, and
+      Malaysia and Indonesia whole. Checked on all 242 countries.
+      Longitudes are not wrapped, so a country across the 180 degree
+      meridian (Russia, Fiji) gives a west below -180 or an east above 180,
+      and its extent is one piece.
+      @param(AFeature The feature's index in @link(Features).)
+      @returns(The extent: Left is west, Right east, Top south and Bottom
+        north, as in @link(TGeoFeature.Bounds); empty (all 0) if there is
+        no such feature.) }
+    function FeatureExtent(AFeature: Integer): TRectF;
+
     { Whether the parts are lines or rings. }
     property Kind: TGeoLayerKind read FKind;
 
@@ -160,6 +240,8 @@ type
   private
     { The layers, owned. }
     FLayers: TArray<TGeoLayer>;
+    { Backing field for @link(Places). }
+    FPlaces: TArray<TGeoPlace>;
 
     { Finds a layer by name.
       @param(AName The layer's name in the file.)
@@ -219,9 +301,25 @@ type
       @returns(The name, or an empty string if there is no such country.) }
     function CountryName(ACountry: Integer): string;
 
+    { The area to show for a country; see @link(TGeoLayer.FeatureExtent).
+      @param(ACountry The country's index in @link(Countries).)
+      @returns(The extent, or an empty rectangle if there is no such
+        country.) }
+    function CountryExtent(ACountry: Integer): TRectF;
+
+    { Names a place for showing in a list, with its region and country
+      where known, such as @code(London, Ontario, Canada).
+      @param(APlace The place's index in @link(Places).)
+      @returns(The text, or an empty string if there is no such place.) }
+    function PlaceText(APlace: Integer): string;
+
     { Describes what is loaded, for the log.
-      @returns(Such as "5 layers, 187,892 points".) }
+      @returns(Such as "5 layers, 187,892 points, 7,342 places".) }
     function Describe: string;
+
+    { The towns and cities, most important first (the first to label when
+      there is room for only some); empty for a version 1 file. }
+    property Places: TArray<TGeoPlace> read FPlaces;
   end;
 
 implementation
@@ -296,6 +394,44 @@ begin
   if ALength = 0 then
     Exit('');
   Result := AEncoding.GetString(AReader.ReadBytes(ALength));
+end;
+
+{ Reads the places section of a version 2 file.
+  @param(AReader Reader positioned at the section.)
+  @param(ACountryCount How many countries there are, to check links.)
+  @returns(The places.) }
+function ReadPlaces(AReader: TBinaryReader; ACountryCount: Integer): TArray<TGeoPlace>;
+const
+  NO_COUNTRY = $FFFF;
+  FLAG_CAPITAL = 1;
+var
+  LCount, LIndex, LCountry: Integer;
+  LOther: string;
+begin
+  LCount := AReader.ReadInt32;
+  if LCount < 0 then
+    raise EVectorError.Create('Bad place count');
+  SetLength(Result, LCount);
+  for LIndex := 0 to LCount - 1 do
+  begin
+    Result[LIndex].Name := ReadText(AReader, AReader.ReadUInt16, TEncoding.UTF8);
+    Result[LIndex].SearchName := ReadText(AReader, AReader.ReadUInt16, TEncoding.ASCII);
+    Result[LIndex].Region := ReadText(AReader, AReader.ReadUInt16, TEncoding.UTF8);
+    LOther := ReadText(AReader, AReader.ReadUInt16, TEncoding.UTF8);
+    if LOther <> '' then
+      Result[LIndex].OtherNames := LOther.Split(['|'])
+    else
+      Result[LIndex].OtherNames := nil;
+    LCountry := AReader.ReadUInt16;
+    if (LCountry = NO_COUNTRY) or (LCountry >= ACountryCount) then
+      LCountry := -1;
+    Result[LIndex].Country := LCountry;
+    Result[LIndex].Lon := AReader.ReadInt32 / VECTORS_UNITS_PER_DEGREE;
+    Result[LIndex].Lat := AReader.ReadInt32 / VECTORS_UNITS_PER_DEGREE;
+    Result[LIndex].MinZoom := AReader.ReadByte / 10;
+    Result[LIndex].Capital := (AReader.ReadByte and FLAG_CAPITAL) <> 0;
+    Result[LIndex].Population := Integer(Min(Int64(AReader.ReadUInt32), Int64(MaxInt)));
+  end;
 end;
 
 { TGeoLayer }
@@ -559,6 +695,111 @@ begin
   end;
 end;
 
+function TGeoLayer.FeatureExtent(AFeature: Integer): TRectF;
+var
+  LFeature: TGeoFeature;
+  LPart, LMain, LIndex, LCount, LCore: Integer;
+  LArea, LReach, LShift, LGap, LMainCentre, LPartCentre: Double;
+  LAreas: TArray<Double>;
+  LBounds: TArray<TRectF>;
+  LUsed, LIsCore, LLarge, LChanged: Boolean;
+  LCores: TList<Integer>;
+  LUsedParts: TArray<Boolean>;
+  LA, LB: TPointF;
+
+  { The gap between two bounds, in degrees: the larger of the east-west
+    and north-south gaps, 0 if they overlap.
+    @param(AOne One part's bounds.)
+    @param(ATwo The other's.)
+    @returns(The gap.) }
+  function GapBetween(const AOne, ATwo: TRectF): Double;
+  begin
+    Result := Max(Max(0, Max(AOne.Left - ATwo.Right, ATwo.Left - AOne.Right)),
+      Max(0, Max(AOne.Top - ATwo.Bottom, ATwo.Top - AOne.Bottom)));
+  end;
+
+begin
+  Result := TRectF.Empty;
+  if not InRange(AFeature, 0, High(FFeatures)) or (Length(FFeatures[AFeature].Parts) = 0) then
+    Exit;
+  LFeature := FFeatures[AFeature];
+  LCount := Length(LFeature.Parts);
+  SetLength(LAreas, LCount);
+  SetLength(LBounds, LCount);
+  SetLength(LUsedParts, LCount);
+
+  // Each part's size: for rings the shoelace formula in degrees, narrowed
+  // by the cosine of the latitude so a ring far north is not overrated;
+  // for lines the size of their bounds
+  LMain := 0;
+  for LPart := 0 to LCount - 1 do
+  begin
+    LArea := 0;
+    if FKind = gkAreas then
+    begin
+      for LIndex := 0 to High(LFeature.Parts[LPart].Points) do
+      begin
+        LA := LFeature.Parts[LPart].Points[LIndex];
+        LB := LFeature.Parts[LPart].Points[(LIndex + 1) mod Length(LFeature.Parts[LPart].Points)];
+        LArea := LArea + (LA.X * LB.Y - LB.X * LA.Y);
+      end;
+      LArea := Abs(LArea) / 2 * Cos(DegToRad((LFeature.Parts[LPart].Bounds.Top +
+        LFeature.Parts[LPart].Bounds.Bottom) / 2));
+    end
+    else
+      LArea := LFeature.Parts[LPart].Bounds.Width + LFeature.Parts[LPart].Bounds.Height;
+    LAreas[LPart] := LArea;
+    if LArea > LAreas[LMain] then
+      LMain := LPart;
+  end;
+
+  // Move each part a whole turn east or west if that brings it nearer the
+  // main part, so parts either side of the 180 degree meridian join up
+  LMainCentre := (LFeature.Parts[LMain].Bounds.Left + LFeature.Parts[LMain].Bounds.Right) / 2;
+  for LPart := 0 to LCount - 1 do
+  begin
+    LBounds[LPart] := LFeature.Parts[LPart].Bounds;
+    LPartCentre := (LBounds[LPart].Left + LBounds[LPart].Right) / 2;
+    LShift := Round((LMainCentre - LPartCentre) / 360) * 360;
+    LBounds[LPart].Offset(LShift, 0);
+  end;
+
+  LReach := Max(Max(LBounds[LMain].Width, LBounds[LMain].Height) * EXTENT_REACH,
+    EXTENT_MIN_REACH);
+  Result := LBounds[LMain];
+  LUsedParts[LMain] := True;
+  LCores := TList<Integer>.Create;
+  try
+    LCores.Add(LMain);
+    // Joining a large part can bring more parts within reach, so go round
+    // until nothing more joins
+    repeat
+      LChanged := False;
+      for LPart := 0 to LCount - 1 do
+      begin
+        if LUsedParts[LPart] then
+          Continue;
+        LGap := MaxDouble;
+        for LCore in LCores do
+          LGap := Min(LGap, GapBetween(LBounds[LPart], LBounds[LCore]));
+        LLarge := LAreas[LPart] >= EXTENT_LARGE_PART * LAreas[LMain];
+        LUsed := (LGap <= LReach) or (LLarge and (LGap <= EXTENT_FAR_FACTOR * LReach));
+        if not LUsed then
+          Continue;
+        LUsedParts[LPart] := True;
+        LChanged := True;
+        LIsCore := LLarge;
+        if LIsCore then
+          LCores.Add(LPart);
+        GrowBounds(Result, LBounds[LPart].TopLeft);
+        GrowBounds(Result, LBounds[LPart].BottomRight);
+      end;
+    until not LChanged;
+  finally
+    LCores.Free;
+  end;
+end;
+
 { TWorldVectors }
 
 destructor TWorldVectors.Destroy;
@@ -577,8 +818,11 @@ var
   LVersion, LCount, LIndex: Integer;
   LLayer: TGeoLayer;
   LLayers: TArray<TGeoLayer>;
+  LPlaces: TArray<TGeoPlace>;
+  LCountries: Integer;
 begin
   LLayers := nil;
+  LPlaces := nil;
   // The reader must not free the caller's stream
   LReader := TBinaryReader.Create(AStream, TEncoding.ASCII, False);
   try
@@ -589,13 +833,21 @@ begin
          (LMagic[3] <> Ord(VECTORS_MAGIC[3])) then
         raise EVectorError.Create('Not a GDEM vector file');
       LVersion := LReader.ReadUInt16;
-      if LVersion <> VECTORS_VERSION then
+      if (LVersion < 1) or (LVersion > VECTORS_VERSION) then
         raise EVectorError.CreateFmt('Vector file version %d is not supported', [LVersion]);
       LCount := LReader.ReadUInt16;
       for LIndex := 1 to LCount do
       begin
         LLayer := TGeoLayer.CreateFromReader(LReader);
         LLayers := LLayers + [LLayer];
+      end;
+      if LVersion >= 2 then
+      begin
+        LCountries := 0;
+        for LLayer in LLayers do
+          if SameText(LLayer.Name, LAYER_COUNTRIES) then
+            LCountries := Length(LLayer.Features);
+        LPlaces := ReadPlaces(LReader, LCountries);
       end;
     except
       on E: EVectorError do
@@ -619,6 +871,7 @@ begin
   for LLayer in FLayers do
     LLayer.Free;
   FLayers := LLayers;
+  FPlaces := LPlaces;
 end;
 
 procedure TWorldVectors.LoadFromResource;
@@ -693,6 +946,33 @@ begin
   Result := LLayer.Features[ACountry].Name;
 end;
 
+function TWorldVectors.CountryExtent(ACountry: Integer): TRectF;
+var
+  LLayer: TGeoLayer;
+begin
+  LLayer := Countries;
+  if LLayer = nil then
+    Exit(TRectF.Empty);
+  Result := LLayer.FeatureExtent(ACountry);
+end;
+
+function TWorldVectors.PlaceText(APlace: Integer): string;
+var
+  LCountry: string;
+begin
+  if not InRange(APlace, 0, High(FPlaces)) then
+    Exit('');
+  Result := FPlaces[APlace].Name;
+  // A region named like the place itself (Singapore, Singapore) says
+  // nothing more
+  if (FPlaces[APlace].Region <> '') and
+     not SameText(FPlaces[APlace].Region, FPlaces[APlace].Name) then
+    Result := Result + ', ' + FPlaces[APlace].Region;
+  LCountry := CountryName(FPlaces[APlace].Country);
+  if LCountry <> '' then
+    Result := Result + ', ' + LCountry;
+end;
+
 function TWorldVectors.Describe: string;
 var
   LLayer: TGeoLayer;
@@ -701,7 +981,8 @@ begin
   LPoints := 0;
   for LLayer in FLayers do
     Inc(LPoints, LLayer.PointCount);
-  Result := Format('%d layers, %.0n points', [Length(FLayers), LPoints * 1.0]);
+  Result := Format('%d layers, %.0n points, %.0n places',
+    [Length(FLayers), LPoints * 1.0, Length(FPlaces) * 1.0]);
 end;
 
 end.

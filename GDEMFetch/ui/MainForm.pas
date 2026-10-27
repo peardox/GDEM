@@ -25,6 +25,20 @@
   right click on a country selects every tile it touches, for fetching or
   deleting like any other selection.
 
+  @bold(Finding places.) The search box at the right of the toolbar
+  (@bold(View > Find...)) finds countries, towns and cities and the user's
+  markers as the user types, forgiving spelling mistakes (see
+  @link(TPlaceSearch)), in a list under the box. Choosing a country zooms
+  to show all of it; choosing a place or marker moves the map to it at the
+  same zoom and rings it. Up and Down move through the list, Enter goes
+  to the chosen one, Escape closes the list.
+
+  @bold(Markers.) Ctrl + click on the map (Cmd + click on a Mac), or
+  @bold(Markers > Add Marker at Map Centre...), adds a named marker, such
+  as Home; @bold(Markers > Edit Markers...) renames and deletes them. They
+  are kept in the settings folder (@link(TMarkerList)) and can be searched
+  for.
+
   @bold(Data folder.) Chosen in @bold(File > Settings) and may be on a
   removable drive. When the user picks a new folder and the old one holds
   data, they are asked whether to move it. Once a folder has been used, a
@@ -70,9 +84,10 @@ uses
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.IOUtils,
   System.Threading, FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   FMX.StdCtrls, FMX.Edit, FMX.Memo, FMX.Memo.Types, FMX.ScrollBox, FMX.Layouts,
-  FMX.Controls.Presentation, FMX.Menus, FMX.TabControl,
+  FMX.Controls.Presentation, FMX.Menus, FMX.TabControl, FMX.ListBox,
   GDEMCancel, GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex,
-  GDEMStore, GDEMThemes, GDEMReport, GDEMVectors, ProgressForm;
+  GDEMStore, GDEMThemes, GDEMReport, GDEMVectors, GDEMTileCache, GDEMMarkers,
+  GDEMSearch, ProgressForm;
 
 const
   { Name of the RCDATA resource holding the world map image. }
@@ -81,6 +96,13 @@ const
   { How often the data folder and its free space are checked, in
     milliseconds. }
   STORAGE_CHECK_INTERVAL = 60000;
+
+  { Height of a row in the list of search matches, in pixels. }
+  SEARCH_ITEM_HEIGHT = 22;
+
+  { Width of the list of search matches, in pixels: wider than the search
+    box, as a place's full name can be long. }
+  SEARCH_LIST_WIDTH = 460;
 
 type
   { The work done by a job, run on a background thread.
@@ -140,6 +162,9 @@ type
     mnuShowBorders: TMenuItem;
     { View > Show Coastlines. }
     mnuShowCoastlines: TMenuItem;
+    { View > High-Resolution Map: draws the tile set, if one was found,
+      instead of the plain map image. }
+    mnuShowMapTiles: TMenuItem;
     { Separator above the log commands. }
     mnuLogSep: TMenuItem;
     { View > Copy Log: puts the whole log on the clipboard. }
@@ -155,6 +180,23 @@ type
     btnCancel: TButton;
     { Describes the map selection. }
     lblSelection: TLabel;
+    { Search box for countries, places and markers; matches show in
+      @link(FSearchList) under it. }
+    edtSearch: TEdit;
+    { View > Find...: puts the cursor in @link(edtSearch). }
+    mnuFind: TMenuItem;
+    { Separator under @link(mnuFind). }
+    mnuFindSep: TMenuItem;
+    { View > Show Towns and Cities. }
+    mnuShowPlaces: TMenuItem;
+    { View > Show Markers. }
+    mnuShowMarkers: TMenuItem;
+    { The Markers menu. }
+    mnuMarkers: TMenuItem;
+    { Markers > Add Marker at Map Centre... }
+    mnuAddMarker: TMenuItem;
+    { Markers > Edit Markers... }
+    mnuEditMarkers: TMenuItem;
     { The tabs filling the window between the toolbar and the status bar. }
     tabMain: TTabControl;
     { First tab: the world map. }
@@ -271,6 +313,10 @@ type
       @param(Sender The menu item, which checks itself.) }
     procedure mnuShowCoastlinesClick(Sender: TObject);
 
+    { Switches between the high-resolution map and the plain map image.
+      @param(Sender The menu item, which checks itself.) }
+    procedure mnuShowMapTilesClick(Sender: TObject);
+
     { Puts the whole log on the clipboard, ready to paste.
       @param(Sender The menu item.) }
     procedure mnuCopyLogClick(Sender: TObject);
@@ -282,12 +328,65 @@ type
     { Periodic check of the data folder and its free space.
       @param(Sender The timer.) }
     procedure tmrStorageTimer(Sender: TObject);
+
+    { Searches again as the user types in @link(edtSearch).
+      @param(Sender The search box.) }
+    procedure edtSearchChangeTracking(Sender: TObject);
+
+    { Up and Down move through the matches, Enter goes to the chosen one,
+      Escape closes the list.
+      @param(Sender The search box.)
+      @param(Key The key; set to 0 when handled here.)
+      @param(KeyChar The character typed.)
+      @param(Shift The modifier keys held.) }
+    procedure edtSearchKeyDown(Sender: TObject; var Key: Word; var KeyChar: WideChar;
+      Shift: TShiftState);
+
+    { Puts the cursor in the search box.
+      @param(Sender The menu item.) }
+    procedure mnuFindClick(Sender: TObject);
+
+    { Shows or hides the labels of towns and cities.
+      @param(Sender The menu item, which checks itself.) }
+    procedure mnuShowPlacesClick(Sender: TObject);
+
+    { Shows or hides the markers.
+      @param(Sender The menu item, which checks itself.) }
+    procedure mnuShowMarkersClick(Sender: TObject);
+
+    { Asks for a name and adds a marker in the middle of the map.
+      @param(Sender The menu item.) }
+    procedure mnuAddMarkerClick(Sender: TObject);
+
+    { Opens the list of markers, to rename, delete or go to them.
+      @param(Sender The menu item.) }
+    procedure mnuEditMarkersClick(Sender: TObject);
   private
     { The user's saved settings, loaded at start-up. }
     FSettings: TGDEMSettings;
 
     { The world map, created in @link(FormCreate). }
     FMap: TWorldMapView;
+
+    { The user's markers, loaded at start-up. Owned by the form and shown
+      on @link(FMap). }
+    FMarkers: TMarkerList;
+
+    { Finds countries, places and markers by name; rebuilt when the markers
+      change. }
+    FSearch: TPlaceSearch;
+
+    { The matches for what is in @link(edtSearch), in the order shown in
+      @link(FSearchList). }
+    FSearchHits: TArray<TSearchHit>;
+
+    { The list of matches under @link(edtSearch), over the map; created in
+      @link(FormCreate) and hidden until there is something to show. }
+    FSearchList: TListBox;
+
+    { @true while the program itself changes @link(edtSearch), so that is
+      not taken as typing. }
+    FSearchUpdating: Boolean;
 
     { Which tiles have data. Owned by the form and shown on @link(FMap).
       Empty until loaded or built. Only touched on the main thread. }
@@ -308,6 +407,10 @@ type
       @code(WORLD_VECTORS_RESOURCE) resource. Owned by the form and shown on
       @link(FMap); empty if they could not be loaded. }
     FVectors: TWorldVectors;
+
+    { The high-resolution map's tiles, shown on @link(FMap); @nil when no
+      tile set was found. Owned by the form. }
+    FMapTiles: TTileCache;
 
     { @true once @link(FDownloaded) has been loaded or rebuilt for the
       current data folder. Cleared when the folder becomes unavailable, so
@@ -402,6 +505,66 @@ type
       coastlines. The map works without the borders, so failing to load them
       is only logged as a warning. }
     procedure LoadWorldMap;
+
+    { Finds the tile set for the high-resolution map (see
+      @code(GDEMMapTiles)), opens it and shows it on @link(FMap), replacing
+      any open before. Reads the smallest level at once, so there is always
+      something to draw. Without a tile set, or if it cannot be read, the
+      plain map image is drawn, and the log says which. }
+    procedure LoadMapTiles;
+
+    { Reads the markers file into @link(FMarkers), logging how many, or a
+      warning if it cannot be read. }
+    procedure LoadMarkers;
+
+    { Writes @link(FMarkers) to its file, then refreshes the search and
+      the map.
+      @returns(@true if saved; a failure is reported.) }
+    function SaveMarkers: Boolean;
+
+    { Refills @link(FSearch) from the countries, places and markers. }
+    procedure RebuildSearch;
+
+    { Searches for what is in @link(edtSearch) and shows the matches. }
+    procedure RunSearch;
+
+    { Shows @link(FSearchList) under @link(edtSearch), sized to the
+      matches. }
+    procedure ShowSearchList;
+
+    { Hides @link(FSearchList). }
+    procedure HideSearchList;
+
+    { Goes to a match: zooms to a country, or moves to a place or marker
+      and rings it.
+      @param(AHit The match.) }
+    procedure GoToHit(const AHit: TSearchHit);
+
+    { Goes to the match clicked in @link(FSearchList).
+      @param(Sender The list.)
+      @param(Item The item clicked.) }
+    procedure SearchListItemClick(const Sender: TCustomListBox; const Item: TListBoxItem);
+
+    { Hides the search list when the map is clicked.
+      @param(Sender The map view.)
+      @param(Button The mouse button.)
+      @param(Shift The modifier keys held.)
+      @param(X Horizontal position.)
+      @param(Y Vertical position.) }
+    procedure MapMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
+      X, Y: Single);
+
+    { Adds a marker where the map was Ctrl + clicked (Cmd + clicked).
+      @param(Sender The map view.)
+      @param(ALat Latitude clicked.)
+      @param(ALon Longitude clicked.)
+      @param(AShift The modifier keys held.) }
+    procedure MapMarkerClick(Sender: TObject; ALat, ALon: Double; AShift: TShiftState);
+
+    { Asks the user for a name and adds a marker.
+      @param(ALat Latitude, in degrees.)
+      @param(ALon Longitude, in degrees.) }
+    procedure AddMarkerAt(ALat, ALon: Double);
 
     { Updates the selection label and buttons after the map selection or a
       tile bitmap changes.
@@ -689,7 +852,8 @@ uses
   {$IFDEF MSWINDOWS}
   Winapi.Windows,
   {$ENDIF}
-  GDEMTiles, GDEMDownloadBatch, GDEMDrawing, SettingsForm;
+  GDEMTiles, GDEMDownloadBatch, GDEMDrawing, GDEMMapTiles, GDEMTileSet, SettingsForm,
+  MarkersForm;
 
 { TfrmMain }
 
@@ -773,6 +937,8 @@ begin
   FMap.OnSelectionChanging := MapSelectionChanging;
   FMap.OnHover := MapHover;
   FMap.OnRightClick := MapRightClick;
+  FMap.OnMarkerClick := MapMarkerClick;
+  FMap.OnMouseDown := MapMouseDown;
   FVectors := TWorldVectors.Create;
   LoadWorldMap;
 
@@ -796,6 +962,20 @@ begin
   if ThemeFromKey(FSettings.Theme) <> thDefault then
     ApplyThemeSetting(False);
 
+  LoadMapTiles;
+  FMarkers := TMarkerList.Create;
+  LoadMarkers;
+  FMap.Markers := FMarkers;
+  FSearch := TPlaceSearch.Create;
+  RebuildSearch;
+  // Over the map, under the search box; not focusable, so clicking it
+  // leaves the cursor in the box
+  FSearchList := TListBox.Create(Self);
+  FSearchList.Parent := Self;
+  FSearchList.Visible := False;
+  FSearchList.CanFocus := False;
+  FSearchList.ItemHeight := SEARCH_ITEM_HEIGHT;
+  FSearchList.OnItemClick := SearchListItemClick;
   LoadTileIndex;
   OpenStore(False);
   MapSelectionChanged(FMap);
@@ -829,6 +1009,11 @@ begin
   tmrStorage.Enabled := False;
   FMap.Vectors := nil;
   FVectors.Free;
+  FMap.MapTiles := nil;
+  FMapTiles.Free;
+  FMap.Markers := nil;
+  FMarkers.Free;
+  FSearch.Free;
   FStore.Free;
   FSettings.Free;
   FTileIndex.Free;
@@ -968,6 +1153,319 @@ begin
       AddLog('WARNING: could not load the borders and coastlines (' +
         E.Message.TrimRight(['.']) + '); the map is shown without them');
   end;
+end;
+
+procedure TfrmMain.LoadMapTiles;
+var
+  LFolder: string;
+  LLevels: TArray<TTileSetLevel>;
+begin
+  FMap.MapTiles := nil;
+  FreeAndNil(FMapTiles);
+  // Nothing to switch to without a tile set
+  mnuShowMapTiles.Enabled := False;
+
+  LFolder := FindMapTiles(FSettings.MapTiles);
+  if LFolder = '' then
+  begin
+    if FSettings.MapTiles.Trim <> '' then
+      AddLog('WARNING: no tile set (tileset.json) in ' + FSettings.MapTiles.Trim +
+        '; the plain map is drawn')
+    else
+      AddLog('Map: no tile set found beside the program; the plain map is drawn');
+    Exit;
+  end;
+
+  try
+    FMapTiles := TTileCache.Create(LFolder);
+    LLevels := FMapTiles.TileSet.Levels;
+    FMapTiles.PreloadLevel(High(LLevels));
+    FMap.MapTiles := FMapTiles;
+    mnuShowMapTiles.Enabled := True;
+    AddLog(Format('Map: tile set "%s", %d x %d in %d levels of %d-pixel tiles, from %s',
+      [FMapTiles.TileSet.Name, FMapTiles.TileSet.SourceWidth,
+       FMapTiles.TileSet.SourceHeight, Length(LLevels), FMapTiles.TileSet.TileSize,
+       LFolder]));
+    if FMapTiles.Failures > 0 then
+      AddLog(Format('WARNING: %d tile(s) of the smallest level could not be read',
+        [FMapTiles.Failures]));
+  except
+    on E: Exception do
+    begin
+      FMap.MapTiles := nil;
+      FreeAndNil(FMapTiles);
+      AddLog('WARNING: could not open the tile set in ' + LFolder + ' (' +
+        E.Message.TrimRight(['.']) + '); the plain map is drawn');
+    end;
+  end;
+end;
+
+{ Markers and search }
+
+procedure TfrmMain.LoadMarkers;
+begin
+  try
+    if FMarkers.Load then
+      AddLog(Format('Markers: %d, from %s', [FMarkers.Count, FMarkers.FileName]));
+  except
+    on E: Exception do
+      AddLog('WARNING: ' + E.Message.TrimRight(['.']) +
+        '; starting with no markers, and the file is left as it is until one is added');
+  end;
+end;
+
+function TfrmMain.SaveMarkers: Boolean;
+begin
+  Result := False;
+  try
+    FMarkers.Save;
+    Result := True;
+  except
+    on E: Exception do
+      ReportError(E.Message);
+  end;
+  RebuildSearch;
+  FMap.MarkersChanged;
+end;
+
+procedure TfrmMain.RebuildSearch;
+begin
+  FSearch.Build(FVectors, FMarkers);
+  // The indexes of shown matches may have changed
+  if (FSearchList <> nil) and FSearchList.Visible then
+    RunSearch;
+end;
+
+procedure TfrmMain.RunSearch;
+var
+  LHit: TSearchHit;
+begin
+  if edtSearch.Text.Trim = '' then
+  begin
+    FSearchHits := nil;
+    HideSearchList;
+    FMap.ClearHighlight;
+    Exit;
+  end;
+  FSearchHits := FSearch.Search(edtSearch.Text);
+  FSearchList.BeginUpdate;
+  try
+    FSearchList.Clear;
+    for LHit in FSearchHits do
+      FSearchList.Items.Add(LHit.Text);
+    if Length(FSearchHits) = 0 then
+      FSearchList.Items.Add('Nothing found')
+    else
+      FSearchList.ItemIndex := 0;
+  finally
+    FSearchList.EndUpdate;
+  end;
+  ShowSearchList;
+end;
+
+procedure TfrmMain.ShowSearchList;
+var
+  LTopRight: TPointF;
+  LRows: Integer;
+begin
+  // Right edges lined up, just under the box, in the form's coordinates
+  LTopRight := edtSearch.LocalToAbsolute(PointF(edtSearch.Width, edtSearch.Height + 2));
+  LRows := Max(1, FSearchList.Count);
+  FSearchList.SetBounds(Max(0, LTopRight.X - SEARCH_LIST_WIDTH), LTopRight.Y,
+    Min(SEARCH_LIST_WIDTH, ClientWidth), LRows * SEARCH_ITEM_HEIGHT + 4);
+  FSearchList.Visible := True;
+  FSearchList.BringToFront;
+end;
+
+procedure TfrmMain.HideSearchList;
+begin
+  if FSearchList <> nil then
+    FSearchList.Visible := False;
+end;
+
+procedure TfrmMain.GoToHit(const AHit: TSearchHit);
+var
+  LExtent: TRectF;
+  LPlace: TGeoPlace;
+  LMarker: TMapMarker;
+begin
+  HideSearchList;
+  case AHit.Kind of
+    skCountry:
+      begin
+        LExtent := FVectors.CountryExtent(AHit.Index);
+        // All 0 when the country is not in the data
+        if (LExtent.Left = 0) and (LExtent.Right = 0) and (LExtent.Top = 0) and
+           (LExtent.Bottom = 0) then
+          Exit;
+        // Bounds hold south in Top and north in Bottom
+        FMap.ZoomToArea(LExtent.Bottom, LExtent.Top, LExtent.Left, LExtent.Right);
+        FMap.ClearHighlight;
+      end;
+    skPlace:
+      begin
+        LPlace := FVectors.Places[AHit.Index];
+        FMap.CentreOn(LPlace.Lat, LPlace.Lon);
+        FMap.ShowHighlight(LPlace.Lat, LPlace.Lon);
+      end;
+    skMarker:
+      begin
+        LMarker := FMarkers[AHit.Index];
+        FMap.CentreOn(LMarker.Lat, LMarker.Lon);
+        FMap.ShowHighlight(LMarker.Lat, LMarker.Lon);
+      end;
+  end;
+  // Show what was chosen, without searching for it again
+  FSearchUpdating := True;
+  try
+    edtSearch.Text := AHit.Text;
+    edtSearch.SelectAll;
+  finally
+    FSearchUpdating := False;
+  end;
+end;
+
+procedure TfrmMain.SearchListItemClick(const Sender: TCustomListBox;
+  const Item: TListBoxItem);
+begin
+  if (Item <> nil) and InRange(Item.Index, 0, High(FSearchHits)) then
+    GoToHit(FSearchHits[Item.Index]);
+end;
+
+procedure TfrmMain.edtSearchChangeTracking(Sender: TObject);
+begin
+  if not FSearchUpdating then
+    RunSearch;
+end;
+
+procedure TfrmMain.edtSearchKeyDown(Sender: TObject; var Key: Word; var KeyChar: WideChar;
+  Shift: TShiftState);
+var
+  LIndex: Integer;
+begin
+  case Key of
+    vkDown, vkUp:
+      begin
+        if not FSearchList.Visible then
+          RunSearch
+        else if Length(FSearchHits) > 0 then
+        begin
+          LIndex := FSearchList.ItemIndex;
+          if Key = vkDown then
+            Inc(LIndex)
+          else
+            Dec(LIndex);
+          FSearchList.ItemIndex := EnsureRange(LIndex, 0, High(FSearchHits));
+        end;
+        Key := 0;
+      end;
+    vkReturn:
+      begin
+        if not FSearchList.Visible then
+          RunSearch;
+        LIndex := Max(FSearchList.ItemIndex, 0);
+        if InRange(LIndex, 0, High(FSearchHits)) then
+          GoToHit(FSearchHits[LIndex]);
+        Key := 0;
+        KeyChar := #0;
+      end;
+    vkEscape:
+      begin
+        if FSearchList.Visible then
+          HideSearchList
+        else
+          FMap.ClearHighlight;
+        Key := 0;
+      end;
+  end;
+end;
+
+procedure TfrmMain.MapMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
+  X, Y: Single);
+begin
+  HideSearchList;
+end;
+
+procedure TfrmMain.MapMarkerClick(Sender: TObject; ALat, ALon: Double; AShift: TShiftState);
+begin
+  AddMarkerAt(ALat, ALon);
+end;
+
+procedure TfrmMain.AddMarkerAt(ALat, ALon: Double);
+var
+  LLat, LLon: Double;
+begin
+  LLat := ALat;
+  LLon := ALon;
+  TDialogService.InputQuery('Add Marker',
+    [Format('Name for the marker at %s %s', [FormatLat(LLat), FormatLon(LLon)])],
+    [Format('Marker %d', [FMarkers.Count + 1])],
+    procedure(const AResult: TModalResult; const AValues: array of string)
+    var
+      LIndex: Integer;
+    begin
+      if (AResult <> mrOk) or (Length(AValues) = 0) then
+        Exit;
+      if TMarkerList.CleanName(AValues[0]) = '' then
+      begin
+        AddLog('No marker added: it needs a name');
+        Exit;
+      end;
+      LIndex := FMarkers.Add(AValues[0], LLat, LLon);
+      if SaveMarkers then
+        AddLog(Format('Marker "%s" added at %s %s', [FMarkers[LIndex].Name,
+          FormatLat(FMarkers[LIndex].Lat), FormatLon(FMarkers[LIndex].Lon)]));
+    end);
+end;
+
+procedure TfrmMain.mnuFindClick(Sender: TObject);
+begin
+  edtSearch.SetFocus;
+  edtSearch.SelectAll;
+end;
+
+procedure TfrmMain.mnuShowPlacesClick(Sender: TObject);
+begin
+  FMap.ShowPlaces := mnuShowPlaces.IsChecked;
+end;
+
+procedure TfrmMain.mnuShowMarkersClick(Sender: TObject);
+begin
+  FMap.ShowMarkers := mnuShowMarkers.IsChecked;
+end;
+
+procedure TfrmMain.mnuAddMarkerClick(Sender: TObject);
+var
+  LLat, LLon: Double;
+begin
+  if FMap.ScreenToGeo(PointF(FMap.Width / 2, FMap.Height / 2), LLat, LLon) then
+    AddMarkerAt(LLat, LLon);
+end;
+
+procedure TfrmMain.mnuEditMarkersClick(Sender: TObject);
+begin
+  HideSearchList;
+  TfrmMarkers.Edit(FMarkers,
+    procedure(AGoTo: Integer; AChanged: Boolean)
+    var
+      LHit: TSearchHit;
+    begin
+      if AChanged then
+      begin
+        RebuildSearch;
+        FMap.MarkersChanged;
+        FMap.ClearHighlight;
+      end;
+      if InRange(AGoTo, 0, FMarkers.Count - 1) then
+      begin
+        LHit.Kind := skMarker;
+        LHit.Index := AGoTo;
+        LHit.Text := FMarkers[AGoTo].Name + ' (marker)';
+        LHit.Match := smExact;
+        LHit.Mistakes := 0;
+        GoToHit(LHit);
+      end;
+    end);
 end;
 
 function TfrmMain.SelectedTileCount(AOnlyIn: TTileIndex): Integer;
@@ -1213,6 +1711,11 @@ begin
   FMap.ShowCoastlines := mnuShowCoastlines.IsChecked;
 end;
 
+procedure TfrmMain.mnuShowMapTilesClick(Sender: TObject);
+begin
+  FMap.ShowMapTiles := mnuShowMapTiles.IsChecked;
+end;
+
 procedure TfrmMain.mnuCopyLogClick(Sender: TObject);
 var
   LClipboard: IFMXClipboardService;
@@ -1232,9 +1735,10 @@ end;
 
 procedure TfrmMain.ShowSettings(const AOnSaved: TProc);
 var
-  LOldTheme: string;
+  LOldTheme, LOldMapTiles: string;
 begin
   LOldTheme := FSettings.Theme;
+  LOldMapTiles := FSettings.MapTiles;
   TfrmSettings.Edit(FSettings,
     procedure(ASaved: Boolean; const ADataFolder: string)
     begin
@@ -1244,6 +1748,8 @@ begin
       CheckTokenExpiry;
       if not SameText(FSettings.Theme, LOldTheme) then
         ApplyThemeSetting(True);
+      if not SameFileName(FSettings.MapTiles, LOldMapTiles) then
+        LoadMapTiles;
       RefreshStorageStatus;
       if not SameFileName(ADataFolder, FSettings.DataFolder) then
         ChangeDataFolder(ADataFolder);

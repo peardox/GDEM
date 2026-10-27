@@ -74,7 +74,7 @@ for f in files:
     m = re.search(r'^(unit|program)\s+\w+;', text, re.M)
     if m:
         before = text[:m.start()].rstrip()
-        if not before.endswith('}') or '@abstract' not in before[-4000:]:
+        if not before.endswith('}') or '@abstract' not in before:
             problems.append(f'{label(f)}: unit/program comment without @abstract')
     # comments: tag balance and links
     for cm in re.finditer(r'\{(?!\$)(.*?)\}', text, re.S):

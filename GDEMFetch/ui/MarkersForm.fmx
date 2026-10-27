@@ -1,0 +1,104 @@
+object frmMarkers: TfrmMarkers
+  Left = 0
+  Top = 0
+  BorderIcons = [biSystemMenu]
+  Caption = 'Markers'
+  ClientHeight = 380
+  ClientWidth = 480
+  Position = MainFormCenter
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [Desktop]
+  DesignerMasterStyle = 0
+  object lblHint: TLabel
+    Align = Top
+    Margins.Left = 12.000000000000000000
+    Margins.Top = 12.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Position.X = 12.000000000000000000
+    Position.Y = 12.000000000000000000
+    Size.Width = 456.000000000000000000
+    Size.Height = 36.000000000000000000
+    Size.PlatformDefault = False
+    TextSettings.WordWrap = True
+    Text = 
+      'To add a marker, Ctrl + click the map (Cmd + click on a Mac), or u' +
+      'se Markers > Add Marker at Map Centre. Double-click one to go to it.'
+  end
+  object lstMarkers: TListBox
+    Align = Client
+    Margins.Left = 12.000000000000000000
+    Margins.Top = 8.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Size.Width = 456.000000000000000000
+    Size.Height = 268.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 0
+    OnChange = lstMarkersChange
+    OnDblClick = lstMarkersDblClick
+  end
+  object layButtons: TLayout
+    Align = Bottom
+    Margins.Left = 12.000000000000000000
+    Margins.Top = 8.000000000000000000
+    Margins.Right = 12.000000000000000000
+    Margins.Bottom = 12.000000000000000000
+    Position.X = 12.000000000000000000
+    Position.Y = 332.000000000000000000
+    Size.Width = 456.000000000000000000
+    Size.Height = 36.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 1
+    object btnGoTo: TButton
+      Align = Left
+      Margins.Top = 4.000000000000000000
+      Position.Y = 4.000000000000000000
+      Size.Width = 80.000000000000000000
+      Size.Height = 32.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 0
+      Text = 'Go To'
+      OnClick = btnGoToClick
+    end
+    object btnRename: TButton
+      Align = Left
+      Margins.Left = 8.000000000000000000
+      Margins.Top = 4.000000000000000000
+      Position.X = 88.000000000000000000
+      Position.Y = 4.000000000000000000
+      Size.Width = 90.000000000000000000
+      Size.Height = 32.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 1
+      Text = 'Rename...'
+      OnClick = btnRenameClick
+    end
+    object btnDelete: TButton
+      Align = Left
+      Margins.Left = 8.000000000000000000
+      Margins.Top = 4.000000000000000000
+      Position.X = 186.000000000000000000
+      Position.Y = 4.000000000000000000
+      Size.Width = 80.000000000000000000
+      Size.Height = 32.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 2
+      Text = 'Delete...'
+      OnClick = btnDeleteClick
+    end
+    object btnClose: TButton
+      Align = Right
+      Cancel = True
+      Default = True
+      ModalResult = 2
+      Margins.Top = 4.000000000000000000
+      Position.X = 376.000000000000000000
+      Position.Y = 4.000000000000000000
+      Size.Width = 80.000000000000000000
+      Size.Height = 32.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 3
+      Text = 'Close'
+    end
+  end
+end
