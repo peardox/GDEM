@@ -268,8 +268,9 @@ Towns and cities come from Natural Earth's 1:10m populated places:
 population and, for 634, other names it goes by (Antioch for Antakya,
 Koln for Cologne). They are labelled on the map (View > Show Towns and
 Cities), more of them the further in you zoom: each is shown from the zoom
-level Natural Earth suggests for it, the most important first, and a
-label that would overlap one already drawn is left out. Capitals are
+level Natural Earth suggests for it, the most important first. A label
+goes to the right of its place, or failing that the left, above or below,
+whichever is clear of those already drawn; if none is, it is left out. Capitals are
 labelled in yellow. Zoomed right out about 25 are named; over Europe at
 30 pixels a degree, about 100.
 

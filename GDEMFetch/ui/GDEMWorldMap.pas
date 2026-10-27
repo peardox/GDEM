@@ -1784,6 +1784,33 @@ begin
     Result := Result + [GeoToScreen(ALat, ALon + LCopy * 360)];
 end;
 
+type
+  { Where a place's label goes, in the order they are tried. }
+  TLabelSide = (lsRight, lsLeft, lsAbove, lsBelow);
+
+{ Where a label goes beside a place's dot.
+  @param(APoint The dot's centre.)
+  @param(AWidth The label's width, padding included.)
+  @param(ASide Which side.)
+  @returns(The label's box.) }
+function LabelRect(const APoint: TPointF; AWidth: Single; ASide: TLabelSide): TRectF;
+begin
+  case ASide of
+    lsLeft:
+      Result := TRectF.Create(APoint.X - LABEL_GAP - AWidth, APoint.Y - LABEL_HEIGHT / 2,
+        APoint.X - LABEL_GAP, APoint.Y + LABEL_HEIGHT / 2);
+    lsAbove:
+      Result := TRectF.Create(APoint.X - AWidth / 2, APoint.Y - LABEL_GAP - LABEL_HEIGHT,
+        APoint.X + AWidth / 2, APoint.Y - LABEL_GAP);
+    lsBelow:
+      Result := TRectF.Create(APoint.X - AWidth / 2, APoint.Y + LABEL_GAP,
+        APoint.X + AWidth / 2, APoint.Y + LABEL_GAP + LABEL_HEIGHT);
+  else
+    Result := TRectF.Create(APoint.X + LABEL_GAP, APoint.Y - LABEL_HEIGHT / 2,
+      APoint.X + LABEL_GAP + AWidth, APoint.Y + LABEL_HEIGHT / 2);
+  end;
+end;
+
 procedure TWorldMapView.PaintPlaces(ANorth, ASouth, AWest, AEast: Double);
 var
   LZoom: Double;
@@ -1795,6 +1822,7 @@ var
   LFree: Boolean;
   LWidth: Single;
   LColor: TAlphaColor;
+  LSide: TLabelSide;
 begin
   if (FVectors = nil) or not FShowPlaces or (Length(FVectors.Places) = 0) then
     Exit;
@@ -1824,15 +1852,31 @@ begin
         end;
         LDot := TRectF.Create(LPoint.X - PLACE_DOT_RADIUS, LPoint.Y - PLACE_DOT_RADIUS,
           LPoint.X + PLACE_DOT_RADIUS, LPoint.Y + PLACE_DOT_RADIUS);
-        LLabel := TRectF.Create(LPoint.X + LABEL_GAP, LPoint.Y - LABEL_HEIGHT / 2,
-          LPoint.X + LABEL_GAP + LWidth + 2 * LABEL_PADDING, LPoint.Y + LABEL_HEIGHT / 2);
+        // The dot must be clear of what is drawn already, and the label
+        // goes in the first clear place of right, left, above and below
         LFree := True;
         for LOther := 0 to LTaken.Count - 1 do
-          if LTaken[LOther].IntersectsWith(LLabel) or LTaken[LOther].IntersectsWith(LDot) then
+          if LTaken[LOther].IntersectsWith(LDot) then
           begin
             LFree := False;
             Break;
           end;
+        if not LFree then
+          Continue;
+        LFree := False;
+        for LSide := Low(TLabelSide) to High(TLabelSide) do
+        begin
+          LLabel := LabelRect(LPoint, LWidth + 2 * LABEL_PADDING, LSide);
+          LFree := True;
+          for LOther := 0 to LTaken.Count - 1 do
+            if LTaken[LOther].IntersectsWith(LLabel) then
+            begin
+              LFree := False;
+              Break;
+            end;
+          if LFree then
+            Break;
+        end;
         if not LFree then
           Continue;
         LTaken.Add(LLabel);

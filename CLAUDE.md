@@ -561,6 +561,14 @@ markers (Home, Work) that the search finds. Not yet built.
 - `tools/pasdoc_check.py` now looks for `@abstract` in the whole unit
   comment (the map's had grown past the 4,000 characters it read).
 
+Built by the owner after one fix (`System.Character` for `Char`'s
+`IsLetter`/`ToLower` in `GDEMSearch`). The whole-world screenshot had no
+London: it qualifies (min zoom 1.7, like Paris) but its right-hand label
+hit Paris's, drawn first. Labels now try right, left, above, below
+(`TLabelSide`, `LabelRect`); simulated at that zoom this adds London,
+Toronto and Washington, D.C. The owner lives in Manchester (min zoom 5.0,
+labelled from about 23 px/degree).
+
 Things to check when built: that `TControl.OnMouseDown` can be assigned
 from `MainForm` (it should be public), that Ctrl + click on macOS is not
 turned into a right click by the system (Cmd + click is the documented
