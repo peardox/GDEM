@@ -38,14 +38,29 @@
       CPU, before the program starts up.)
     @item(@link(GDEMGpuPreference) reads and sets Windows' choice of
       graphics processor for the program.)
-    @item(@link(GDEMMapTiles) finds the tile set drawn as the
-      high-resolution map; @link(GDEMTileSet) (shared with TileMaker) and
-      @link(GDEMTileCache), in the repository's @code(common) folder, read
-      it.)
+    @item(@link(GDEMMapTiles) opens the tile set built into the program
+      as the high-resolution map; @link(GDEMTileSet) (shared with
+      TileMaker) and @link(GDEMTileCache), in the repository's
+      @code(common) folder, read it.)
+    @item(@link(GDEMGeoTiff), in @code(common), reads the downloaded
+      GeoTIFF tiles; @link(GDEMTerrain) makes a tile's surface from them,
+      and @link(GDEMTerrainView) shows it on the 3D tab with Gorilla3D.)
+    @item(On Windows, FastMM5 (a submodule in @code(FastMM5)) is the
+      memory manager; with @code(REPORT_LEAKS) defined, leaks are reported
+      at shut-down.)
   ) }
 program GDEMFetch;
 
+// Define to report memory leaks at shut-down (see below); leave it off for
+// a release build
+// {$DEFINE REPORT_LEAKS}
+
 uses
+  // On Windows FastMM5 is the memory manager, so it must come first; with
+  // REPORT_LEAKS defined it writes the full leak report to a file
+  {$IFDEF MSWINDOWS}
+  FastMM5,
+  {$ENDIF}
   System.StartUpCopy,
   FMX.Forms,
   FMX.Skia,
@@ -73,11 +88,14 @@ uses
   GDEMMapTiles in 'lib\GDEMMapTiles.pas',
   GDEMTileSet in '..\common\GDEMTileSet.pas',
   GDEMTileCache in '..\common\GDEMTileCache.pas',
+  GDEMGeoTiff in '..\common\GDEMGeoTiff.pas',
   GDEMMarkers in 'lib\GDEMMarkers.pas',
   GDEMSearch in 'lib\GDEMSearch.pas',
   MarkersForm in 'ui\MarkersForm.pas' {frmMarkers},
   GDEMViewOptions in 'lib\GDEMViewOptions.pas',
-  GDEMEasterEggs in 'lib\GDEMEasterEggs.pas';
+  GDEMEasterEggs in 'lib\GDEMEasterEggs.pas',
+  GDEMTerrain in 'lib\GDEMTerrain.pas',
+  GDEMTerrainView in 'ui\GDEMTerrainView.pas';
 
 {$R *.res}
 { The world map image and its borders and coastlines, built from the
@@ -89,6 +107,19 @@ uses
 {$R '..\styles\GDEMThemes.res'}
 
 begin
+  {$IF DEFINED(REPORT_LEAKS)}
+  // Leaks still allocated at shut-down are listed in a message box. On
+  // Windows FastMM5 also writes every leak, in full, to
+  // GDEMFetch_MemoryManager_EventLog.txt beside the executable, its default
+  // place. It adds to that file each run, so the last run's is deleted
+  // first and the file holds only this run's leaks; no file, no leaks.
+  ReportMemoryLeaksOnShutdown := True;
+  {$IF DEFINED(MSWINDOWS)}
+  FastMM_DeleteEventLogFile;
+  FastMM_LogToFileEvents := FastMM_LogToFileEvents +
+    [mmetUnexpectedMemoryLeakSummary, mmetUnexpectedMemoryLeakDetail];
+  {$ENDIF}
+  {$ENDIF}
   // Skia, on the GPU or the CPU as File > Settings says; it must be set
   // before Application.Initialize
   ConfigureDrawing;

@@ -6,27 +6,45 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 27 October 2026, at the end of the evening's session.
+Last updated: 27 October 2026, late evening, before the owner's push of
+the 3D work.
 
 ## State at the end of 27 October 2026
 
-GitHub `main` at `ce47687` ("Map OK") holds everything. The owner
-applied, built and tested the evening's work on Windows, macOS and
-Linux, and everything works: the map-jump fix (below), the display log,
-the built-in high-resolution tile set (and the removal of the tile set
-folder setting), and the View options suggested for faster drawing. It
-was checked against GitHub file for file (the only difference was the
-IDE reordering Skia entries in `GDEMFetch.deployproj`) and validated:
-`pasdoc_check.py` clean; every source ASCII; both `.dproj` files keep
-their BOM and parse; every unit in `lib/` and `ui/` is in both the `.dpr`
-and the `.dproj`, and every path exists; each `RcItem` exists, with its
-Deployment entries disabled, and nothing from `maps/` is in the
-`.deployproj`; `maps/tiles.zip` rebuilds byte-identically from
-`maps/tiles`; every form's `.fmx` objects and events match its unit; no
-code refers to anything removed.
+The owner is pushing the evening's 3D work on top of `c1096a1` ("Add
+FastMM5"). Everything since was delivered as zips and is in that push;
+before it, the working copy was validated: `pasdoc_check.py` clean
+(including `tools/GeoTiffCheck`); every source ASCII; both `.dproj` files
+keep their BOM and parse; every unit in `lib/` and `ui/` is in both the
+`.dpr` and the `.dproj`, and every path exists; each `RcItem` exists, its
+Deployment entries disabled; every form's `.fmx` objects and events match
+its unit; `maps/world_vectors.bin` and `maps/tiles.zip` rebuild byte for
+byte from their sources (Natural Earth at `ca96624`, and `maps/tiles`);
+nothing refers to removed code.
 
-Sections below that say "Not yet built" were written before the owner's
-builds; everything in them has been built and run since. No known bugs.
+What the push holds, in the order it was done (details in the sections
+below):
+
+1. FastMM5 first in both `.dpr`s on Windows, with `REPORT_LEAKS`.
+2. `common/GDEMGeoTiff.pas`, the pure-Pascal GeoTIFF reader, and
+   `tools/GeoTiffCheck`. **Verified**: all 18 images of the two volatile
+   tiles decode identically to libtiff on Windows.
+3. The 3D tab (`lib/GDEMTerrain`, `ui/GDEMTerrainView`). **Works** on
+   Windows: the Isle of Wight drew correctly first time (windings,
+   colours, shading, camera). Full detail (3601) added and timed: 2.49 s
+   to build 13 million vertices.
+4. The main toolbar moved into the Map tab.
+5. Mountains in the search (Natural Earth elevation points,
+   `world_vectors.bin` version 3), Show in 3D, the Click for 3D switch.
+6. Panning in the 3D view.
+7. The search box: "Search" label, arrow button, cleared by a click.
+8. Five compiler hints fixed (`System.RTLConsts` in `GDEMTerrainView`;
+   `IsClear` in `TWorldMapView.PaintPlaces`).
+
+Items 5 to 8 compiled (the owner's build reported only the hints of item
+8), but have not been reported on in use. macOS and Linux have not run
+any of items 2 to 8. Sections below that say "Not yet built" were written
+before the owner's builds. No known bugs.
 
 ### The map jumping while dragging (fixed 27 October 2026)
 
@@ -65,7 +83,7 @@ x 1440 at 0, 0, scale 1.50.
 ## Starting a new conversation
 
 1. Fetch the repository (<https://github.com/peardox/GDEM>, branch
-   `main`) and its `delphi-neon` submodule.
+   `main`) and its `delphi-neon` and `FastMM5` submodules.
 2. Read `README.md`, then this file.
 3. The owner's working copy is often ahead of GitHub. If the owner
    attaches or pastes files, build on those, not on GitHub.
@@ -344,15 +362,20 @@ GitHub (see the top of this file).
    selection of a country across 180 degrees (Fiji, Russia), and that
    right-drag still pans. Colours: borders pink `$FFFF80AB`, coastlines
    white at 55%.
-3. **GeoTIFF reader** in pure Pascal for the `_dem` and `_num` files
-   (LZW, 256 x 256 tiles, Int16 and UInt8, 3601 x 3601, 8 overviews).
-   <https://github.com/peardox/volatile> has older decoding logic to
-   reuse, but uses a Windows-only libtiff binding, so take the logic only.
+3. **GeoTIFF reader**: done and verified on Windows (see "Gorilla3D,
+   first step" below). Worth running `GeoTiffCheck` on macOS and Linux.
 4. **High-resolution map**: tile set made and drawn (see the TileMaker
    and high-resolution map sections below); built and working. Search,
    towns and cities, and markers followed (see below). Natural Earth's 1:10m borders and coastlines would suit
    it; add them as more layers in `tools/build_vectors.py`.
-5. **3D tab**: content to come once tiles can be read.
+5. **3D tab**: one tile as a surface, working on Windows (see "The 3D
+   tab" and later sections below). To check: macOS and Linux; FastMM5's
+   leak report after switching tiles (a `TMeshDef` leak would mean the
+   singleton mesh does not own its definition); the new controls in use.
+   Ideas raised: build the pieces on a worker thread so Full does not
+   freeze the window for 2.5 s; several tiles stitched together; the
+   high-resolution map laid over the surface; a checked list of the peaks
+   Natural Earth leaves out (Lhotse, Makalu, Cho Oyu, Annapurna...).
 6. Smaller ideas offered but not taken up: parallel workers and the
    progress dialog for moving the data folder; a macOS `.icns` and a
    Linux `.desktop` file; a menu item to open the Reports folder.
@@ -766,6 +789,332 @@ High performance, OK: every View option on, the dialog, one log line;
 open Settings again and change something: no dialog. With a fresh
 `view.json`, Power saving: borders, coastlines and the high-resolution
 map. Choosing CPU first: no dialog, and a later GPU choice still gets it.
+
+### Gorilla3D, first step (27 October 2026)
+
+The owner opened the 3D stage: Gorilla3D 1.5.3
+(<https://gorilla3d.de/doc/v3/version/v1.5>, PasDoc reference at
+<https://peardox.com/G3D/>), and FastMM5. Decided with the owner:
+
+- **First view:** one downloaded tile, as a surface to orbit; stitching
+  several comes later.
+- **Surface:** our own mesh from the 16-bit elevations, thinned to a grid
+  we choose, coloured by height; not `TGorillaTerrain`, which takes
+  heights through a greyscale bitmap.
+- **Order:** the GeoTIFF reader first, then the 3D tab on real data.
+- **FastMM5:** now, as Sprite3D has it.
+
+What the Gorilla3D docs say that matters here:
+
+- `Gorilla.Context.Backend` must be the first unit in the `.dpr`, and
+  `GorillaGraphicsBackend` (`gbDefault` = OpenGL / OpenGL ES, `gbOpenGL`,
+  `gbVulkan`, Windows x64 only and experimental) must be set before
+  `Application.Initialize`; set later it is silently ignored. That is
+  where `ConfigureDrawing` sets Skia's GPU choice, so the two go together.
+- It works with FMX Skia, raster or GPU canvas
+  (`GlobalUseSkiaRasterWhenAvailable := False` gives `TVkCanvas` on
+  Delphi 13.2+): it renders into its own image, which FMX paints. Keep
+  `TGorillaViewport.UseFixedFrameRate` on, and do not call
+  `Invalidate`/`Repaint` on the form every frame under Skia.
+- Requirements: OpenGL 4.3+ on Windows and Linux (Mesa/GLX, X11, not
+  Wayland; Delphi 12.3+ for Linux); Metal on macOS. The docs say macOS is
+  Intel only, with Apple silicon under Rosetta and native ARM64
+  "planned", but Sprite3D builds OSXARM64 with Gorilla3D, so the owner's
+  copy evidently runs there.
+- Custom meshes: `TMeshDef` from a `TMeshData` (`VertexBuffer.Vertices`,
+  `.Normals`, `.Color0`; `IndexBuffer.Indices`; counter-clockwise
+  triangles) via `ApplyFromMeshData`, then `IsStatic := True`, which
+  freezes the vertices (rebuild to change). Or `TVertexCache` with
+  `ApplyToMeshDef`. `TGorillaVertexColorMaterialSource`
+  (`Gorilla.Material.VertexColor`) colours by vertex. Indices are UInt32
+  on desktop, UInt16 on mobile. Then `TGorillaModel.LoadNewModelFromDef`.
+- Camera: `TGorillaThirdPersonController` (orbit; needs a
+  `TGorillaInputController` with `Viewport` set; `CameraZLimit` for zoom
+  distance, `RotationDragMode` with `RButtonDown`), with
+  `UsingDesignCamera := False`.
+
+**FastMM5.** The owner added the submodule (`c1096a1`, pinned at
+`ff65acc`). Both `.dpr`s now list `FastMM5` first on Windows, and have a
+commented-out `{$DEFINE REPORT_LEAKS}`; defined, it sets
+`ReportMemoryLeaksOnShutdown` and, on Windows, deletes the last
+`<program>_MemoryManager_EventLog.txt` and logs every leak in full to a
+new one, as Sprite3D does. `..\FastMM5` is on both `.dproj` search paths.
+README: Requirements, "Memory leaks", the layout table, the rule on
+submodules.
+
+**The reader, `common/GDEMGeoTiff.pas`** (no FMX; in GDEMFetch's `.dpr`
+and `.dproj` so it is compiled, not yet used): `TGeoTiff.Create(file)` or
+`CreateFromStream`; `Images[]`/`ImageCount` (`TGeoTiffImage`: size,
+bits, sample format, compression, predictor, tiles or strips, offsets,
+byte counts, `IsOverview`); `ReadInto(index, pointer)`, `ReadInt16`,
+`ReadUInt8`; `Georeference(index)` (`TGeoTiffGeoreference`: scale, tie
+point, `PixelIsPoint`, EPSG, GDAL no-data; `West`, `North`, `CentreX`,
+`CentreY`; overviews via `Resized`, the full image's edges divided into
+the overview's pixels, as GDAL does). Classic TIFF either byte order,
+tiles or strips, 8/16-bit integer, one sample per pixel; none, LZW,
+Deflate (`System.ZLib.ZDecompress`), PackBits; predictor 2. LZW keeps each
+code as a start and length in the output (every string has been decoded
+already), widening one code early as libtiff does; KwKwK copied a byte at
+a time. Not BigTIFF, not floating point.
+
+The real ASTER files: `peardox/volatile`'s `img/iow_dem.tif` and
+`iow_num.tif` (N50W002) are genuine tiles, little-endian, 3601 x 3601
+in 256 tiles, LZW, no predictor, sizes as SHORT, offsets as LONG,
+`SampleFormat` 2 (DEM) and 1 (NUM), then overviews of 1801, 1201, 901,
+451, 401, 226, 57 and 45 in 128 tiles with `NewSubfileType` 1 and no geo
+tags of their own. Scale 1/3600; tie point (0, 0) at -2.000138889,
+51.000138889; pixel is area; EPSG 4326; no GDAL no-data tag. So the first
+pixel's centre is exactly -2, 51 and the last -1, 50.
+
+Tested with no Pascal compiler in the sandbox: a line-for-line Python
+port (same names and arithmetic) decoded all 9 images of both files
+identically to libtiff (Pillow), and 15 synthetic files covering strips
+and tiles, both byte orders, predictor 2 at 8 and 16 bits under LZW and
+Deflate, PackBits, no-data and pixel is point. LZW paths reached: 742
+table resets and about 1.07 million 12-bit codes and 110,000 KwKwK
+strings in the real DEM; 306 resets in random data. The Pascal itself is
+unbuilt, so `tools/GeoTiffCheck/GeoTiffCheck.dpr` (console, FMX-free;
+open the `.dpr`, the IDE makes the project) prints per image: size, min,
+max, -9999 count, FNV-1a of the decoded samples as little-endian bytes,
+and milliseconds. Its output for the two volatile files should be (from
+libtiff's decoding):
+
+```
+iow_dem.tif
+  0  3601 x 3601  min     0  max   250  voids      0  fnv1a 993D2602
+  1  1801 x 1801  min     0  max   249  voids      0  fnv1a E83AC132
+  2  1201 x 1201  min     0  max   247  voids      0  fnv1a 4DACF523
+  3   901 x  901  min     0  max   247  voids      0  fnv1a B28E3B63
+  4   451 x  451  min     0  max   244  voids      0  fnv1a 266EEB8B
+  5   401 x  401  min     0  max   244  voids      0  fnv1a F7002C07
+  6   226 x  226  min     0  max   227  voids      0  fnv1a B503B3EF
+  7    57 x   57  min     0  max   188  voids      0  fnv1a 03530934
+  8    45 x   45  min     0  max   172  voids      0  fnv1a 57493CC3
+iow_num.tif
+  0  3601 x 3601  min     2  max   250  voids      0  fnv1a D035738E
+  1  1801 x 1801  min     2  max   234  voids      0  fnv1a AF3DC3DA
+  2  1201 x 1201  min     2  max   231  voids      0  fnv1a 8BC06FBA
+  3   901 x  901  min     2  max   148  voids      0  fnv1a 9F51B7D7
+  4   451 x  451  min     3  max   126  voids      0  fnv1a 0BF910B5
+  5   401 x  401  min     3  max   126  voids      0  fnv1a 961C2CAD
+  6   226 x  226  min     3  max    81  voids      0  fnv1a D5DD8E6A
+  7    57 x   57  min     4  max    51  voids      0  fnv1a D2D22F6A
+  8    45 x   45  min     6  max    51  voids      0  fnv1a AFD9665B
+```
+
+**Verified 27 October 2026:** the owner built GeoTiffCheck on Windows and
+ran it on both files: all 18 checksums, minimums, maximums, void counts
+and the georeference line matched libtiff's exactly. Times (Windows):
+full DEM 45 ms, full NUM 22 ms, overviews 12 ms and less. macOS and
+Linux not yet run.
+
+Next: the 3D tab: Gorilla3D's backend unit and `GorillaGraphicsBackend` in
+the `.dpr` beside `ConfigureDrawing`, a `TGorillaViewport` on `tab3D`, a
+`lib` unit that turns a tile into a thinned grid of heights (voids
+-9999 filled or dropped, overviews for coarse grids), and a `ui` unit
+that builds the mesh and colours it.
+
+### The 3D tab (27 October 2026)
+
+The owner chose the tile: the single downloaded tile selected on the map.
+Built and run by the owner on Windows the same evening, after one fix
+(`Default(TTerrainGrid)` in `GDEMTerrainView` did not compile: the unit
+uses `Gorilla.DefTypes`, which declares an enumeration value `Default`
+that hides the intrinsic; now `EmptyTerrainGrid` in `GDEMTerrain`, and
+the Gorilla3D units come before `System.Math`). The Isle of Wight tile
+showed correctly at Medium, 2x, from the starting view: windings,
+colours, shading and camera all right, so items 1 and 2 of the list
+below did not arise. The toolbar's Detail caption came out after Reset
+View: `AddToBar` set `Align` before `Position.X`; now the other way
+round, starting at 8.
+
+Then, at the owner's request, the main toolbar (`layTop`: Fetch
+selection, Cancel, `lblSelection`, `edtSearch`) moved from the top of the
+form into the Map tab, above `layMap` (`.fmx` only; the search list is
+placed in form coordinates from `edtSearch`, so it follows). View > Find
+and `GoToHit` (search and Markers > Edit Markers' Go To) switch to the
+Map tab first. Cancel for local jobs (rescan, move, delete) is now only on
+the Map tab; downloads and imports have Cancel in their progress dialog.
+
+Owner's timing, Windows laptop (RTX 5090 Mobile, GPU drawing, High
+performance): Very fine, `3D: N50W002: 1801 x 1801 samples ... 3,268,864
+vertices and 6,480,000 triangles in 64 piece(s) ...; read in 23 ms, built
+in 649 ms`. At the owner's request Full (3601) was then added to
+`TERRAIN_DETAILS` (13 million vertices, 225 pieces; about 2.6 s expected
+at that rate, on the main thread). Tried: N53W005 at Full, `13,068,225
+vertices and 25,920,000 triangles in 225 piece(s) ...; read in 95 ms,
+built in 2492 ms` (Very fine 647 ms).
+
+Units:
+
+- `lib/GDEMTerrain` (no FMX): `LoadTerrainGrid(dem, tile, maxSize)` reads
+  the largest image of the `_dem.tif` no wider than `maxSize` (226, 451,
+  901, 1801 = overviews 6, 4, 3, 1 of an ASTER tile), converts degrees to
+  metres (111,320 m a degree; longitude times cos of the middle latitude),
+  fills -9999 voids from the mean of known neighbours pass after pass (64
+  at most, then 0). `TerrainChunk(grid, index, exaggeration)` makes one
+  piece of at most `TERRAIN_CHUNK_CELLS` (240) cells a side, 58,081
+  vertices, so 16-bit indices are enough whatever Gorilla3D's index format
+  is; pieces share edge vertices. Kilometres, centred; X east, Z north,
+  Y down (FMX's up is -Y, as Sprite3DCamera's notes say), so heights are
+  -Y. Normals from central differences of the exaggerated heights,
+  pointing -Y. Colours: `HeightColour` stops (blue water at 0 and below,
+  greens, yellow, browns, grey 3,000 m, white 4,500 m) times a hillshade
+  for a sun in the north-west 45 degrees up (35% ambient), baked in, so
+  the relief shows whether or not the vertex-colour material is lit.
+  Winding: clockwise seen from above with north up the screen
+  (NW, NE, SE; NW, SE, SW). Gorilla3D's guide calls its front faces
+  counter-clockwise, and its example quad, worked through with FMX's -Y up,
+  is clockwise on screen; `TERRAIN_FLIP_WINDING` reverses it.
+  `TERRAIN_DETAILS`, `TERRAIN_HEIGHTS` and defaults (451, 2x).
+- `ui/GDEMTerrainView`: `TTerrainView` (a `TLayout`, `HitTest` on) holds
+  a `TGorillaViewport` (`HitTest` off, so the layout gets the mouse, as
+  Sprite3D's AspectLayout does; `UseFixedFrameRate`, 60 fps, no VSync,
+  `UsingDesignCamera` off, dark background), a centre `TDummy`, a terrain
+  `TDummy` holding the pieces, a `TGorillaCamera` (FOV 45) with
+  `Target` the centre, and a point `TGorillaLight` on the camera (as in
+  Sprite3D). Not Sprite3D's camera rig, which the owner pointed out is made
+  for that app: the camera is placed from Distance, Azimuth (0 from the
+  south) and Elevation (5 to 89) and FMX's `TCamera.Target` aims it.
+  Left-drag turns, the wheel zooms (0.88 a notch, 0.5 km to 5 tile sizes),
+  double-click resets (south, 35 degrees, 1.25 tile sizes back). Each
+  piece follows the guide's "Direct TMeshData Manipulation" example:
+  `TGorillaSingletonMesh.Create(nil)`, `Parent` the terrain dummy, fill
+  `MeshData.VertexBuffer` (`Vertices`, `Normals`, `Color0`) and
+  `IndexBuffer`, `TMeshDef.Create(nil)`, `Mesh.Def := Def`,
+  `ApplyFromMeshData`, `IsStatic := True`, `MeshData.Clear`, then a
+  `TGorillaVertexColorMaterialSource` owned and parented by the mesh.
+  `ClearMesh` is `DeleteChildren` on the terrain dummy.
+- `MainForm`: `Build3DTab` (from `FormCreate`, after `LoadViewOptions`)
+  makes a toolbar on `tab3D` in code: Detail and Heights combo boxes, Reset
+  View, and an information label. `tabMain.OnChange := TabMainChange`
+  calls `ShowSelectedTerrain` when the 3D tab is chosen:
+  `SelectedTileNames(FDownloaded)` must be one tile; the tile is read
+  again only if it or the detail changed; the view is made on first use;
+  a new tile resets the view, a new detail keeps it. Logs
+  `3D: <tile>: W x H samples, ... image I of N, V vertices and T triangles
+  in P piece(s), heights ...; read in X ms, built in Y ms`. Heights
+  rebuilds the surface only (`Exaggeration`). Detail and Heights are kept
+  in `view.json` (`TViewOptions.TerrainDetail`, `TerrainHeights`).
+- README: Requirements (Gorilla3D 1.5.3, OpenGL 4.3, X11 on Linux), "The
+  3D view", the unit tables, roadmap; and the stale `GDEMMapTiles` row
+  (it still mentioned `FindMapTiles`) put right.
+
+Checked without a compiler: a Python port of `GDEMTerrain` on
+`iow_dem.tif` at 226 and 451: sizes 70.67 x 111.10 km at 451 (one degree
+at 50.5 N), every vertex covered once, largest piece 58,081, 405,000
+triangles as expected, none wound the wrong way, every normal up, no
+mismatch where pieces meet; void filling on high ground stays within the
+surrounding heights (mean error 33 m on a planted 12 x 16 hole).
+
+Unconfirmed until built, from documentation only, so look here first if
+the tab misbehaves:
+
+1. **Nothing visible from above, but visible from below:** the winding is
+   the wrong way for Gorilla3D; set `TERRAIN_FLIP_WINDING` to True.
+2. **Black or white surface:** `Color0` may not be in the mesh's vertex
+   format, or the vertex-colour material may need something else.
+3. **Leaks reported for `TMeshDef`:** the singleton mesh may not own the
+   definition assigned to `Def`; free it in `ClearMesh`.
+4. **Surface cut off near or far:** the camera's clipping planes; the
+   scene is in kilometres (a tile is about 111 by 70, the camera up to
+   about 550 away).
+
+### Mountains, Show in 3D, Click for 3D (27 October 2026)
+
+Owner's timing at Full: `3D: N53W005: 3601 x 3601 samples ... 13,068,225
+vertices and 25,920,000 triangles in 225 piece(s) ...; read in 95 ms,
+built in 2492 ms` (Very fine 647 ms; as estimated, four times).
+
+**Mountains** (owner: "Everest ain't in the locations, neither is K2").
+Natural Earth's `ne_10m_geography_regions_elevation_points.geojson` (same
+commit `ca96624`): 711 points, 644 named (633 mountains, 61 spot heights,
+9 depressions, 5 plateaus, 2 passes, 1 cape; the 67 with no name in
+`name`, `name_en` or `label` left out). One summit per range: Everest,
+K2, Kanchenjunga, Dhaulagiri, Nanga Parbat are there, Lhotse, Makalu, Cho
+Oyu, Annapurna are not; a hand-checked supplement could fill gaps.
+
+- `tools/build_vectors.py` writes **version 3**: after the places, a peaks
+  section (name, ASCII key, other names from `name_alt`, `name_en` and
+  `label`, two countries, lon/lat, Int16 elevation, kind, min zoom x 10),
+  sorted by min zoom then height. `nation1`/`nation2` hold ISO alpha-2
+  codes for most points (CN, RU, US) and names for a few (France, Italy),
+  so both are matched (`ADMIN`, `NAME`, `NAME_LONG`, `ISO_A2`,
+  `ISO_A2_EH`, `WB_A2`); with neither, the country whose outline holds the
+  point (even-odd ray test on the quantised rings). 33 on a border, 5 in
+  no country (offshore: Krakatau, Sakurajima, Gibraltar...). A rebuild at
+  version 2 first matched the repository's file byte for byte; version 3
+  is that file plus the version number and the section (1,130,340 bytes),
+  decoded back in Python to the last byte. Everest: 8,848 m, Nepal (by
+  outline); Mont Blanc France / Italy; Denali aka Mt. McKinley; Death
+  Valley -86 m, kind depression.
+- `GDEMVectors`: `VECTORS_VERSION` 3 (reads 1 to 3), `TGeoPeakKind`,
+  `TGeoPeak`, `ReadPeaks`, `Peaks`, `PeakText` (`Mount Everest, 8,848 m,
+  Nepal`), `Describe` counts peaks.
+- `GDEMSearch`: `skPeak` between `skEgg` and `skPlace` (a peak before a
+  town of the same name); entries for the name (or ASCII key) and each
+  other name. `Fold` keeps digits, so `k2` finds K2.
+- `MainForm.GoToHit`: a peak zooms to `PEAK_VIEW_KM` (40 km) round it,
+  rings it, selects its tile (`SelectTileAt` -> `FMap.SelectTiles`, named
+  after the peak, so the label reads `Mount Everest: 1 tile(s), ...`) and
+  puts `PeakText` in the status bar.
+
+**Show in 3D** (owner: build it from the map and switch tabs when ready;
+then "the left click is used for selection as well as triggering 3D -
+confusing"). The 3D tab no longer follows the selection: `TabMainChange`
+is gone, and `ShowSelectedTerrain` became `ShowTerrainTile(tile, force)`.
+`btnShow3D` on the Map tab's toolbar (enabled when exactly one downloaded
+tile is selected, in `UpdateButtons`) builds the selected tile with the
+hourglass (`IFMXCursorService`), then switches to the 3D tab. The 3D tab
+keeps its tile until Show in 3D sends another; Detail re-reads the tile on
+show.
+
+**Click for 3D** (owner: "possibly a switch control to choose what it
+does?"): `swClick3D` (`TSwitch`, with `lblClick3D`) beside Show in 3D,
+off by default, kept as `TViewOptions.ClickShows3D`. `MapMouseDown` sets
+`FMapLeftClick` for a plain left press (not Shift, which pans, nor Ctrl
+or Cmd, which marks); `MapSelectionChanged` clears it and, if it was set
+and the switch is on and Show in 3D is enabled, does what the button does.
+So finding a mountain (a selection by the program) never jumps to the 3D
+tab. `lblSelection` moved right to make room (X 468, 344 wide).
+
+**Panning the 3D view** (owner: "I can't seem to pan the 3D"; it had only
+turn and zoom). `TTerrainView`: right-drag, middle-drag or Shift +
+left-drag move the centre (`FPanX` east, `FPanZ` north, km), as the map
+pans. The ground follows the pointer: a pixel is 2 tan(FOV/2) x distance /
+height km across, and divided by sin(elevation) up the screen; across
+moves against the camera's right (cos az, sin az), down moves along its
+way ahead (-sin az, cos az). Limited to half a tile beyond the edges;
+`ResetView` centres it again. `PlaceCamera` offsets both the centre and
+the camera.
+
+**Search box** (owner: clicking in it should clear it; a "Search" label
+to its left; an arrow to its right, drawn as Sprite3D draws its buttons).
+`.fmx`: `lblSearch` (X 760, 52 wide), `edtSearch` narrowed to 236,
+`btnSearchGo` (X 1060, 32 x 26), all anchored right; `lblSelection`
+narrowed to 284. `BuildSearchGoIcon` (from `FormCreate`) puts an
+`FMX.Objects.TPath` with `SEARCH_GO_ICON` (Sprite3D's Play triangle,
+`M8 5v14l11-7z`, `WrapMode` Fit, 18 x 18) on the button as its
+`TagObject`; `btnSearchGoApplyStyleLookup` colours it with the button's
+`ResultingTextSettings.FontColor`, as Sprite3D's
+`TransportButtonApplyStyle` does. `FMX.Objects` is in the implementation
+uses and its TPath always written in full (`System.IOUtils` has one too).
+Enter and the button share `GoToSearchChoice`. Clearing: `edtSearchEnter`
+empties the box whenever it gains the focus; `edtSearchClick` empties it
+only while it shows the text `GoToHit` put there (`FSearchChosen`), so a
+click while typing still just moves the cursor. Emptying goes through the
+normal typing path, so the list closes and the ring goes.
+
+Built by the owner (the build reported only hints, see below); not yet
+reported on in use.
+
+**Hints** from that build, fixed: H2443 four times in `GDEMTerrainView`
+(FMX's `TVertexBuffer` and `TIndexBuffer` setters not expanded inline
+without `System.RTLConsts` in the uses; now listed), and H2077 in
+`TWorldMapView.PaintPlaces` (`LFree := False` before a loop that always
+set it first). The overlap tests there became a nested `IsClear`, with
+`LFound` set only when a side is found, so no value is unused and none
+can be left unset (W1036, see Lessons learned).
 
 ## NASA: what was found by testing
 

@@ -20,12 +20,15 @@
   )
   and, from version 2, Natural Earth's 1:10m populated places (towns and
   cities, about 7,300), each with its region, country and population, for
-  labelling the map and for searching (see @link(TGeoPlace)).
+  labelling the map and for searching (see @link(TGeoPlace)); and, from
+  version 3, its named elevation points (644 mountains, spot heights,
+  depressions, plateaus and passes, such as Mount Everest and K2), each
+  with its height and country, for searching (see @link(TGeoPeak)).
 
   File format, all numbers little-endian:
   @preformatted(
 'GDVC'                magic
-UInt16 version        1 or 2
+UInt16 version        1, 2 or 3
 UInt16 layer count
 for each layer:
   UInt8  kind         1 = lines, 2 = areas (closed rings)
@@ -52,6 +55,19 @@ for each place, most important first:
   UInt8  min zoom x 10 (see TGeoPlace.MinZoom)
   UInt8  flags: 1 = national capital
   UInt32 population
+UInt32 peak count     (version 3 on)
+for each peak, most important first:
+  UInt16 length, name in UTF-8
+  UInt16 length, name in plain ASCII for searching (empty when the name
+         is plain ASCII already)
+  UInt16 length, other names in UTF-8, separated by '|' (often empty)
+  UInt16 country: index in countries50, or 65535 for none
+  UInt16 second country, for a peak on a border, or 65535
+  Int32 lon, Int32 lat, in thousandths of a degree
+  Int16  elevation in metres
+  UInt8  kind (see TGeoPeakKind): 1 mountain, 2 spot height,
+         3 depression, 4 plateau, 5 pass, 0 anything else
+  UInt8  min zoom x 10
   )
 
   Natural Earth splits everything at the 180 degree meridian, so no line or
@@ -75,8 +91,8 @@ const
   VECTORS_MAGIC: array[0..3] of AnsiChar = ('G', 'D', 'V', 'C');
 
   { The newest file version this unit reads; it reads version 1, which has
-    no places, too. }
-  VECTORS_VERSION = 2;
+    no places, and version 2, which has no peaks, too. }
+  VECTORS_VERSION = 3;
 
   { How far, as a share of the main part's larger side, a small part of a
     country may lie from the main part (or a large part) and still be
@@ -156,6 +172,50 @@ type
     Capital: Boolean;
     { Population, from Natural Earth; 0 if not known. }
     Population: Integer;
+  end;
+
+  { @abstract(What kind of point a @link(TGeoPeak) is, as Natural Earth
+    classes it.) }
+  TGeoPeakKind = (
+    { Anything else. }
+    pkOther,
+    { A mountain. }
+    pkMountain,
+    { A spot height. }
+    pkSpotHeight,
+    { A depression, often below sea level. }
+    pkDepression,
+    { A plateau. }
+    pkPlateau,
+    { A pass. }
+    pkPass);
+
+  { @abstract(A named high (or low) point: a mountain, spot height,
+    depression, plateau or pass.) }
+  TGeoPeak = record
+    { The name, such as @code(Mount Everest). }
+    Name: string;
+    { The name in plain ASCII, for searching; empty when @link(Name) is
+      plain ASCII already. }
+    SearchName: string;
+    { Other names it goes by, such as @code(Mt. McKinley) for Denali;
+      often empty. }
+    OtherNames: TArray<string>;
+    { Its country's index in @link(TWorldVectors.Countries), or -1. }
+    Country: Integer;
+    { A second country, for a peak on a border, or -1. }
+    Country2: Integer;
+    { Latitude, in degrees. }
+    Lat: Double;
+    { Longitude, in degrees. }
+    Lon: Double;
+    { Height in metres; below 0 for some depressions. }
+    Elevation: Integer;
+    { What kind of point it is. }
+    Kind: TGeoPeakKind;
+    { Natural Earth's suggested web map zoom level for labelling it, as
+      for @link(TGeoPlace.MinZoom). }
+    MinZoom: Single;
   end;
 
   { @abstract(One layer of the vector data.) }
@@ -242,6 +302,8 @@ type
     FLayers: TArray<TGeoLayer>;
     { Backing field for @link(Places). }
     FPlaces: TArray<TGeoPlace>;
+    { Backing field for @link(Peaks). }
+    FPeaks: TArray<TGeoPeak>;
 
     { Finds a layer by name.
       @param(AName The layer's name in the file.)
@@ -313,13 +375,25 @@ type
       @returns(The text, or an empty string if there is no such place.) }
     function PlaceText(APlace: Integer): string;
 
+    { Names a peak for showing in a list, with its height and country,
+      such as @code(Mount Everest, 8,848 m, Nepal) or
+      @code(Mont Blanc, 4,807 m, France / Italy).
+      @param(APeak The peak's index in @link(Peaks).)
+      @returns(The text, or an empty string if there is no such peak.) }
+    function PeakText(APeak: Integer): string;
+
     { Describes what is loaded, for the log.
-      @returns(Such as "5 layers, 187,892 points, 7,342 places".) }
+      @returns(Such as "5 layers, 187,892 points, 7,342 places, 644
+        peaks".) }
     function Describe: string;
 
     { The towns and cities, most important first (the first to label when
       there is room for only some); empty for a version 1 file. }
     property Places: TArray<TGeoPlace> read FPlaces;
+
+    { The named high and low points, most important first; empty for a
+      file before version 3. }
+    property Peaks: TArray<TGeoPeak> read FPeaks;
   end;
 
 implementation
@@ -431,6 +505,54 @@ begin
     Result[LIndex].MinZoom := AReader.ReadByte / 10;
     Result[LIndex].Capital := (AReader.ReadByte and FLAG_CAPITAL) <> 0;
     Result[LIndex].Population := Integer(Min(Int64(AReader.ReadUInt32), Int64(MaxInt)));
+  end;
+end;
+
+{ Reads the peaks section of a version 3 file.
+  @param(AReader Reader positioned at the section.)
+  @param(ACountryCount How many countries there are, to check links.)
+  @returns(The peaks.) }
+function ReadPeaks(AReader: TBinaryReader; ACountryCount: Integer): TArray<TGeoPeak>;
+const
+  NO_COUNTRY = $FFFF;
+
+  { A country index from the file, or -1 for none or one out of range. }
+  function Country(AValue: Integer): Integer;
+  begin
+    if (AValue = NO_COUNTRY) or (AValue >= ACountryCount) then
+      Result := -1
+    else
+      Result := AValue;
+  end;
+
+var
+  LCount, LIndex, LKind: Integer;
+  LOther: string;
+begin
+  LCount := AReader.ReadInt32;
+  if LCount < 0 then
+    raise EVectorError.Create('Bad peak count');
+  SetLength(Result, LCount);
+  for LIndex := 0 to LCount - 1 do
+  begin
+    Result[LIndex].Name := ReadText(AReader, AReader.ReadUInt16, TEncoding.UTF8);
+    Result[LIndex].SearchName := ReadText(AReader, AReader.ReadUInt16, TEncoding.ASCII);
+    LOther := ReadText(AReader, AReader.ReadUInt16, TEncoding.UTF8);
+    if LOther <> '' then
+      Result[LIndex].OtherNames := LOther.Split(['|'])
+    else
+      Result[LIndex].OtherNames := nil;
+    Result[LIndex].Country := Country(AReader.ReadUInt16);
+    Result[LIndex].Country2 := Country(AReader.ReadUInt16);
+    Result[LIndex].Lon := AReader.ReadInt32 / VECTORS_UNITS_PER_DEGREE;
+    Result[LIndex].Lat := AReader.ReadInt32 / VECTORS_UNITS_PER_DEGREE;
+    Result[LIndex].Elevation := AReader.ReadInt16;
+    LKind := AReader.ReadByte;
+    if LKind <= Ord(High(TGeoPeakKind)) then
+      Result[LIndex].Kind := TGeoPeakKind(LKind)
+    else
+      Result[LIndex].Kind := pkOther;
+    Result[LIndex].MinZoom := AReader.ReadByte / 10;
   end;
 end;
 
@@ -819,10 +941,12 @@ var
   LLayer: TGeoLayer;
   LLayers: TArray<TGeoLayer>;
   LPlaces: TArray<TGeoPlace>;
+  LPeaks: TArray<TGeoPeak>;
   LCountries: Integer;
 begin
   LLayers := nil;
   LPlaces := nil;
+  LPeaks := nil;
   // The reader must not free the caller's stream
   LReader := TBinaryReader.Create(AStream, TEncoding.ASCII, False);
   try
@@ -848,6 +972,8 @@ begin
           if SameText(LLayer.Name, LAYER_COUNTRIES) then
             LCountries := Length(LLayer.Features);
         LPlaces := ReadPlaces(LReader, LCountries);
+        if LVersion >= 3 then
+          LPeaks := ReadPeaks(LReader, LCountries);
       end;
     except
       on E: EVectorError do
@@ -872,6 +998,7 @@ begin
     LLayer.Free;
   FLayers := LLayers;
   FPlaces := LPlaces;
+  FPeaks := LPeaks;
 end;
 
 procedure TWorldVectors.LoadFromResource;
@@ -973,6 +1100,21 @@ begin
     Result := Result + ', ' + LCountry;
 end;
 
+function TWorldVectors.PeakText(APeak: Integer): string;
+var
+  LCountry, LCountry2: string;
+begin
+  if not InRange(APeak, 0, High(FPeaks)) then
+    Exit('');
+  Result := FPeaks[APeak].Name + ', ' + FormatFloat('#,##0', FPeaks[APeak].Elevation) + ' m';
+  LCountry := CountryName(FPeaks[APeak].Country);
+  LCountry2 := CountryName(FPeaks[APeak].Country2);
+  if (LCountry <> '') and (LCountry2 <> '') then
+    Result := Result + ', ' + LCountry + ' / ' + LCountry2
+  else if LCountry <> '' then
+    Result := Result + ', ' + LCountry;
+end;
+
 function TWorldVectors.Describe: string;
 var
   LLayer: TGeoLayer;
@@ -981,8 +1123,8 @@ begin
   LPoints := 0;
   for LLayer in FLayers do
     Inc(LPoints, LLayer.PointCount);
-  Result := Format('%d layers, %.0n points, %.0n places',
-    [Length(FLayers), LPoints * 1.0, Length(FPlaces) * 1.0]);
+  Result := Format('%d layers, %.0n points, %.0n places, %.0n peaks',
+    [Length(FLayers), LPoints * 1.0, Length(FPlaces) * 1.0, Length(FPeaks) * 1.0]);
 end;
 
 end.

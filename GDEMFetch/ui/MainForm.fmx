@@ -149,56 +149,6 @@ object frmMain: TfrmMain
     Left = 1016
     Top = 72
   end
-  object layTop: TLayout
-    Align = Top
-    Size.Width = 1100.000000000000000000
-    Size.Height = 40.000000000000000000
-    Size.PlatformDefault = False
-    TabOrder = 0
-    object btnFetchSelection: TButton
-      Position.X = 8.000000000000000000
-      Position.Y = 7.000000000000000000
-      Size.Width = 120.000000000000000000
-      Size.Height = 26.000000000000000000
-      Size.PlatformDefault = False
-      TabOrder = 0
-      Text = 'Fetch selection'
-      OnClick = btnFetchSelectionClick
-    end
-    object btnCancel: TButton
-      Position.X = 136.000000000000000000
-      Position.Y = 7.000000000000000000
-      Size.Width = 80.000000000000000000
-      Size.Height = 26.000000000000000000
-      Size.PlatformDefault = False
-      TabOrder = 1
-      Text = 'Cancel'
-      OnClick = btnCancelClick
-    end
-    object lblSelection: TLabel
-      Anchors = [akLeft, akTop, akRight]
-      Position.X = 228.000000000000000000
-      Position.Y = 9.000000000000000000
-      Size.Width = 584.000000000000000000
-      Size.Height = 22.000000000000000000
-      Size.PlatformDefault = False
-      TextSettings.Trimming = Character
-      Text = 'Nothing selected'
-    end
-    object edtSearch: TEdit
-      Touch.InteractiveGestures = [LongTap, DoubleTap]
-      Anchors = [akTop, akRight]
-      TabOrder = 2
-      Position.X = 820.000000000000000000
-      Position.Y = 8.000000000000000000
-      Size.Width = 272.000000000000000000
-      Size.Height = 24.000000000000000000
-      Size.PlatformDefault = False
-      TextPrompt = 'Find a country, place or marker'
-      OnChangeTracking = edtSearchChangeTracking
-      OnKeyDown = edtSearchKeyDown
-    end
-  end
   object layStatus: TLayout
     Align = Bottom
     Margins.Left = 8.000000000000000000
@@ -252,12 +202,116 @@ object frmMain: TfrmMain
       Size.PlatformDefault = False
       TabOrder = 0
       Text = 'Map'
+      object layTop: TLayout
+        Align = Top
+        Size.Width = 1100.000000000000000000
+        Size.Height = 40.000000000000000000
+        Size.PlatformDefault = False
+        TabOrder = 0
+        object btnFetchSelection: TButton
+          Position.X = 8.000000000000000000
+          Position.Y = 7.000000000000000000
+          Size.Width = 120.000000000000000000
+          Size.Height = 26.000000000000000000
+          Size.PlatformDefault = False
+          TabOrder = 0
+          Text = 'Fetch selection'
+          OnClick = btnFetchSelectionClick
+        end
+        object btnCancel: TButton
+          Position.X = 136.000000000000000000
+          Position.Y = 7.000000000000000000
+          Size.Width = 80.000000000000000000
+          Size.Height = 26.000000000000000000
+          Size.PlatformDefault = False
+          TabOrder = 1
+          Text = 'Cancel'
+          OnClick = btnCancelClick
+        end
+        object btnShow3D: TButton
+          Position.X = 224.000000000000000000
+          Position.Y = 7.000000000000000000
+          Size.Width = 96.000000000000000000
+          Size.Height = 26.000000000000000000
+          Size.PlatformDefault = False
+          TabOrder = 3
+          Text = 'Show in 3D'
+          OnClick = btnShow3DClick
+        end
+        object lblClick3D: TLabel
+          Position.X = 328.000000000000000000
+          Position.Y = 9.000000000000000000
+          Size.Width = 76.000000000000000000
+          Size.Height = 22.000000000000000000
+          Size.PlatformDefault = False
+          TextSettings.HorzAlign = Trailing
+          Text = 'Click for 3D'
+        end
+        object swClick3D: TSwitch
+          IsChecked = False
+          Position.X = 410.000000000000000000
+          Position.Y = 8.000000000000000000
+          Size.Width = 48.000000000000000000
+          Size.Height = 24.000000000000000000
+          Size.PlatformDefault = False
+          TabOrder = 4
+          OnSwitch = swClick3DSwitch
+        end
+        object lblSelection: TLabel
+          Anchors = [akLeft, akTop, akRight]
+          Position.X = 468.000000000000000000
+          Position.Y = 9.000000000000000000
+          Size.Width = 284.000000000000000000
+          Size.Height = 22.000000000000000000
+          Size.PlatformDefault = False
+          TextSettings.Trimming = Character
+          Text = 'Nothing selected'
+        end
+        object lblSearch: TLabel
+          Anchors = [akTop, akRight]
+          Position.X = 760.000000000000000000
+          Position.Y = 9.000000000000000000
+          Size.Width = 52.000000000000000000
+          Size.Height = 22.000000000000000000
+          Size.PlatformDefault = False
+          TextSettings.HorzAlign = Trailing
+          Text = 'Search'
+        end
+        object edtSearch: TEdit
+          Touch.InteractiveGestures = [LongTap, DoubleTap]
+          Anchors = [akTop, akRight]
+          TabOrder = 2
+          Position.X = 820.000000000000000000
+          Position.Y = 8.000000000000000000
+          Size.Width = 236.000000000000000000
+          Size.Height = 24.000000000000000000
+          Size.PlatformDefault = False
+          TextPrompt = 'Find a country, place or marker'
+          OnChangeTracking = edtSearchChangeTracking
+          OnKeyDown = edtSearchKeyDown
+          OnEnter = edtSearchEnter
+          OnClick = edtSearchClick
+        end
+        object btnSearchGo: TButton
+          Anchors = [akTop, akRight]
+          Position.X = 1060.000000000000000000
+          Position.Y = 7.000000000000000000
+          Size.Width = 32.000000000000000000
+          Size.Height = 26.000000000000000000
+          Size.PlatformDefault = False
+          TabOrder = 5
+          Hint = 'Go to the place found'
+          ShowHint = True
+          OnClick = btnSearchGoClick
+          OnApplyStyleLookup = btnSearchGoApplyStyleLookup
+        end
+      end
       object layMap: TLayout
         Align = Client
         Size.Width = 1100.000000000000000000
-        Size.Height = 562.000000000000000000
+        Size.Height = 522.000000000000000000
         Size.PlatformDefault = False
-        TabOrder = 0
+        TabOrder = 1
       end
     end
     object tab3D: TTabItem

@@ -57,6 +57,11 @@ GDEM on 3 December 2025, so older scripts that use it no longer work.
 - **Delphi 13** with FireMonkey (FMX). The build uses RAD Studio's
   `brcc32` and its FMX styles in `Redist\styles\Fmx` (see
   [Themes](#themes)); both come with every RAD Studio install.
+- **Gorilla3D 1.5.3**, installed in Delphi, for the 3D tab
+  (<https://gorilla3d.de>; reference at <https://peardox.com/G3D/>). It
+  draws with OpenGL 4.3 or later on Windows and Linux (on Linux through
+  Mesa's GLX under X11, not Wayland) and with Metal on macOS; see
+  [The 3D view](#the-3d-view).
 - **Skia**, which comes with Delphi 13. GDEMFetch draws with it, on the
   GPU by default (`ConfigureDrawing` in `GDEMDrawing`, called from
   `GDEMFetch.dpr`, and the `SKIA` define the IDE adds when Skia is enabled
@@ -64,6 +69,9 @@ GDEM on 3 December 2025, so older scripts that use it no longer work.
 - **Neon JSON library**, included as a git submodule in `delphi-neon/`.
   Clone with submodules (see below). The project's search path already
   points at `..\delphi-neon\Source`.
+- **FastMM5**, the memory manager on Windows, included as a git submodule
+  in `FastMM5/`; see [Memory leaks](#memory-leaks). The projects' search
+  path already points at `..\FastMM5`.
 - **A free NASA Earthdata Login account**, from
   <https://urs.earthdata.nasa.gov>, and a **bearer token** generated
   there. Tokens last 60 days, so a new one is needed from time to time.
@@ -99,11 +107,15 @@ If you already cloned without submodules, run
    This takes about a dozen requests and needs no token.
 4. Select tiles on the map (a single tile is a left click) and press
    **Fetch selection**.
+5. To see a downloaded tile in 3D, select it and press **Show in 3D**
+   (or find a mountain first, such as Everest); see
+   [The 3D view](#the-3d-view).
 
 ### Using the map
 
 | Action | Control |
 |--------|---------|
+| Show the selected tile in 3D | Show in 3D, on the toolbar; or switch on Click for 3D and click a downloaded tile; see [The 3D view](#the-3d-view) |
 | Select a block of tiles | Left-drag. The size and tile counts update as you drag. A left click selects one tile. To reach beyond the screen, drag towards an edge and the map scrolls that way, faster the nearer the edge, or use the mouse wheel to zoom while still dragging. On Windows the pointer stays inside the map until you let go. |
 | Select a whole country | Right-click it (on a Mac trackpad, click with two fingers). Every tile the country touches is selected and tinted, including tiles along its borders and coasts, so neighbouring countries' tiles are included where they share one. Overseas parts count too: France includes French Guiana, the United States includes Alaska and Hawaii. The selection label then gives the country, its tile count, and how many have data and are downloaded, such as `Germany: 68 tile(s), ...`. Fetch selection and Delete Selected Downloads work on just those tiles. Dragging a new selection or clicking replaces it. |
 | Add a country to the selection | Shift + right-click it (on a Mac trackpad, Shift + two-finger click). Its tiles join those already selected, whether a country, several countries or a dragged block; a tile in both is selected once. The label names the countries, such as `Germany + France: 146 tile(s), ...`, or the first two and how many more when there are over three (a dragged block is named `Selected area`). With nothing selected it is the same as a right-click. |
@@ -122,7 +134,7 @@ that tile has data, and the country it is in. Progress messages and errors appea
 **Debug** tab (the file-by-file detail of downloads goes to a
 [report file](#how-downloads-work) instead), and serious errors (a failed download or tile index build,
 unreadable settings, a missing world map) are also shown in a dialog. The
-**3D** tab is reserved for a later stage.
+**3D** tab shows the selected tile in 3D; see [The 3D view](#the-3d-view).
 
 ### Menus
 
@@ -298,21 +310,75 @@ whichever is clear of those already drawn; if none is, it is left out. Capitals 
 labelled in yellow. Zoomed right out about 25 are named; over Europe at
 30 pixels a degree, about 100.
 
+Mountains come from Natural Earth's 1:10m elevation points: 644 named
+mountains, spot heights, depressions, plateaus and passes, each with its
+height and country, two for a peak on a border (Mont Blanc, France /
+Italy). They are not drawn on the map, but the search finds them (see
+[Finding places](#finding-places)). Natural Earth picks one well-known
+summit for each range, so Everest, K2, Kanchenjunga, Denali, Kilimanjaro,
+Mont Blanc and Ben Nevis are there, but some famous neighbours are not
+(Lhotse, Makalu, Annapurna).
+
 The data is linked into the program as the `WORLDVECTORS` resource, built
 from `maps/world_vectors.bin`, so nothing is deployed. That file is made
 from Natural Earth's GeoJSON files by `tools/build_vectors.py`; its
 comments say which files it needs and how to run it. It holds five layers
 (1:110m and 1:50m borders, 1:110m and 1:50m coastlines, and 1:50m country
-outlines with names), about 190,000 points, and the towns and cities, in
-1.1 MB. `GDEMVectors.pas` documents the format (version 2; version 1, from
-before the towns and cities, still reads).
+outlines with names), about 190,000 points, the towns and cities, and the
+mountains, in 1.1 MB. `GDEMVectors.pas` documents the format (version 3;
+version 1, from before the towns and cities, and version 2, from before
+the mountains, still read).
+
+### The 3D view
+
+The **3D** tab shows one downloaded tile as a surface you can turn and
+zoom. Select a single downloaded tile on the map (a left click, or find a
+mountain), then press **Show in 3D** on the Map tab's toolbar: the tile is
+built while the map is showing, and the 3D tab opens once it is ready. The
+3D tab keeps showing that tile, whatever is selected on the map
+afterwards, until Show in 3D sends another. The line at the top says the
+tile's size and heights.
+
+With **Click for 3D** switched on (beside Show in 3D), a left click that
+selects a single downloaded tile also shows it in 3D, saving the press of
+the button; off, as it starts, a click only selects. Only your own clicks
+count: finding a mountain selects its tile but stays on the map. The
+switch is remembered in `view.json`.
+
+| Action | Control |
+|--------|---------|
+| Turn the view | Left-drag: across to swing round, up and down to look from higher or lower |
+| Move the view | Right-drag, middle-drag or Shift + left-drag, as on the map: the ground follows the pointer, up to half a tile beyond the edges |
+| Zoom | Mouse wheel |
+| Back to the starting view (from the south, 35 degrees up, centred on the tile) | Double-click, or Reset View |
+| More or less detail | **Detail**: Coarse (226 samples across), Medium (451, the default), Fine (901), Very fine (1801) or Full (3601, every sample) |
+| Stretch the heights | **Heights**: 1, 2 (the default), 3, 5 or 10 times true scale |
+
+The detail picks one of the images inside the tile's `_dem.tif` (the full
+3601 x 3601 and its overviews), so a coarse view reads only a small part
+of the file. Very fine is about 3.2 million vertices (built in 0.65 s on
+a laptop with an RTX 5090), and Full, every sample of the tile, about 13
+million in 225 pieces, four times as long; the window waits while it is
+built. The surface is coloured by height, from blue water through greens,
+yellows and browns to grey rock and white above 4,500 m, and shaded as if
+lit from the north-west, so the relief shows at any angle. Voids (-9999)
+are filled from the heights around them. Detail and Heights are remembered
+in `view.json`.
+
+The surface is built in pieces of at most 241 x 241 vertices (Medium is 4,
+Very fine 64), each small enough for 16-bit indices, and drawn by
+Gorilla3D. The Debug tab logs each tile shown: its size, vertices,
+triangles and pieces, and the milliseconds taken to read and to build it.
 
 ### Finding places
 
-The box at the right of the toolbar finds countries, towns and cities, and
-your [markers](#markers). Matches are listed under it as you type, best
-first; Up and Down move through them, Enter or a click goes to one, and
-Escape closes the list.
+The **Search** box at the right of the Map tab's toolbar finds countries,
+towns and cities, mountains, and your [markers](#markers). Matches are
+listed under it as you type, best first; Up and Down move through them,
+Enter, the arrow button beside the box or a click goes to one, and Escape
+closes the list. Clicking into the box empties it, ready for a new search
+(as does a click on the box while it shows a place you have gone to);
+text you are typing is left alone.
 
 - **A country** is zoomed to fit the window with a margin round it, as
   far as the zoom allows (Vatican City and Jersey are too small to fill
@@ -323,6 +389,11 @@ Escape closes the list.
 - **A town, city or marker** is moved to the middle of the map at the
   zoom you are at, and ringed in yellow. Escape with the list closed, or
   emptying the box, removes the ring.
+- **A mountain** is zoomed in on, about 40 km across, ringed in yellow,
+  and its tile selected, so Show in 3D shows it straight away. The list
+  gives its height and country, such as `Mount Everest, 8,848 m, Nepal`,
+  and it is also found by other names (`mckinley` finds Denali). Depressions
+  such as Death Valley (-86 m) are found the same way.
 - **Spelling mistakes** are forgiven: `lodnon`, `edinbrugh`, `bejing` and
   `kuala lumpar` all find the right place. Accents and punctuation do not
   matter (`sao paulo`, `zurich`, `st johns`, `ndjamena`), and a place is
@@ -331,12 +402,13 @@ Escape closes the list.
   mistake is a wrong, missing, extra or swapped letter.
 - **Order:** the whole name, then the start of the name, then the start
   of a later word (`york` finds New York), then anywhere in the name, then
-  names with mistakes. Within each, markers come before countries, and
-  countries before towns and cities, which are in order of importance.
+  names with mistakes. Within each, markers come before countries,
+  countries before mountains, and mountains before towns and cities; the
+  last two in order of importance.
   Places with the same name are told apart by region and country, such as
   `London, Ontario, Canada`.
 
-The search runs on every letter typed, over about 8,200 names, in a few
+The search runs on every letter typed, over about 9,200 names, in a few
 milliseconds; see `GDEMSearch.pas`.
 
 #### Easter eggs
@@ -532,6 +604,19 @@ and linked into the program as resources, so nothing needs deploying:
 This is the same arrangement as Sprite3D's themes, so the two projects
 look and behave alike.
 
+### Memory leaks
+
+On Windows, [FastMM5](https://github.com/pleriche/FastMM5) is the memory
+manager of GDEMFetch and TileMaker: it is the first unit in each `.dpr`.
+To have leaks reported, remove the `//` before `{$DEFINE REPORT_LEAKS}`
+near the top of the `.dpr` (leave it commented out for a release build).
+Leaks still allocated when the program closes are then listed in a
+message box on every platform, and on Windows FastMM5 also writes every
+leaked block and what it holds to `GDEMFetch_MemoryManager_EventLog.txt`
+(or `TileMaker_...`) beside the executable. The file is deleted at
+start-up, so it only ever holds the last run's leaks; no file means
+nothing leaked. On other platforms the system's memory manager is used.
+
 ## Deploying
 
 The world map, its high-resolution tile set, and its borders and
@@ -590,7 +675,7 @@ Removable drives are normally mounted under `/media/<user>/` or
 | Tile index (`tileindex.bin`) | Same folder as the settings |
 | Download reports (`Reports/download-*.log`) | Same folder as the settings |
 | Markers (`markers.json`) | Same folder as the settings |
-| What the View menu shows (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
+| What the View menu shows, the 3D tab's Detail and Heights, and Click for 3D (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
 | Windows' graphics processor choice | Windows only: the registry value named after the program's path in `HKEY_CURRENT_USER\Software\Microsoft\DirectX\UserGpuPreferences`; see [Drawing](#drawing) |
 | Downloaded tiles | The **data folder**, chosen in File > Settings. Default: `ASTGTM` in your documents folder. |
 
@@ -829,6 +914,31 @@ tile set (an interrupted or cancelled save). `common/GDEMTileSet.pas`
 reads and writes it, and checks that every level is whole tiles and half
 the size of the one before.
 
+## Reading the tiles
+
+`common/GDEMGeoTiff.pas` reads the downloaded GeoTIFF files in pure
+Pascal, so no native library (such as libtiff) has to be deployed.
+`TGeoTiff` opens a file, lists its images (the full 3601 x 3601 image and
+its eight overviews, 1801 down to 45 pixels across) and decodes any of
+them into an array: signed 16-bit heights from a `_dem.tif`
+(`ReadInt16`), unsigned 8-bit values from a `_num.tif` (`ReadUInt8`).
+`Georeference` says where each image lies: for a tile such as
+`N50W002`, the first pixel's centre is exactly 2 degrees west, 51 north,
+and the last 1 west, 50 north.
+
+It reads classic TIFF in either byte order, tiled or in strips, with 8- or
+16-bit samples, uncompressed or compressed with LZW (as ASTER GDEM is),
+Deflate or PackBits, with or without the horizontal predictor, which
+covers most single-band GeoTIFFs GDAL writes. It was checked against
+libtiff on two real ASTER tiles, every pixel of all nine images of each,
+and on test files of every other kind it reads.
+
+`tools/GeoTiffCheck` is a console program that decodes files with it and
+prints, for each image, the size, the lowest and highest values, how many
+are -9999 (a void), an FNV-1a checksum of the decoded samples and the time
+taken. Open `GeoTiffCheck.dpr` in Delphi (the IDE makes its project file)
+and run it with tile files as arguments.
+
 ## Repository layout
 
 | Path | Contents |
@@ -840,9 +950,11 @@ the size of the one before.
 | `styles/` | FMX styles for the themes, with the resource script and the pre-build script that builds them; see [Themes](#themes) |
 | `maps/` | World map images and vectors. `world_1080x540.jpg` and `world_vectors.bin` (borders, coastlines, countries, and towns and cities) are linked into GDEMFetch as resources. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository; `maps/tiles/` is the tile set TileMaker made from it (225-pixel JPEG tiles, four levels, 1530 tiles, 8.4 MB), which is, and `maps/tiles.zip` the same packed into one file by `tools/pack_tiles.py`, linked into GDEMFetch as a resource. |
 | `delphi-neon/` | Neon JSON library (git submodule) |
+| `FastMM5/` | FastMM5 memory manager, used on Windows (git submodule); see [Memory leaks](#memory-leaks) |
 | `tools/pasdoc_check.py` | Checks the units of `GDEMFetch/`, `TileMaker/` and `common/` follow the PasDoc and layout rules; see [Notes for Claude](#notes-for-claude) |
 | `tools/build_vectors.py` | Builds `maps/world_vectors.bin` from Natural Earth; see [Borders and coastlines](#borders-and-coastlines) |
 | `tools/pack_tiles.py` | Packs `maps/tiles` into `maps/tiles.zip`; see [The high-resolution map](#the-high-resolution-map) |
+| `tools/GeoTiffCheck/` | A console program that decodes GeoTIFF files with `GDEMGeoTiff` and prints each image's size, range, voids and a checksum, to check the reader; see [Reading the tiles](#reading-the-tiles) |
 | `additions.md` | How to add places the search finds: markers, easter eggs, towns and countries |
 | `CLAUDE.md` | Handover notes: the project's current state, test results and lessons learned, for picking the work up in a new conversation |
 | `docs/` | Ignored for development |
@@ -882,17 +994,19 @@ it:
 | `GDEMAwake` | `TKeepAwake`, which keeps the computer from sleeping while a job runs |
 | `GDEMBrowser` | Opens web links in the default browser on each platform |
 | `GDEMGpuPreference` | Reads and sets Windows' graphics processor preference for the program (ported from Sprite3D's `GpuPreference`); does nothing on other platforms |
-| `GDEMMapTiles` | `OpenBuiltInMapTiles`, the tile set linked into the program, and `FindMapTiles`, a tile set folder from Settings or beside the program to draw instead |
+| `GDEMMapTiles` | `OpenBuiltInMapTiles`, the tile set linked into the program |
+| `GDEMTerrain` | A tile's heights at a chosen detail (`LoadTerrainGrid`), and the pieces of its 3D surface: positions, normals, shaded colours and triangles (`TerrainChunk`) |
 
 **ui/**
 
 | Unit | Purpose |
 |------|---------|
-| `MainForm` | Main window: toolbar and menus over three tabs (Map, 3D, Debug), with progress and status bars; runs the jobs and shows their progress |
+| `MainForm` | Main window: menus over three tabs (Map, with its toolbar and the search box; 3D, with its own; Debug), with progress and status bars; runs the jobs and shows their progress |
 | `SettingsForm` | Modal settings dialog |
 | `ProgressForm` | Modal progress dialog shown while data is downloaded or imported |
 | `MarkersForm` | Modal dialog listing the markers, to go to, rename or delete them |
 | `GDEMWorldMap` | `TWorldMapView`, the zoomable map with tile selection, borders and coastlines, the high-resolution map's tiles (`MapTiles`), town and city names, markers, and `ZoomToArea` and `CentreOn` for the search |
+| `GDEMTerrainView` | `TTerrainView`, the 3D tab's Gorilla3D view of a tile, turned and zoomed with the mouse |
 | `GDEMDrawing` | `ConfigureDrawing`, called from the `.dpr` before `Application.Initialize`, which tells Skia to draw on the GPU or the CPU and applies the Windows graphics processor choice |
 | `GDEMThemes` | The themes, and `ApplyTheme` |
 | `GDEMStyles` | Switches FMX styles at run time (ported from Sprite3D) |
@@ -918,6 +1032,7 @@ reports any that do. Each program's `.dpr` lists them with
 | `GDEMResample` | `TRGBA8Image`, and `ReduceImage`: shrinking by a whole factor with Lanczos-3 in linear light |
 | `GDEMTileSet` | `TTileSet`, a tile set's description, read and written as `tileset.json` with Neon |
 | `GDEMTileCache` | `TTileCache`: a tile set's tiles, from its folder or packed in a zip, decoded with Skia when first needed and kept, the least recently used dropped first; a level can be kept for good (used by GDEMFetch) |
+| `GDEMGeoTiff` | `TGeoTiff`: reads GeoTIFF files such as the downloaded tiles, in pure Pascal; see [Reading the tiles](#reading-the-tiles) |
 
 The world map image `maps/world_1080x540.jpg` is linked into GDEMFetch as
 the `WORLDMAP` RCDATA resource, `maps/easter_eggs.json` as `EASTEREGGS`,
@@ -929,11 +1044,11 @@ the left and latitude 90 at the top.
 
 ## Roadmap
 
-- **GeoTIFF reader:** a pure-Pascal reader for the DEM and NUM files, so
-  no native library has to be shipped. Older work in
-  <https://github.com/peardox/volatile> can be reused. That project uses a
-  Windows-only libtiff binding, so only its logic carries over, not the
-  binding.
+- **3D view:** several tiles stitched together, the high-resolution map
+  laid over the surface, finer detail near the camera, and the surface
+  built in the background so Full detail does not hold up the window.
+- **More mountains:** a checked list of famous peaks Natural Earth leaves
+  out, such as Lhotse, Makalu and Annapurna.
 - **Finer borders:** Natural Earth's 1:10m borders and coastlines would
   suit the [high-resolution map](#the-high-resolution-map) when zoomed in;
   they can be added as more layers in `tools/build_vectors.py`.
@@ -962,7 +1077,8 @@ got to, what has been tested and what was learned along the way.
 
 - Honour `.gitignore`, `.gitmodules` and the other `.git*` files.
 - Ignore the `docs/` and `models/` folders.
-- Neon is a submodule; never copy its sources into the project.
+- Neon and FastMM5 are submodules; never copy their sources into the
+  project, and never change them.
 
 ### Code
 

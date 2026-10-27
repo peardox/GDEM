@@ -87,7 +87,7 @@ uses
   FMX.Controls.Presentation, FMX.Menus, FMX.TabControl, FMX.ListBox,
   GDEMCancel, GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex,
   GDEMStore, GDEMThemes, GDEMReport, GDEMVectors, GDEMTileCache, GDEMMarkers,
-  GDEMSearch, GDEMViewOptions, GDEMEasterEggs, ProgressForm;
+  GDEMSearch, GDEMViewOptions, GDEMEasterEggs, GDEMTerrainView, ProgressForm;
 
 const
   { Name of the RCDATA resource holding the world map image. }
@@ -107,6 +107,13 @@ const
   { Kilometres in a degree of latitude, near enough, for sizing the view
     round an easter egg. }
   KM_PER_DEGREE = 111.32;
+
+  { The search's go button's icon, a right-pointing triangle: an SVG path
+    in a 24 x 24 box, the same as Sprite3D's Play button. }
+  SEARCH_GO_ICON = 'M8 5v14l11-7z';
+
+  { Kilometres shown round a mountain found by the search. }
+  PEAK_VIEW_KM = 40;
 
 type
   { The work done by a job, run on a background thread.
@@ -182,11 +189,25 @@ type
     btnFetchSelection: TButton;
     { Stops the running job. Enabled only while one is running. }
     btnCancel: TButton;
+    { Shows the selected tile in 3D, then switches to the 3D tab. Enabled
+      while exactly one downloaded tile is selected. }
+    btnShow3D: TButton;
+    { Caption for @link(swClick3D). }
+    lblClick3D: TLabel;
+    { On, a left click on the map that selects a single downloaded tile
+      also shows it in 3D, as @link(btnShow3D) does; off, a click only
+      selects. Remembered in @code(view.json). }
+    swClick3D: TSwitch;
     { Describes the map selection. }
     lblSelection: TLabel;
     { Search box for countries, places and markers; matches show in
       @link(FSearchList) under it. }
     edtSearch: TEdit;
+    { "Search", before @link(edtSearch). }
+    lblSearch: TLabel;
+    { Goes to the best match, or the one picked in the list, as Enter
+      does; shows a right-pointing triangle drawn as a vector path. }
+    btnSearchGo: TButton;
     { View > Find...: puts the cursor in @link(edtSearch). }
     mnuFind: TMenuItem;
     { Separator under @link(mnuFind). }
@@ -252,6 +273,15 @@ type
     { Asks the running job to stop.
       @param(Sender The button.) }
     procedure btnCancelClick(Sender: TObject);
+
+    { Builds the selected tile's 3D view while the map is still showing,
+      then switches to the 3D tab once it is ready.
+      @param(Sender The button.) }
+    procedure btnShow3DClick(Sender: TObject);
+
+    { Remembers the Click for 3D switch.
+      @param(Sender The switch.) }
+    procedure swClick3DSwitch(Sender: TObject);
 
     { Opens the settings dialog.
       @param(Sender The menu item.) }
@@ -346,6 +376,26 @@ type
     procedure edtSearchKeyDown(Sender: TObject; var Key: Word; var KeyChar: WideChar;
       Shift: TShiftState);
 
+    { Empties the search box as it gains the focus, ready for a new
+      search.
+      @param(Sender The search box.) }
+    procedure edtSearchEnter(Sender: TObject);
+
+    { Empties the search box when it is clicked while it shows a place
+      already gone to; text being typed is left alone, so a click can
+      still move the cursor in it.
+      @param(Sender The search box.) }
+    procedure edtSearchClick(Sender: TObject);
+
+    { Goes to the best match, as Enter does.
+      @param(Sender The button.) }
+    procedure btnSearchGoClick(Sender: TObject);
+
+    { Colours the button's triangle like the button's text, so it shows
+      on every theme, light or dark.
+      @param(Sender The button.) }
+    procedure btnSearchGoApplyStyleLookup(Sender: TObject);
+
     { Puts the cursor in the search box.
       @param(Sender The menu item.) }
     procedure mnuFindClick(Sender: TObject);
@@ -401,6 +451,10 @@ type
       not taken as typing. }
     FSearchUpdating: Boolean;
 
+    { The text @link(GoToHit) last put in @link(edtSearch): a place gone
+      to, which a click on the box clears. }
+    FSearchChosen: string;
+
     { Which tiles have data. Owned by the form and shown on @link(FMap).
       Empty until loaded or built. Only touched on the main thread. }
     FTileIndex: TTileIndex;
@@ -424,6 +478,39 @@ type
     { The high-resolution map's tiles, shown on @link(FMap); @nil when no
       tile set was found. Owned by the form. }
     FMapTiles: TTileCache;
+
+    { The 3D view of the selected tile, made the first time the 3D tab
+      shows a tile; @nil before that. Owned by the form. }
+    FTerrainView: TTerrainView;
+
+    { The 3D tab's toolbar, made in @link(Build3DTab). }
+    FTerrainBar: TLayout;
+
+    { The 3D tab's choice of detail, in the order of
+      @code(TERRAIN_DETAILS). }
+    FTerrainDetailBox: TComboBox;
+
+    { The 3D tab's choice of height stretch, in the order of
+      @code(TERRAIN_HEIGHTS). }
+    FTerrainHeightsBox: TComboBox;
+
+    { Says what the 3D tab shows, or why it shows nothing. }
+    FTerrainInfo: TLabel;
+
+    { The tile the 3D tab shows; empty when none. }
+    FTerrainTile: string;
+
+    { The detail the 3D tab's tile was read at. }
+    FTerrainDetail: Integer;
+
+    { @true while the program itself sets the 3D tab's choices, so that is
+      not taken as the user choosing. }
+    FTerrainUpdating: Boolean;
+
+    { @true from a plain left press on the map until the selection next
+      changes, so @link(MapSelectionChanged) can tell a click from a
+      selection made by the program (such as finding a mountain). }
+    FMapLeftClick: Boolean;
 
     { @true once @link(FDownloaded) has been loaded or rebuilt for the
       current data folder. Cleared when the folder becomes unavailable, so
@@ -534,6 +621,47 @@ type
       them, logging a warning if they cannot be written. }
     procedure SaveViewOptions;
 
+    { Makes the 3D tab's toolbar: Detail and Heights choices, set from
+      @link(FViewOptions), a Reset View button and a line of information.
+      The view itself is made when first needed. }
+    procedure Build3DTab;
+
+    { Shows a tile on the 3D tab. Reads it again only if it or the detail
+      has changed, or when asked to. The 3D tab keeps showing it until
+      another is sent with Show in 3D, whatever is selected on the map
+      meanwhile.
+      @param(ATile The tile, such as @code(N50W002).)
+      @param(AForce @true to read the tile even if it is already shown.) }
+    procedure ShowTerrainTile(const ATile: string; AForce: Boolean);
+
+    { The detail chosen on the 3D tab.
+      @returns(The most samples across, from @code(TERRAIN_DETAILS).) }
+    function ChosenTerrainDetail: Integer;
+
+    { The height stretch chosen on the 3D tab.
+      @returns(Times true scale, from @code(TERRAIN_HEIGHTS).) }
+    function ChosenTerrainHeights: Integer;
+
+    { Selects the one tile holding a point, naming the selection, so the
+      selection label and the 3D tab use it.
+      @param(ALat Latitude.)
+      @param(ALon Longitude.)
+      @param(AName The selection's name, such as a mountain's.) }
+    procedure SelectTileAt(ALat, ALon: Double; const AName: string);
+
+    { Reads the tile again at the new detail, and remembers the choice.
+      @param(Sender The combo box.) }
+    procedure TerrainDetailChange(Sender: TObject);
+
+    { Rebuilds the surface at the new height stretch, and remembers the
+      choice.
+      @param(Sender The combo box.) }
+    procedure TerrainHeightsChange(Sender: TObject);
+
+    { Puts the 3D view back to its starting view.
+      @param(Sender The button.) }
+    procedure TerrainResetClick(Sender: TObject);
+
     { The View menu item that shows a layer.
       @param(ALayer The layer.)
       @returns(Its menu item.) }
@@ -574,6 +702,19 @@ type
 
     { Searches for what is in @link(edtSearch) and shows the matches. }
     procedure RunSearch;
+
+    { Goes to the match picked in the search list, or the best one,
+      searching first if the list is not showing; for Enter and
+      @link(btnSearchGo). }
+    procedure GoToSearchChoice;
+
+    { Puts a right-pointing triangle, drawn as a vector path as Sprite3D
+      draws its buttons, on @link(btnSearchGo). }
+    procedure BuildSearchGoIcon;
+
+    { Empties the search box, which closes the list and removes the ring,
+      as emptying it by hand does. }
+    procedure ClearSearchBox;
 
     { Shows @link(FSearchList) under @link(edtSearch), sized to the
       matches. }
@@ -901,12 +1042,15 @@ implementation
 {$R *.fmx}
 
 uses
-  System.Math, System.StrUtils, System.Diagnostics, System.Rtti, FMX.DialogService, FMX.Platform, GDEMAwake,
+  System.Math, System.StrUtils, System.Diagnostics, System.Rtti, FMX.DialogService, FMX.Platform,
+  // Only for FMX.Objects.TPath, always written in full: System.IOUtils
+  // has a TPath too
+  FMX.Objects, GDEMAwake,
   {$IFDEF MSWINDOWS}
   Winapi.Windows,
   {$ENDIF}
   GDEMTiles, GDEMDownloadBatch, GDEMDrawing, GDEMMapTiles, GDEMTileSet, GDEMGpuPreference,
-  SettingsForm, MarkersForm;
+  GDEMTerrain, SettingsForm, MarkersForm;
 
 { TfrmMain }
 
@@ -949,7 +1093,7 @@ begin
   FFmxMenuBar := TMenuBar.Create(Self);
   FFmxMenuBar.Parent := Self;
   // Top-aligned controls are laid out in the order of their positions, so
-  // this puts the menu bar above the toolbar (layTop)
+  // this puts the menu bar above everything else at the top
   FFmxMenuBar.Position.Y := -1;
   FFmxMenuBar.Align := TAlignLayout.Top;
   for LIndex := 0 to mnuMain.ItemsCount - 1 do
@@ -1018,6 +1162,7 @@ begin
   LoadMapTiles;
   FViewOptions := TViewOptions.Create;
   LoadViewOptions;
+  Build3DTab;
   FMarkers := TMarkerList.Create;
   LoadMarkers;
   FMap.Markers := FMarkers;
@@ -1032,6 +1177,7 @@ begin
   FSearchList.CanFocus := False;
   FSearchList.ItemHeight := SEARCH_ITEM_HEIGHT;
   FSearchList.OnItemClick := SearchListItemClick;
+  BuildSearchGoIcon;
   LoadTileIndex;
   OpenStore(False);
   MapSelectionChanged(FMap);
@@ -1382,6 +1528,254 @@ begin
   end;
 end;
 
+{ 3D tab }
+
+procedure TfrmMain.Build3DTab;
+var
+  LX: Single;
+
+  { Adds a control to the toolbar, left to right.
+    @param(AControl The control.)
+    @param(AWidth Its width.)
+    @param(AGap Space after it.) }
+  procedure AddToBar(AControl: TControl; AWidth, AGap: Single);
+  begin
+    AControl.Parent := FTerrainBar;
+    // Left-aligned controls are laid out in the order of their positions,
+    // so each goes to its place before it is aligned; set the other way
+    // round, FMX had already moved the first one
+    AControl.Position.X := LX;
+    AControl.Width := AWidth;
+    AControl.Align := TAlignLayout.Left;
+    AControl.Margins.Right := AGap;
+    LX := LX + AWidth + AGap;
+  end;
+
+  { A caption for the toolbar.
+    @param(AText The caption.)
+    @returns(The label.) }
+  function BarLabel(const AText: string): TLabel;
+  begin
+    Result := TLabel.Create(Self);
+    Result.Text := AText;
+    Result.TextSettings.HorzAlign := TTextAlign.Trailing;
+  end;
+
+var
+  I: Integer;
+  LButton: TButton;
+begin
+  FTerrainUpdating := True;
+  try
+    // The Map tab's switch, as it was left; its handler only saves, so
+    // setting it here saves the same value back, harmlessly
+    swClick3D.IsChecked := FViewOptions.ClickShows3D;
+    FTerrainBar := TLayout.Create(Self);
+    FTerrainBar.Parent := tab3D;
+    FTerrainBar.Align := TAlignLayout.Top;
+    FTerrainBar.Height := 40;
+    FTerrainBar.Padding.Rect := RectF(8, 6, 8, 6);
+    LX := 8;
+
+    AddToBar(BarLabel('Detail'), 44, 6);
+    FTerrainDetailBox := TComboBox.Create(Self);
+    for I := 0 to High(TERRAIN_DETAILS) do
+      FTerrainDetailBox.Items.Add(Format('%s (%d)', [TERRAIN_DETAIL_NAMES[I], TERRAIN_DETAILS[I]]));
+    FTerrainDetailBox.ItemIndex := 1;
+    for I := 0 to High(TERRAIN_DETAILS) do
+      if TERRAIN_DETAILS[I] = FViewOptions.TerrainDetail then
+        FTerrainDetailBox.ItemIndex := I;
+    FTerrainDetailBox.OnChange := TerrainDetailChange;
+    AddToBar(FTerrainDetailBox, 150, 16);
+
+    AddToBar(BarLabel('Heights'), 52, 6);
+    FTerrainHeightsBox := TComboBox.Create(Self);
+    for I := 0 to High(TERRAIN_HEIGHTS) do
+      FTerrainHeightsBox.Items.Add(Format('%d' + #$00D7, [TERRAIN_HEIGHTS[I]]));
+    FTerrainHeightsBox.ItemIndex := 1;
+    for I := 0 to High(TERRAIN_HEIGHTS) do
+      if TERRAIN_HEIGHTS[I] = FViewOptions.TerrainHeights then
+        FTerrainHeightsBox.ItemIndex := I;
+    FTerrainHeightsBox.OnChange := TerrainHeightsChange;
+    AddToBar(FTerrainHeightsBox, 70, 16);
+
+    LButton := TButton.Create(Self);
+    LButton.Text := 'Reset View';
+    LButton.OnClick := TerrainResetClick;
+    AddToBar(LButton, 96, 16);
+
+    FTerrainInfo := TLabel.Create(Self);
+    FTerrainInfo.Parent := FTerrainBar;
+    FTerrainInfo.Align := TAlignLayout.Client;
+    FTerrainInfo.Text := 'Select one downloaded tile on the map and press Show in 3D.';
+  finally
+    FTerrainUpdating := False;
+  end;
+end;
+
+function TfrmMain.ChosenTerrainDetail: Integer;
+begin
+  if InRange(FTerrainDetailBox.ItemIndex, 0, High(TERRAIN_DETAILS)) then
+    Result := TERRAIN_DETAILS[FTerrainDetailBox.ItemIndex]
+  else
+    Result := DEFAULT_TERRAIN_DETAIL;
+end;
+
+function TfrmMain.ChosenTerrainHeights: Integer;
+begin
+  if InRange(FTerrainHeightsBox.ItemIndex, 0, High(TERRAIN_HEIGHTS)) then
+    Result := TERRAIN_HEIGHTS[FTerrainHeightsBox.ItemIndex]
+  else
+    Result := DEFAULT_TERRAIN_HEIGHTS;
+end;
+
+procedure TfrmMain.ShowTerrainTile(const ATile: string; AForce: Boolean);
+var
+  LTile, LDem, LNum: string;
+  LSouth, LWest, LDetail: Integer;
+  LGrid: TTerrainGrid;
+  LWatch: TStopwatch;
+  LReadMs: Int64;
+  LText: string;
+begin
+  LTile := ATile;
+  LDetail := ChosenTerrainDetail;
+  if not AForce and (FTerrainView <> nil) and FTerrainView.HasTerrain and
+     (LTile = FTerrainTile) and (LDetail = FTerrainDetail) then
+    Exit;
+  if not FStore.IsAvailable or not TryParseTileName(LTile, LSouth, LWest) then
+  begin
+    FTerrainInfo.Text := 'The data folder is not available.';
+    Exit;
+  end;
+  FStore.TileFiles(LSouth, LWest, LDem, LNum);
+  if not TFile.Exists(LDem) then
+  begin
+    FTerrainInfo.Text := LTile + ' is not in the data folder.';
+    Exit;
+  end;
+
+  try
+    LWatch := TStopwatch.StartNew;
+    LGrid := LoadTerrainGrid(LDem, LTile, LDetail);
+    LReadMs := LWatch.ElapsedMilliseconds;
+    if FTerrainView = nil then
+    begin
+      FTerrainView := TTerrainView.Create(Self);
+      FTerrainView.Parent := tab3D;
+      FTerrainView.Align := TAlignLayout.Client;
+    end;
+    LWatch := TStopwatch.StartNew;
+    // A new tile starts from the starting view; a new detail keeps the view
+    FTerrainView.ShowTerrain(LGrid, ChosenTerrainHeights, LTile <> FTerrainTile);
+    FTerrainTile := LTile;
+    FTerrainDetail := LDetail;
+    LText := Format('%s: %d x %d samples, %.0f to %.0f m', [LTile, LGrid.Columns, LGrid.Rows,
+      LGrid.MinHeight, LGrid.MaxHeight]);
+    if LGrid.Voids > 0 then
+      LText := LText + Format(', %d voids filled', [LGrid.Voids]);
+    FTerrainInfo.Text := LText + '. Drag to turn, wheel to zoom, double-click to reset.';
+    AddLog(Format('3D: %s, image %d of %d, %s vertices and %s triangles in %d piece(s), ' +
+      'heights %.0f to %.0f m x %d; read in %d ms, built in %d ms',
+      [LText, LGrid.ImageIndex, LGrid.ImageCount, FormatFloat('#,##0', FTerrainView.VertexCount),
+       FormatFloat('#,##0', FTerrainView.TriangleCount), FTerrainView.PieceCount,
+       LGrid.MinHeight, LGrid.MaxHeight, ChosenTerrainHeights, LReadMs,
+       LWatch.ElapsedMilliseconds]));
+  except
+    on E: Exception do
+    begin
+      FTerrainInfo.Text := 'Could not show ' + LTile + ': ' + E.Message;
+      AddLog('WARNING: could not show ' + LTile + ' in 3D (' + E.ClassName + ': ' +
+        E.Message.TrimRight(['.']) + ')');
+    end;
+  end;
+end;
+
+procedure TfrmMain.SelectTileAt(ALat, ALon: Double; const AName: string);
+var
+  LTiles: TTileIndex;
+begin
+  LTiles := TTileIndex.Create;
+  try
+    LTiles.Add(Floor(ALat), Floor(ALon));
+    // Fires OnSelectionChanged, which updates the label and buttons
+    FMap.SelectTiles(LTiles, AName);
+  finally
+    LTiles.Free;
+  end;
+end;
+
+procedure TfrmMain.btnShow3DClick(Sender: TObject);
+var
+  LCursors: IFMXCursorService;
+  LNames: TArray<string>;
+begin
+  // Only this sends a tile to the 3D tab: selecting on the map only
+  // selects, so a click is never taken as asking for 3D
+  LNames := SelectedTileNames(FDownloaded);
+  if Length(LNames) <> 1 then
+    Exit;
+  // Built while the map is showing, which can take a few seconds at Full
+  // detail, with the hourglass up; the 3D tab opens once it is ready
+  if not TPlatformServices.Current.SupportsPlatformService(IFMXCursorService, LCursors) then
+    LCursors := nil;
+  if LCursors <> nil then
+    LCursors.SetCursor(crHourGlass);
+  try
+    ShowTerrainTile(LNames[0], False);
+  finally
+    if LCursors <> nil then
+      LCursors.SetCursor(crDefault);
+  end;
+  tabMain.ActiveTab := tab3D;
+end;
+
+procedure TfrmMain.swClick3DSwitch(Sender: TObject);
+begin
+  if FViewOptions = nil then
+    Exit;
+  FViewOptions.ClickShows3D := swClick3D.IsChecked;
+  SaveViewOptions;
+end;
+
+procedure TfrmMain.TerrainDetailChange(Sender: TObject);
+begin
+  if FTerrainUpdating then
+    Exit;
+  FViewOptions.TerrainDetail := ChosenTerrainDetail;
+  SaveViewOptions;
+  // The tile on show, at the new detail
+  if FTerrainTile <> '' then
+    ShowTerrainTile(FTerrainTile, False);
+end;
+
+procedure TfrmMain.TerrainHeightsChange(Sender: TObject);
+var
+  LWatch: TStopwatch;
+begin
+  if FTerrainUpdating then
+    Exit;
+  FViewOptions.TerrainHeights := ChosenTerrainHeights;
+  SaveViewOptions;
+  if (FTerrainView = nil) or not FTerrainView.HasTerrain then
+    Exit;
+  try
+    LWatch := TStopwatch.StartNew;
+    FTerrainView.Exaggeration := ChosenTerrainHeights;
+    AddLog(Format('3D: heights x %d, rebuilt in %d ms',
+      [ChosenTerrainHeights, LWatch.ElapsedMilliseconds]));
+  except
+    on E: Exception do
+      AddLog('WARNING: could not rebuild the 3D view (' + E.Message.TrimRight(['.']) + ')');
+  end;
+end;
+
+procedure TfrmMain.TerrainResetClick(Sender: TObject);
+begin
+  if FTerrainView <> nil then
+    FTerrainView.ResetView;
+end;
+
 { Markers and search }
 
 procedure TfrmMain.LoadMarkers;
@@ -1487,10 +1881,13 @@ procedure TfrmMain.GoToHit(const AHit: TSearchHit);
 var
   LExtent: TRectF;
   LPlace: TGeoPlace;
+  LPeak: TGeoPeak;
   LMarker: TMapMarker;
   LEgg: TEasterEgg;
   LHalfLat, LHalfLon: Double;
 begin
+  // Markers > Edit Markers can go to one from any tab
+  tabMain.ActiveTab := tabMap;
   HideSearchList;
   case AHit.Kind of
     skCountry:
@@ -1509,6 +1906,19 @@ begin
         LPlace := FVectors.Places[AHit.Index];
         FMap.CentreOn(LPlace.Lat, LPlace.Lon);
         FMap.ShowHighlight(LPlace.Lat, LPlace.Lon);
+      end;
+    skPeak:
+      begin
+        // Zoomed in round it, ringed, and its tile selected, ready for the
+        // 3D tab
+        LPeak := FVectors.Peaks[AHit.Index];
+        LHalfLat := PEAK_VIEW_KM / 2 / KM_PER_DEGREE;
+        LHalfLon := LHalfLat / Max(Cos(DegToRad(LPeak.Lat)), 0.01);
+        FMap.ZoomToArea(LPeak.Lat + LHalfLat, LPeak.Lat - LHalfLat,
+          LPeak.Lon - LHalfLon, LPeak.Lon + LHalfLon);
+        FMap.ShowHighlight(LPeak.Lat, LPeak.Lon);
+        SelectTileAt(LPeak.Lat, LPeak.Lon, LPeak.Name);
+        lblHover.Text := FVectors.PeakText(AHit.Index);
       end;
     skMarker:
       begin
@@ -1542,6 +1952,7 @@ begin
   FSearchUpdating := True;
   try
     edtSearch.Text := AHit.Text;
+    FSearchChosen := AHit.Text;
     edtSearch.SelectAll;
   finally
     FSearchUpdating := False;
@@ -1559,6 +1970,71 @@ procedure TfrmMain.edtSearchChangeTracking(Sender: TObject);
 begin
   if not FSearchUpdating then
     RunSearch;
+end;
+
+procedure TfrmMain.BuildSearchGoIcon;
+var
+  LIcon: FMX.Objects.TPath;
+begin
+  btnSearchGo.Text := '';
+  LIcon := FMX.Objects.TPath.Create(Self);
+  LIcon.Parent := btnSearchGo;
+  LIcon.Align := TAlignLayout.Center;
+  LIcon.Width := 18;
+  LIcon.Height := 18;
+  // Drawn in its own 24 x 24 box, scaled to fit
+  LIcon.WrapMode := TPathWrapMode.Fit;
+  LIcon.Data.Data := SEARCH_GO_ICON;
+  LIcon.Stroke.Kind := TBrushKind.None;
+  // The theme's text colour once the button is styled
+  LIcon.Fill.Color := TAlphaColors.Black;
+  LIcon.HitTest := False;
+  btnSearchGo.TagObject := LIcon;
+  // In case the button was styled already; a later theme change styles it
+  // again, which colours the icon through the same handler
+  btnSearchGoApplyStyleLookup(btnSearchGo);
+end;
+
+procedure TfrmMain.GoToSearchChoice;
+var
+  LIndex: Integer;
+begin
+  if not FSearchList.Visible then
+    RunSearch;
+  LIndex := Max(FSearchList.ItemIndex, 0);
+  if InRange(LIndex, 0, High(FSearchHits)) then
+    GoToHit(FSearchHits[LIndex]);
+end;
+
+procedure TfrmMain.ClearSearchBox;
+begin
+  FSearchChosen := '';
+  if edtSearch.Text <> '' then
+    // Taken as typing, so the list closes and the ring goes
+    edtSearch.Text := '';
+end;
+
+procedure TfrmMain.edtSearchEnter(Sender: TObject);
+begin
+  ClearSearchBox;
+end;
+
+procedure TfrmMain.edtSearchClick(Sender: TObject);
+begin
+  if (FSearchChosen <> '') and (edtSearch.Text = FSearchChosen) then
+    ClearSearchBox;
+end;
+
+procedure TfrmMain.btnSearchGoClick(Sender: TObject);
+begin
+  GoToSearchChoice;
+end;
+
+procedure TfrmMain.btnSearchGoApplyStyleLookup(Sender: TObject);
+begin
+  if btnSearchGo.TagObject is FMX.Objects.TPath then
+    FMX.Objects.TPath(btnSearchGo.TagObject).Fill.Color :=
+      btnSearchGo.ResultingTextSettings.FontColor;
 end;
 
 procedure TfrmMain.edtSearchKeyDown(Sender: TObject; var Key: Word; var KeyChar: WideChar;
@@ -1584,11 +2060,7 @@ begin
       end;
     vkReturn:
       begin
-        if not FSearchList.Visible then
-          RunSearch;
-        LIndex := Max(FSearchList.ItemIndex, 0);
-        if InRange(LIndex, 0, High(FSearchHits)) then
-          GoToHit(FSearchHits[LIndex]);
+        GoToSearchChoice;
         Key := 0;
         KeyChar := #0;
       end;
@@ -1631,6 +2103,10 @@ procedure TfrmMain.MapMouseDown(Sender: TObject; Button: TMouseButton; Shift: TS
   X, Y: Single);
 begin
   HideSearchList;
+  // A plain left press selects; with Shift it pans, with Ctrl (Cmd) it
+  // marks, neither of which selects
+  FMapLeftClick := (Button = TMouseButton.mbLeft) and
+    ([ssShift, ssCtrl, ssCommand] * Shift = []);
 end;
 
 procedure TfrmMain.MapMarkerClick(Sender: TObject; ALat, ALon: Double; AShift: TShiftState);
@@ -1667,6 +2143,8 @@ end;
 
 procedure TfrmMain.mnuFindClick(Sender: TObject);
 begin
+  // The search box is on the Map tab
+  tabMain.ActiveTab := tabMap;
   edtSearch.SetFocus;
   edtSearch.SelectAll;
 end;
@@ -1778,9 +2256,17 @@ begin
 end;
 
 procedure TfrmMain.MapSelectionChanged(Sender: TObject);
+var
+  LClicked: Boolean;
 begin
   UpdateSelectionText;
   UpdateButtons;
+  LClicked := FMapLeftClick;
+  FMapLeftClick := False;
+  // With Click for 3D on, the user's own click on a downloaded tile
+  // shows it, as Show in 3D does
+  if LClicked and swClick3D.IsChecked and btnShow3D.Enabled then
+    btnShow3DClick(btnShow3D);
 end;
 
 procedure TfrmMain.MapRightClick(Sender: TObject; ALat, ALon: Double; AShift: TShiftState);
@@ -1890,6 +2376,7 @@ begin
   LHaveSelection := not FMap.Selection.IsEmpty;
   btnFetchSelection.Enabled := not LBusy and LHaveSelection;
   btnCancel.Enabled := LBusy;
+  btnShow3D.Enabled := SelectedTileCount(FDownloaded) = 1;
   mnuZoomSelection.Enabled := LHaveSelection;
   mnuRefreshIndex.Enabled := FIndexBuilder = nil;
   mnuRescan.Enabled := not LBusy;

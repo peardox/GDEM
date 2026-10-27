@@ -1854,14 +1854,28 @@ procedure TWorldMapView.PaintPlaces(ANorth, ASouth, AWest, AEast: Double);
 var
   LZoom: Double;
   LPlaces: TArray<TGeoPlace>;
-  LIndex, LDrawn, LOther: Integer;
+  LIndex, LDrawn: Integer;
   LPoint: TPointF;
   LLabel, LDot: TRectF;
   LTaken: TList<TRectF>;
-  LFree: Boolean;
+  LFound: Boolean;
   LWidth: Single;
   LColor: TAlphaColor;
   LSide: TLabelSide;
+
+  { Whether a rectangle is clear of every dot and label drawn so far.
+    @param(ARect The rectangle.)
+    @returns(@true if it overlaps none of them.) }
+  function IsClear(const ARect: TRectF): Boolean;
+  var
+    LOther: Integer;
+  begin
+    for LOther := 0 to LTaken.Count - 1 do
+      if LTaken[LOther].IntersectsWith(ARect) then
+        Exit(False);
+    Result := True;
+  end;
+
 begin
   if (FVectors = nil) or not FShowPlaces or (Length(FVectors.Places) = 0) then
     Exit;
@@ -1893,30 +1907,19 @@ begin
           LPoint.X + PLACE_DOT_RADIUS, LPoint.Y + PLACE_DOT_RADIUS);
         // The dot must be clear of what is drawn already, and the label
         // goes in the first clear place of right, left, above and below
-        LFree := True;
-        for LOther := 0 to LTaken.Count - 1 do
-          if LTaken[LOther].IntersectsWith(LDot) then
-          begin
-            LFree := False;
-            Break;
-          end;
-        if not LFree then
+        if not IsClear(LDot) then
           Continue;
-        LFree := False;
+        LFound := False;
         for LSide := Low(TLabelSide) to High(TLabelSide) do
         begin
           LLabel := LabelRect(LPoint, LWidth + 2 * LABEL_PADDING, LSide);
-          LFree := True;
-          for LOther := 0 to LTaken.Count - 1 do
-            if LTaken[LOther].IntersectsWith(LLabel) then
-            begin
-              LFree := False;
-              Break;
-            end;
-          if LFree then
+          if IsClear(LLabel) then
+          begin
+            LFound := True;
             Break;
+          end;
         end;
-        if not LFree then
+        if not LFound then
           Continue;
         LTaken.Add(LLabel);
         LTaken.Add(LDot);

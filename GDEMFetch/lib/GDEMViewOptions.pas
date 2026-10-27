@@ -12,6 +12,9 @@
   stretch, and the user's own markers start on. A choice missing from the
   file, such as one added in a later version, keeps its default.
 
+  The 3D tab's detail and height stretch, and the Map tab's Click for 3D
+  switch, are kept here too.
+
   Those defaults suit drawing on the CPU or a low-powered graphics
   processor. The first time the user changes how GDEMFetch draws to
   something faster, @link(SuggestedViewLayers) says which layers to turn
@@ -99,6 +102,12 @@ type
     FShowMarkers: Boolean;
     { Backing field for @link(DrawingSuggestionMade). }
     FDrawingSuggestionMade: Boolean;
+    { Backing field for @link(TerrainDetail). }
+    FTerrainDetail: Integer;
+    { Backing field for @link(TerrainHeights). }
+    FTerrainHeights: Integer;
+    { Backing field for @link(ClickShows3D). }
+    FClickShows3D: Boolean;
   public
     { Sets the defaults: tile tints and markers on, the other layers
       off. }
@@ -145,6 +154,17 @@ type
       first time. @false by default. }
     property DrawingSuggestionMade: Boolean read FDrawingSuggestionMade
       write FDrawingSuggestionMade;
+
+    { The 3D tab's detail: the most samples across a tile (see
+      @code(TERRAIN_DETAILS) in @code(GDEMTerrain)). 451 by default. }
+    property TerrainDetail: Integer read FTerrainDetail write FTerrainDetail;
+
+    { The 3D tab's height stretch, times true scale. 2 by default. }
+    property TerrainHeights: Integer read FTerrainHeights write FTerrainHeights;
+
+    { The Map tab's Click for 3D switch: @true if a click selecting a
+      single downloaded tile also shows it in 3D. @false by default. }
+    property ClickShows3D: Boolean read FClickShows3D write FClickShows3D;
   end;
 
 { The layers to turn on the first time the user chooses how GDEMFetch
@@ -210,6 +230,9 @@ begin
   FShowMapTiles := False;
   FShowPlaces := False;
   FShowMarkers := True;
+  // Written out, as GDEMTerrain's defaults, so this unit stays small
+  FTerrainDetail := 451;
+  FTerrainHeights := 2;
 end;
 
 class function TViewOptions.FileName: string;

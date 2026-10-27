@@ -18,7 +18,16 @@
   ) }
 program TileMaker;
 
+// Define to report memory leaks at shut-down (see below); leave it off for
+// a release build
+// {$DEFINE REPORT_LEAKS}
+
 uses
+  // On Windows FastMM5 is the memory manager, so it must come first; with
+  // REPORT_LEAKS defined it writes the full leak report to a file
+  {$IFDEF MSWINDOWS}
+  FastMM5,
+  {$ENDIF}
   System.StartUpCopy,
   FMX.Forms,
   FMX.Skia,
@@ -31,6 +40,19 @@ uses
 {$R *.res}
 
 begin
+  {$IF DEFINED(REPORT_LEAKS)}
+  // Leaks still allocated at shut-down are listed in a message box. On
+  // Windows FastMM5 also writes every leak, in full, to
+  // TileMaker_MemoryManager_EventLog.txt beside the executable, its default
+  // place. It adds to that file each run, so the last run's is deleted
+  // first and the file holds only this run's leaks; no file, no leaks.
+  ReportMemoryLeaksOnShutdown := True;
+  {$IF DEFINED(MSWINDOWS)}
+  FastMM_DeleteEventLogFile;
+  FastMM_LogToFileEvents := FastMM_LogToFileEvents +
+    [mmetUnexpectedMemoryLeakSummary, mmetUnexpectedMemoryLeakDetail];
+  {$ENDIF}
+  {$ENDIF}
   // Skia draws the window, and decodes and encodes the images
   GlobalUseSkia := True;
   Application.Initialize;

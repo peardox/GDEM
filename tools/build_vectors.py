@@ -4,7 +4,7 @@ from Natural Earth.
 
 Natural Earth (https://www.naturalearthdata.com) is in the public domain.
 Get its GeoJSON files from https://github.com/nvkelso/natural-earth-vector
-(the geojson folder); only these six are needed:
+(the geojson folder); only these seven are needed:
 
     ne_110m_admin_0_boundary_lines_land.geojson
     ne_50m_admin_0_boundary_lines_land.geojson
@@ -12,6 +12,7 @@ Get its GeoJSON files from https://github.com/nvkelso/natural-earth-vector
     ne_50m_coastline.geojson
     ne_50m_admin_0_countries.geojson
     ne_10m_populated_places_simple.geojson
+    ne_10m_geography_regions_elevation_points.geojson
 
 Usage, from the repository root:
 
@@ -21,7 +22,7 @@ The output is read by GDEMVectors.pas, which documents the same format.
 All numbers are little-endian.
 
     'GDVC'                magic
-    UInt16 version        2
+    UInt16 version        3
     UInt16 layer count
     for each layer:
       UInt8  kind         1 = lines, 2 = areas (closed rings)
@@ -52,6 +53,21 @@ All numbers are little-endian.
              tiles) from which the place should be labelled
       UInt8  flags: 1 = national capital
       UInt32 population
+    UInt32 peak count     (version 3 on)
+    for each named high (or low) point, most important first (smallest
+    min zoom, then highest):
+      UInt16 name length, then the name in UTF-8
+      UInt16 key length, then the name in plain ASCII for searching, or
+             nothing when the name is plain ASCII already
+      UInt16 length, then other names in UTF-8, separated by '|', such as
+             'Mt. McKinley' for Denali (often empty)
+      UInt16 country: its feature's index in countries50, or 65535
+      UInt16 second country, for a peak on a border, or 65535
+      Int32 lon, Int32 lat, in thousandths of a degree
+      Int16  elevation in metres (below sea level for a depression)
+      UInt8  kind: 1 mountain, 2 spot height, 3 depression, 4 plateau,
+             5 pass, 0 anything else
+      UInt8  min zoom x 10
 
 Points are rounded to a thousandth of a degree (about 110 m), far finer
 than the 1:50m data itself, and repeated points left by the rounding are
@@ -77,6 +93,8 @@ LAYERS = [
 ]
 
 PLACES_FILE = 'ne_10m_populated_places_simple.geojson'
+PEAKS_FILE = 'ne_10m_geography_regions_elevation_points.geojson'
+PEAK_KINDS = {'mountain': 1, 'spot elevation': 2, 'depression': 3, 'plateau': 4, 'pass': 5}
 COUNTRIES_LAYER = 'countries50'
 NO_COUNTRY = 0xFFFF
 FLAG_CAPITAL = 1
@@ -167,6 +185,82 @@ def encode_places(source, countries):
     return out
 
 
+def inside(point, rings):
+    """Whether a point lies inside a country: crossings of a ray east from
+    it, over all the country's rings, so holes count out (even-odd)."""
+    x, y = point
+    crossings = 0
+    for ring in rings:
+        for (x1, y1), (x2, y2) in zip(ring, ring[1:] + ring[:1]):
+            if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+                crossings += 1
+    return crossings % 2 == 1
+
+
+def encode_peaks(source, countries, country_rings):
+    """The peaks section: Natural Earth's named elevation points (mountains,
+    spot heights, depressions, plateaus, passes), each linked to the
+    countries Natural Earth gives for it (nation1, nation2), or failing
+    those the country whose outline holds it. Unnamed points are left out:
+    nothing could find them."""
+    data = json.loads((source / PEAKS_FILE).read_text(encoding='utf-8'))
+    # nation1 and nation2 hold two-letter ISO codes for most points and
+    # country names for a few, so both are looked up
+    by_name = {}
+    for index, properties in enumerate(countries):
+        for field in ('ADMIN', 'NAME', 'NAME_LONG', 'ISO_A2', 'ISO_A2_EH', 'WB_A2'):
+            value = properties.get(field)
+            if value and value != '-99':
+                by_name.setdefault(value, index)
+    peaks = []
+    unlinked = 0
+    for feature in data['features']:
+        properties = feature['properties']
+        name = clean(properties.get('name') or properties.get('name_en') or
+                     properties.get('label'))
+        if not name:
+            continue
+        aliases = []
+        for field in ('name_alt', 'name_en', 'label'):
+            alias = clean(properties.get(field))
+            if alias and alias.lower() != name.lower() and \
+                    alias.lower() not in (a.lower() for a in aliases):
+                aliases.append(alias)
+        lon, lat = feature['geometry']['coordinates'][:2]
+        point = (round(lon * UNITS), round(lat * UNITS))
+        linked = [by_name[n] for n in (properties.get('nation1'), properties.get('nation2'))
+                  if n and n in by_name]
+        if not linked:
+            linked = [i for i, rings in enumerate(country_rings) if inside(point, rings)][:1]
+        if not linked:
+            unlinked += 1
+        linked = (linked + [NO_COUNTRY, NO_COUNTRY])[:2]
+        peaks.append({
+            'name': name,
+            'key': ascii_key(name, ''),
+            'aliases': '|'.join(aliases),
+            'countries': linked,
+            'lon': point[0],
+            'lat': point[1],
+            'elevation': int(properties.get('elevation') or 0),
+            'kind': PEAK_KINDS.get(properties.get('featurecla'), 0),
+            'zoom': round(float(properties.get('min_zoom') or 9) * 10),
+        })
+    peaks.sort(key=lambda p: (p['zoom'], -p['elevation'], p['name']))
+    out = bytearray(struct.pack('<I', len(peaks)))
+    for peak in peaks:
+        out += utf8_field(peak['name'])
+        out += utf8_field(peak['key'])
+        out += utf8_field(peak['aliases'])
+        out += struct.pack('<HHiihBB', peak['countries'][0], peak['countries'][1],
+                           peak['lon'], peak['lat'], peak['elevation'], peak['kind'],
+                           peak['zoom'])
+    print(f'peaks: {len(peaks)}, {unlinked} not in any country, '
+          f'{sum(1 for p in peaks if p["countries"][1] != NO_COUNTRY)} on a border, '
+          f'{sum(1 for p in peaks if p["aliases"])} with other names')
+    return out
+
+
 def parts_of(geometry):
     """Yields every line or ring of a GeoJSON geometry."""
     kind = geometry['type']
@@ -206,8 +300,9 @@ def encode_part(points):
 
 
 def build(source, target):
-    out = bytearray(b'GDVC' + struct.pack('<HH', 2, len(LAYERS)))
+    out = bytearray(b'GDVC' + struct.pack('<HH', 3, len(LAYERS)))
     countries = []
+    country_rings = []
     for name, kind, file_name, named in LAYERS:
         data = json.loads((source / file_name).read_text(encoding='utf-8'))
         features = []
@@ -221,6 +316,7 @@ def build(source, target):
             features.append((label, parts))
             if name == COUNTRIES_LAYER:
                 countries.append(feature['properties'])
+                country_rings.append(parts)
         if kind == 1:
             # Lines need no names, so one feature holds them all
             features = [('', [p for _, parts in features for p in parts])]
@@ -237,6 +333,7 @@ def build(source, target):
         print(f'{name}: {len(features)} feature(s), '
               f'{sum(len(p) for _, p in features)} part(s), {points} point(s)')
     out += encode_places(source, countries)
+    out += encode_peaks(source, countries, country_rings)
     target.write_bytes(out)
     print(f'wrote {target} ({len(out):,} bytes)')
 

@@ -1,5 +1,5 @@
-{ @abstract(Finds countries, towns and cities, and the user's markers by
-  name, forgiving spelling mistakes.)
+{ @abstract(Finds countries, towns and cities, mountains, and the user's
+  markers by name, forgiving spelling mistakes.)
 
   A @link(TPlaceSearch) is filled once from a @code(TWorldVectors) and a
   @code(TMarkerList) (and again when the markers change), then asked as
@@ -25,16 +25,20 @@
   map.
 
   A place is also found by its other names, such as @code(Antioch) for
-  Antakya; the list then shows that name after the place.
+  Antakya; the list then shows that name after the place. Mountains and
+  other named high and low points (@code(TWorldVectors.Peaks)) are found
+  the same way, by name or other names (@code(McKinley) for Denali), and
+  listed with their height and country.
 
   Mistakes are counted with the optimal string alignment distance (a
   Damerau-Levenshtein distance), worked out only against the start of each
   word and given up as soon as it must exceed the limit, so a search of
-  every name, about 8,200, takes a few milliseconds per letter typed.
+  every name, about 9,200, takes a few milliseconds per letter typed.
 
   Matches are ranked by how they matched, then by fewer mistakes, then
-  markers before countries before places, and places by importance (the
-  order @code(TWorldVectors.Places) holds them in).
+  markers before countries before easter eggs before peaks before places,
+  and peaks and places by importance (the order @code(TWorldVectors.Peaks)
+  and @code(TWorldVectors.Places) hold them in).
 
   No FMX: any program can use it. }
 unit GDEMSearch;
@@ -58,6 +62,10 @@ type
     skCountry,
     { An easter egg: a hidden place; see @code(GDEMEasterEggs). }
     skEgg,
+    { A mountain or other named high or low point; see
+      @code(TWorldVectors.Peaks). Before towns, so Everest the mountain
+      comes before any town named after it. }
+    skPeak,
     { A town or city; see @code(TWorldVectors.Places). }
     skPlace
   );
@@ -82,7 +90,8 @@ type
     { What it is. }
     Kind: TSearchKind;
     { Its index: in the marker list, @code(TWorldVectors.Countries), the
-      easter eggs or @code(TWorldVectors.Places). }
+      easter eggs, @code(TWorldVectors.Peaks) or
+      @code(TWorldVectors.Places). }
     Index: Integer;
     { How to show it in a list, such as @code(London, Ontario, Canada),
       @code(Jersey (country)) or @code(Home (marker)). }
@@ -328,6 +337,7 @@ var
   LIndex: Integer;
   LCountries: TGeoLayer;
   LPlace: TGeoPlace;
+  LPeak: TGeoPeak;
   LEntries: TList<TSearchEntry>;
   LName, LOther, LText, LCountry: string;
 begin
@@ -359,6 +369,19 @@ begin
       for LOther in AEggs[LIndex].Aliases do
         AddEntry(LEntries, skEgg, LIndex, LOther, LText + ' (' + LOther + ')', LIndex);
     end;
+    if AVectors <> nil then
+      for LIndex := 0 to High(AVectors.Peaks) do
+      begin
+        LPeak := AVectors.Peaks[LIndex];
+        if LPeak.SearchName <> '' then
+          LName := LPeak.SearchName
+        else
+          LName := LPeak.Name;
+        AddEntry(LEntries, skPeak, LIndex, LName, AVectors.PeakText(LIndex), LIndex);
+        for LOther in LPeak.OtherNames do
+          AddEntry(LEntries, skPeak, LIndex, LOther,
+            AVectors.PeakText(LIndex) + ' (' + LOther + ')', LIndex);
+      end;
     if AVectors <> nil then
     begin
       for LIndex := 0 to High(AVectors.Places) do

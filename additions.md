@@ -1,6 +1,6 @@
 # Adding places to GDEMFetch
 
-GDEMFetch's search finds four kinds of place, and each is added a
+GDEMFetch's search finds five kinds of place, and each is added a
 different way:
 
 | Kind | Shown on the map | Where it comes from | How to add one |
@@ -8,6 +8,7 @@ different way:
 | Markers | Yes, always (View > Show Markers) | `markers.json` in the settings folder | In the program, or by editing the file |
 | Countries | As borders | `maps/world_vectors.bin` (Natural Earth) | Rebuild from Natural Earth |
 | Towns and cities | As labels (View > Show Towns and Cities) | `maps/world_vectors.bin` (Natural Earth) | Rebuild from Natural Earth |
+| Mountains | No: only the search finds them | `maps/world_vectors.bin` (Natural Earth) | Rebuild from Natural Earth, or add one as an easter egg |
 | Easter eggs | Never: only the search finds them | `maps/easter_eggs.json` | Edit the file and rebuild |
 
 For your own places (Home, Work, a hill you want the elevation of), use
@@ -139,14 +140,14 @@ old or local name (`Seongapdo`), a nickname (`Dreamland`), or a word
 someone looking for it would try (`UFO`). There is no need to add
 spellings that differ only by accents, case or a typo.
 
-## Towns, cities and countries
+## Towns, cities, mountains and countries
 
 These come from [Natural Earth](https://www.naturalearthdata.com), in the
 public domain, through `tools/build_vectors.py`, which writes
 `maps/world_vectors.bin` (the `WORLDVECTORS` resource). Rather than
 editing that file, add personal places as markers and shared ones as easter
 eggs. To update the data from a newer Natural Earth, follow the script's
-comments: it needs six GeoJSON files, which a sparse clone of
+comments: it needs seven GeoJSON files, which a sparse clone of
 <https://github.com/nvkelso/natural-earth-vector> can fetch without the
 whole repository. Then rebuild GDEMFetch. `GDEMVectors.pas` documents the
 file's format.
