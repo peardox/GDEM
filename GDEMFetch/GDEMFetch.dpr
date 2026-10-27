@@ -14,7 +14,8 @@
     @item(@link(GDEMWorldMap) is the zoomable map used to select tiles.)
     @item(@link(GDEMTiles) names and selects tiles on the 1 degree grid.)
     @item(@link(GDEMTileIndex) records which tiles exist, built from CMR.)
-    @item(@link(GDEMDownloader) finds and downloads tiles.)
+    @item(@link(GDEMDownloader) finds and downloads tiles, and
+      @link(GDEMDownloadBatch) runs a whole batch of downloads.)
     @item(@link(GDEMStore) keeps downloaded tiles in the data folder.)
     @item(@link(GDEMCancel) lets the user cancel background work.)
     @item(@link(GDEMThemes), @link(GDEMStyles) and @link(GDEMTitleBar) give
@@ -38,26 +39,27 @@ uses
   System.StartUpCopy,
   FMX.Forms,
   FMX.Skia,
-  MainForm in 'MainForm.pas' {frmMain},
-  GDEMDownloader in 'GDEMDownloader.pas',
-  GDEMCMR in 'GDEMCMR.pas',
-  GDEMSettings in 'GDEMSettings.pas',
-  GDEMBrowser in 'GDEMBrowser.pas',
-  SettingsForm in 'SettingsForm.pas' {frmSettings},
-  GDEMTiles in 'GDEMTiles.pas',
-  GDEMWorldMap in 'GDEMWorldMap.pas',
-  GDEMTileIndex in 'GDEMTileIndex.pas',
-  GDEMCancel in 'GDEMCancel.pas',
-  GDEMStore in 'GDEMStore.pas',
-  ProgressForm in 'ProgressForm.pas' {frmProgress},
-  GDEMStyles in 'GDEMStyles.pas',
-  GDEMTitleBar in 'GDEMTitleBar.pas',
-  GDEMThemes in 'GDEMThemes.pas',
-  GDEMReport in 'GDEMReport.pas',
-  GDEMAwake in 'GDEMAwake.pas',
-  GDEMVectors in 'GDEMVectors.pas',
-  GDEMDrawing in 'GDEMDrawing.pas',
-  GDEMGpuPreference in 'GDEMGpuPreference.pas';
+  MainForm in 'ui\MainForm.pas' {frmMain},
+  GDEMDownloader in 'lib\GDEMDownloader.pas',
+  GDEMDownloadBatch in 'lib\GDEMDownloadBatch.pas',
+  GDEMCMR in 'lib\GDEMCMR.pas',
+  GDEMSettings in 'lib\GDEMSettings.pas',
+  GDEMBrowser in 'lib\GDEMBrowser.pas',
+  SettingsForm in 'ui\SettingsForm.pas' {frmSettings},
+  GDEMTiles in 'lib\GDEMTiles.pas',
+  GDEMWorldMap in 'ui\GDEMWorldMap.pas',
+  GDEMTileIndex in 'lib\GDEMTileIndex.pas',
+  GDEMCancel in 'lib\GDEMCancel.pas',
+  GDEMStore in 'lib\GDEMStore.pas',
+  ProgressForm in 'ui\ProgressForm.pas' {frmProgress},
+  GDEMStyles in 'ui\GDEMStyles.pas',
+  GDEMTitleBar in 'ui\GDEMTitleBar.pas',
+  GDEMThemes in 'ui\GDEMThemes.pas',
+  GDEMReport in 'lib\GDEMReport.pas',
+  GDEMAwake in 'lib\GDEMAwake.pas',
+  GDEMVectors in 'lib\GDEMVectors.pas',
+  GDEMDrawing in 'ui\GDEMDrawing.pas',
+  GDEMGpuPreference in 'lib\GDEMGpuPreference.pas';
 
 {$R *.res}
 { The world map image and its borders and coastlines, built from the

@@ -363,6 +363,12 @@ type
   @returns(The formatted size.) }
 function FormatByteSize(ABytes: Int64): string;
 
+{ Formats a time for display, such as @code(1 h 46 min), @code(3 min 5 s)
+  or @code(38 s).
+  @param(ASeconds The time, in seconds.)
+  @returns(The formatted time, rounded to the second.) }
+function FormatDuration(ASeconds: Double): string;
+
 implementation
 
 uses
@@ -391,6 +397,21 @@ begin
     Result := FormatFloat('0.0', ABytes / GB) + ' GB'
   else
     Result := FormatFloat('0', ABytes / MB) + ' MB';
+end;
+
+function FormatDuration(ASeconds: Double): string;
+var
+  LSeconds, LMinutes, LHours: Int64;
+begin
+  LSeconds := Round(ASeconds);
+  LHours := LSeconds div 3600;
+  LMinutes := (LSeconds mod 3600) div 60;
+  if LHours > 0 then
+    Result := Format('%d h %d min', [LHours, LMinutes])
+  else if LMinutes > 0 then
+    Result := Format('%d min %d s', [LMinutes, LSeconds mod 60])
+  else
+    Result := Format('%d s', [LSeconds]);
 end;
 
 type

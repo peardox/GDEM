@@ -86,11 +86,6 @@ const
     milliseconds. }
   STORAGE_CHECK_INTERVAL = 60000;
 
-  { Once this many tiles in a row have failed to download, even after
-    retries, the batch stops: something is badly wrong. Failures with good
-    tiles between them only skip those tiles, however many there are. }
-  MAX_DOWNLOAD_FAILURES = 10;
-
 type
   { The work done by a job, run on a background thread.
     @param(AToken Check this at safe points; cancelling the job sets it.) }
@@ -612,16 +607,9 @@ type
     procedure StartFetch(const ATiles: TArray<string>; AAlready: Integer = 0);
 
     { The work of a download job, run on its background thread by
-      @link(StartFetch). Skips tiles already in the data folder, asks CMR
-      where the rest are, many tiles per request, then downloads them
-      several tiles at a time, sharing a @link(TDownloadThrottle) that
-      starts at the speed's starting number, climbs towards its most while
-      all goes well, and cuts back if NASA objects. A tile that keeps failing is logged
-      and skipped; the job stops early only if the bearer token is rejected,
-      free space runs low, the data folder disappears, or
-      @link(MAX_DOWNLOAD_FAILURES) tiles in a row fail. Every request,
-      redirect and saved file is written to a @link(TDownloadReport); the
-      Debug tab gets only the start, problems and the summary.
+      @link(StartFetch): runs a @link(TDownloadBatch), showing its progress
+      in the progress dialog, its summary on the Debug tab and its tiles on
+      the map, and reports any tiles that failed in a dialog.
       @param(AToken The job's cancellation token.)
       @param(ATiles Tile names such as @code(N50W002).)
       @param(ABearer The Earthdata Login bearer token.)
@@ -638,6 +626,31 @@ type
     procedure RunDownloads(AToken: TCancelToken; const ATiles: TArray<string>;
       const ABearer: string; AStore: TGDEMStore; AReserve: Int64; ASpeed: TDownloadSpeed;
       AAlready: Integer);
+  {$IF defined(LINUX) and not defined(ANDROID)}
+  private
+    { Linux only: the menu bar FMX draws itself, holding the menus of
+      @link(mnuMain) (see @link(UseFmxMenuBar)). }
+    FFmxMenuBar: TMenuBar;
+
+    { Replaces @link(mnuMain) with @link(FFmxMenuBar), a menu bar FMX
+      draws itself in the theme. On Linux FMX shows a @code(TMainMenu) as a
+      native GTK menu bar, which showed only the first letter of each menu
+      and item.
+
+      The items are copied, not moved. By the time the form is created FMX
+      has already built the GTK menu, and each item keeps a handle to its
+      GTK widget; moving the items and freeing @link(mnuMain), as Sprite3D
+      does, leaves those handles pointing at destroyed widgets, so the next
+      change to an item (such as @code(Enabled)) crashed in GTK. So the
+      copies are made first, then the original items are freed one by one,
+      so FMX rebuilds the GTK menu bar without each and it ends up empty
+      (freeing @link(mnuMain) with its items still in it left a GTK bar of
+      first letters above the new one), then @link(mnuMain) is freed, and
+      then each copy takes its original's name, which points the form's field (such as
+      @link(mnuShowTiles)) at the copy. Handlers, ticks and enabled states
+      carry on as before. }
+    procedure UseFmxMenuBar;
+  {$ENDIF}
   end;
 
 var
@@ -649,20 +662,84 @@ implementation
 {$R *.fmx}
 
 uses
-  System.Math, System.Diagnostics, System.SyncObjs, System.Generics.Collections,
-  System.Rtti, FMX.DialogService, FMX.Platform, GDEMAwake,
+  System.Math, System.Diagnostics, System.Rtti, FMX.DialogService, FMX.Platform, GDEMAwake,
   {$IFDEF MSWINDOWS}
   Winapi.Windows,
   {$ENDIF}
-  GDEMTiles, GDEMDrawing, SettingsForm;
+  GDEMTiles, GDEMDownloadBatch, GDEMDrawing, SettingsForm;
 
 { TfrmMain }
+
+{$IF defined(LINUX) and not defined(ANDROID)}
+procedure TfrmMain.UseFmxMenuBar;
+var
+  LCopies: TArray<TMenuItem>;
+  LNames: TArray<string>;
+  LIndex: Integer;
+
+  { Copies a menu item and its submenus onto a new parent, noting the
+    original's name for later.
+    @param(AItem The item to copy.)
+    @param(AParent The menu bar or menu item the copy goes in.) }
+  procedure CopyItem(AItem: TMenuItem; AParent: TFmxObject);
+  var
+    LCopy: TMenuItem;
+    LSub: Integer;
+  begin
+    // Owned by the form, so naming it later sets the form's field
+    LCopy := TMenuItem.Create(Self);
+    LCopy.Text := AItem.Text;
+    LCopy.Enabled := AItem.Enabled;
+    LCopy.Visible := AItem.Visible;
+    LCopy.AutoCheck := AItem.AutoCheck;
+    LCopy.IsChecked := AItem.IsChecked;
+    LCopy.RadioItem := AItem.RadioItem;
+    LCopy.GroupIndex := AItem.GroupIndex;
+    LCopy.ShortCut := AItem.ShortCut;
+    LCopy.Tag := AItem.Tag;
+    LCopy.OnClick := AItem.OnClick;
+    LCopy.Parent := AParent;
+    LCopies := LCopies + [LCopy];
+    LNames := LNames + [AItem.Name];
+    for LSub := 0 to AItem.ItemsCount - 1 do
+      CopyItem(AItem.Items[LSub], LCopy);
+  end;
+
+begin
+  FFmxMenuBar := TMenuBar.Create(Self);
+  FFmxMenuBar.Parent := Self;
+  // Top-aligned controls are laid out in the order of their positions, so
+  // this puts the menu bar above the toolbar (layTop)
+  FFmxMenuBar.Position.Y := -1;
+  FFmxMenuBar.Align := TAlignLayout.Top;
+  for LIndex := 0 to mnuMain.ItemsCount - 1 do
+    if mnuMain.Items[LIndex] is TMenuItem then
+      CopyItem(TMenuItem(mnuMain.Items[LIndex]), FFmxMenuBar);
+
+  // Empty mnuMain item by item: each removal makes FMX rebuild the GTK menu
+  // bar without that item, so it ends up empty and goes. Freeing mnuMain
+  // with items still in it left a GTK bar showing their first letters.
+  // Each original's field on the form is set to nil as it goes.
+  while mnuMain.ItemsCount > 0 do
+    mnuMain.Items[0].Free;
+  mnuMain.RecreateOSMenu;
+  FreeAndNil(mnuMain);
+
+  // Naming a copy points the form's field of that name at it
+  for LIndex := 0 to High(LCopies) do
+    if LNames[LIndex] <> '' then
+      LCopies[LIndex].Name := LNames[LIndex];
+end;
+{$ENDIF}
 
 procedure TfrmMain.FormCreate(Sender: TObject);
 begin
   {$IF defined(MACOS) and not defined(IOS)}
   mnuFileSep.Visible := False;
   mnuExit.Visible := False;
+  {$ENDIF}
+  {$IF defined(LINUX) and not defined(ANDROID)}
+  UseFmxMenuBar;
   {$ENDIF}
 
   edtTile.Text := 'N50W002';
@@ -1385,18 +1462,8 @@ begin
 end;
 
 class function TfrmMain.FormatDuration(ASeconds: Double): string;
-var
-  LSeconds, LMinutes, LHours: Int64;
 begin
-  LSeconds := Round(ASeconds);
-  LHours := LSeconds div 3600;
-  LMinutes := (LSeconds mod 3600) div 60;
-  if LHours > 0 then
-    Result := Format('%d h %d min', [LHours, LMinutes])
-  else if LMinutes > 0 then
-    Result := Format('%d min %d s', [LMinutes, LSeconds mod 60])
-  else
-    Result := Format('%d s', [LSeconds]);
+  Result := GDEMStore.FormatDuration(ASeconds);
 end;
 
 procedure TfrmMain.btnCancelClick(Sender: TObject);
@@ -2058,361 +2125,27 @@ procedure TfrmMain.RunDownloads(AToken: TCancelToken; const ATiles: TArray<strin
   const ABearer: string; AStore: TGDEMStore; AReserve: Int64; ASpeed: TDownloadSpeed;
   AAlready: Integer);
 var
-  LTodo, LQueueList, LFolders: TList<string>;
-  LTile, LFolder: string;
-  LSouth, LWest, LAlready, LNoData, LIndex, LMost: Integer;
-  LLookup: TGDEMDownloader;
-  LURLs: TDictionary<string, TArray<string>>;
-  LQueue: TArray<string>;
-  LLock: TObject;
-  LWorker: TProc;
-  LThreads: TArray<TThread>;
-  LClock: TStopwatch;
-  // Shared by the workers; counters change only through TInterlocked
-  LNext, LDone, LDownloaded, LFailed, LFailRun: Integer;
-  LBytes, LSaved, LLastUi: Int64;
-  LError, LCutBack: string;
-  LStop: Boolean;
-  LSeconds: Double;
-  LThrottle: TDownloadThrottle;
-  LReport: TDownloadReport;
-  // Detail goes only to the report; summary lines go to both
-  LDetail, LBoth: TGDEMLogEvent;
+  LBatch: TDownloadBatch;
+  LResult: TDownloadBatchResult;
 begin
-  LThrottle := nil;
-  LReport := nil;
-  LTodo := TList<string>.Create;
-  LQueueList := TList<string>.Create;
-  LFolders := TList<string>.Create;
-  LLock := TObject.Create;
-  LURLs := nil;
+  LBatch := TDownloadBatch.Create(ABearer, AStore, AReserve, ASpeed);
   try
-  try
-    // 1. Tiles already in the data folder need nothing from NASA. Those
-    // the caller left out are counted too.
-    LAlready := AAlready;
-    for LTile in ATiles do
-    begin
-      AToken.Check;
-      // Validates the name, raising a clear error if it is wrong
-      TGDEMDownloader.TileGranuleName(LTile);
-      TryParseTileName(LTile, LSouth, LWest);
-      if AStore.TileComplete(LSouth, LWest) then
-      begin
-        Inc(LAlready);
-        QueueMarkDownloaded(LSouth, LWest);
-      end
-      else if not LTodo.Contains(TileName(LSouth, LWest)) then
-        LTodo.Add(TileName(LSouth, LWest));
-    end;
-    if LAlready > 0 then
-      AddLog(Format('%d tile(s) already downloaded', [LAlready]));
-    if LTodo.Count = 0 then
-    begin
-      AddLog('Nothing to download.');
-      Exit;
-    end;
-
-    // The report file; if it cannot be made, the detail goes to the Debug
-    // tab as before
-    try
-      LReport := TDownloadReport.Create('download');
-      LDetail := LReport.Add;
-      LBoth :=
-        procedure(const Msg: string)
-        begin
-          AddLog(Msg);
-          LReport.Add(Msg);
-        end;
-      AddLog('Download report: ' + LReport.FileName);
-      if LAlready > 0 then
-        LReport.Add(Format('%d tile(s) already downloaded', [LAlready]));
-    except
-      on E: Exception do
-      begin
-        AddLog('WARNING: could not start a download report (' +
-          E.Message.TrimRight(['.']) + '); details follow here instead');
-        LDetail := AddLog;
-        LBoth := AddLog;
-      end;
-    end;
-
-    // 2. Ask CMR where they all are, many tiles per request
-    ProgressStatus('Asking NASA CMR where the tiles are ...');
-    LClock := TStopwatch.StartNew;
-    LLookup := TGDEMDownloader.Create(ABearer);
-    try
-      LLookup.CancelToken := AToken;
-      LLookup.OnLog := LDetail;
-      LURLs := LLookup.LookUpTiles(LTodo.ToArray,
-        procedure(ABatch, ABatches: Integer)
-        begin
-          ProgressOverall(ABatch - 1, ABatches,
-            Format('Looking up tiles: request %d of %d', [ABatch, ABatches]));
-        end);
-    finally
-      LLookup.Free;
-    end;
-
-    LNoData := 0;
-    for LTile in LTodo do
-      if LURLs.ContainsKey(LTile) then
-        LQueueList.Add(LTile)
-      else
-      begin
-        Inc(LNoData);
-        LDetail('  no data for ' + LTile + ' (ocean or outside coverage)');
-      end;
-    LQueue := LQueueList.ToArray;
-    LBoth(Format('Looked up %d tile(s) in NASA CMR in %s: %d have data',
-      [LTodo.Count, FormatDuration(LClock.Elapsed.TotalSeconds), Length(LQueue)]));
-
-    // 3. Download them, several tiles at a time. From here on LURLs is
-    // only read, which is safe from several threads at once.
-    LNext := -1;
-    LDone := 0;
-    LDownloaded := 0;
-    LFailed := 0;
-    LFailRun := 0;
-    LBytes := 0;
-    LSaved := 0;
-    LLastUi := -1000;
-    // Shared by every worker: limits files at once, climbing towards the
-    // most while all goes well and backing off if NASA starts cutting off
-    // or refusing downloads
-    LMost := DOWNLOAD_SPEED_MAX[ASpeed];
-    LThrottle := TDownloadThrottle.Create(DOWNLOAD_SPEED_START[ASpeed], LMost);
-    LThrottle.OnLog := LBoth;
-    LError := '';
-    LStop := False;
-    LBoth(Format('Downloading %d tile(s) at %s speed: %d at a time to start with, ' +
-      'at most %d', [Length(LQueue), DOWNLOAD_SPEED_KEYS[ASpeed].ToLower,
-      LThrottle.Allowed, LMost]));
-    ProgressOverall(0, Length(LQueue), Format('Tile 0 of %d', [Length(LQueue)]));
-    LClock := TStopwatch.StartNew;
-
-    LWorker :=
-      procedure
-      var
-        LIdx, LCount, LFailures, LS, LW: Integer;
-        LName, LTileFolder, LMessage: string;
-        LDownloader: TGDEMDownloader;
-        LSpace, LPrev: Int64;
-        LFatal: Boolean;
-      begin
-        LPrev := 0;
-        LDownloader := TGDEMDownloader.Create(ABearer);
-        try
-          LDownloader.CancelToken := AToken;
-          LDownloader.Throttle := LThrottle;
-          LDownloader.OnLog := LDetail;
-          LDownloader.OnProgress :=
-            procedure(const FileName: string; Received, Total: Int64)
-            var
-              LNow, LLast: Int64;
-              LSeconds: Double;
-              LText: string;
-              LAllowed: Integer;
-            begin
-              // Received starts again from 0 for each file and each retry
-              if Received < LPrev then
-                LPrev := 0;
-              TInterlocked.Add(LBytes, Received - LPrev);
-              LPrev := Received;
-
-              // At most four screen updates a second, whichever worker
-              LNow := LClock.ElapsedMilliseconds;
-              LLast := TInterlocked.Read(LLastUi);
-              if (LNow - LLast < 250) or
-                 (TInterlocked.CompareExchange(LLastUi, LNow, LLast) <> LLast) then
-                Exit;
-              LText := FormatByteSize(TInterlocked.Read(LBytes)) + ' downloaded';
-              LSeconds := LNow / 1000;
-              if LSeconds >= 2 then
-                LText := LText + Format(', %s/s',
-                  [FormatByteSize(Round(TInterlocked.Read(LBytes) / LSeconds))]);
-              LAllowed := LThrottle.Allowed;
-              if LAllowed = 1 then
-                ProgressItemText(Received, Total, FileName + ': ' + LText)
-              else
-                ProgressItemText(0, 0, Format('%d at a time: %s', [LAllowed, LText]));
-            end;
-
-          while not LStop and not AToken.Cancelled do
-          begin
-            LIdx := TInterlocked.Increment(LNext);
-            if LIdx >= Length(LQueue) then
-              Exit;
-            LName := LQueue[LIdx];
-            TryParseTileName(LName, LS, LW);
-            LTileFolder := AStore.TileFolder(LS, LW);
-            LMessage := '';
-            LFatal := False;
-            ProgressStatus('Downloading ' + LName);
-
-            if not TDirectory.Exists(AStore.Root) then
-            begin
-              LFatal := True;
-              LMessage := Format('Downloading stopped: the data folder %s is no longer ' +
-                'available. If it is on a removable drive, check that it is still ' +
-                'connected, then fetch again.', [AStore.Root]);
-            end
-            else
-            begin
-              // Every worker may be about to write a tile of about this size
-              LSpace := AStore.FreeSpace;
-              if (LSpace >= 0) and (LSpace - ESTIMATED_TILE_BYTES * LMost < AReserve) then
-              begin
-                LFatal := True;
-                LMessage := Format('Downloading stopped: only %s is free on the data ' +
-                  'drive, and %s must be kept free. Free some space or change the ' +
-                  'reserve in File > Settings.',
-                  [FormatByteSize(LSpace), FormatByteSize(AReserve)]);
-              end
-              else
-                try
-                  // Several workers may need the same new block folder at
-                  // once, and ForceDirectories is not safe for that
-                  TMonitor.Enter(LLock);
-                  try
-                    if not TDirectory.Exists(LTileFolder) then
-                      ForceDirectories(LTileFolder);
-                  finally
-                    TMonitor.Exit(LLock);
-                  end;
-                  if not TDirectory.Exists(LTileFolder) then
-                    raise EGDEMError.Create('the folder ' + LTileFolder + ' could not be created');
-
-                  TInterlocked.Add(LSaved, LDownloader.DownloadFiles(LURLs[LName], LTileFolder));
-                  if AStore.TileComplete(LS, LW) then
-                  begin
-                    TInterlocked.Increment(LDownloaded);
-                    QueueMarkDownloaded(LS, LW);
-                  end;
-                  // A good tile ends any run of failures
-                  TInterlocked.Exchange(LFailRun, 0);
-                except
-                  on E: EOperationCancelled do
-                    Exit;
-                  on E: EGDEMAuthError do
-                  begin
-                    // Every other tile would fail the same way
-                    LFatal := True;
-                    LMessage := E.Message;
-                  end;
-                  on E: Exception do
-                  begin
-                    // Already tried several times; skip the tile and carry on
-                    TInterlocked.Increment(LFailed);
-                    LFailures := TInterlocked.Increment(LFailRun);
-                    LBoth(Format('  FAILED %s: %s', [LName, E.Message.TrimRight(['.'])]));
-                    TMonitor.Enter(LLock);
-                    try
-                      if not LFolders.Contains(LTileFolder) then
-                        LFolders.Add(LTileFolder);
-                    finally
-                      TMonitor.Exit(LLock);
-                    end;
-                    if LFailures >= MAX_DOWNLOAD_FAILURES then
-                    begin
-                      LFatal := True;
-                      LMessage := Format('Downloading stopped after %d tiles in a row ' +
-                        'failed; the last with: %s. The Debug tab lists them.',
-                        [LFailures, E.Message.TrimRight(['.'])]);
-                    end;
-                  end;
-                end;
-            end;
-
-            if LFatal then
-            begin
-              TMonitor.Enter(LLock);
-              try
-                // The first fatal problem is the one reported
-                if LError = '' then
-                  LError := LMessage;
-                LStop := True;
-                if not LFolders.Contains(LTileFolder) then
-                  LFolders.Add(LTileFolder);
-              finally
-                TMonitor.Exit(LLock);
-              end;
-              Exit;
-            end;
-
-            LCount := TInterlocked.Increment(LDone);
-            ProgressOverall(LCount, Length(LQueue),
-              Format('Tile %d of %d', [LCount, Length(LQueue)]));
-          end;
-        finally
-          LDownloader.Free;
-        end;
-      end;
-
-    // Plain threads rather than the task pool, as this already runs on a
-    // pool thread and must wait for the workers. There is one for the most
-    // files allowed at once; the throttle holds back any not yet allowed.
-    SetLength(LThreads, Min(LMost, Max(1, Length(LQueue))));
-    for LIndex := 0 to High(LThreads) do
-    begin
-      LThreads[LIndex] := TThread.CreateAnonymousThread(LWorker);
-      LThreads[LIndex].FreeOnTerminate := False;
-    end;
-    try
-      for LIndex := 0 to High(LThreads) do
-        LThreads[LIndex].Start;
-      for LIndex := 0 to High(LThreads) do
-        LThreads[LIndex].WaitFor;
-    finally
-      for LIndex := 0 to High(LThreads) do
-        LThreads[LIndex].Free;
-    end;
-
-    // Only now that no worker is writing can empty folders be removed
-    for LFolder in LFolders do
-      AStore.PruneEmptyFolders(LFolder);
-
-    // LClock was restarted when the downloads began, so the lookup is not
-    // counted in the speed
-    LSeconds := LClock.Elapsed.TotalSeconds;
-    // The speed counts everything that arrived, including retries; the
-    // size is what was saved
-    LCutBack := '';
-    if LThrottle.Lowest < LThrottle.Peak then
-      LCutBack := Format(' (cut back to %d at worst, %d at the end)',
-        [LThrottle.Lowest, LThrottle.Allowed]);
-    LBoth(Format('Downloaded %d tile(s), %s, in %s at %s/s, up to %d at a time%s; %d were ' +
-      'already here, %d have no data, %d failed.',
-      [LDownloaded, FormatByteSize(LSaved), FormatDuration(LSeconds),
-       FormatByteSize(Round(LBytes / Max(LSeconds, 0.001))), LThrottle.Peak, LCutBack,
-       LAlready, LNoData, LFailed]));
-    if LError <> '' then
-      raise EGDEMError.Create(LError);
-    AToken.Check;
-    ProgressOverall(Length(LQueue), Length(LQueue), 'Finished');
-    if LFailed > 0 then
-      ReportError(Format('%d tile(s) could not be downloaded, even after several tries ' +
-        'each, and were skipped. The Debug tab lists them and why. Fetch the same ' +
-        'selection again to try them again; tiles already downloaded are skipped.',
-        [LFailed]));
-  except
-    // Record why the batch stopped, then let the job report it as usual
-    on E: Exception do
-    begin
-      if LReport <> nil then
-        LReport.Add('Stopped: ' + E.Message);
-      raise;
-    end;
-  end;
+    // Each of these is safe from the batch's threads: they queue their
+    // work to the main thread
+    LBatch.OnLog := AddLog;
+    LBatch.OnStatus := ProgressStatus;
+    LBatch.OnOverall := ProgressOverall;
+    LBatch.OnItem := ProgressItemText;
+    LBatch.OnTileDownloaded := QueueMarkDownloaded;
+    LResult := LBatch.Run(AToken, ATiles, AAlready);
   finally
-    LReport.Free;
-    LThrottle.Free;
-    LURLs.Free;
-    LLock.Free;
-    LFolders.Free;
-    LQueueList.Free;
-    LTodo.Free;
+    LBatch.Free;
   end;
+  if LResult.Failed > 0 then
+    ReportError(Format('%d tile(s) could not be downloaded, even after several tries ' +
+      'each, and were skipped. The Debug tab lists them and why. Fetch the same ' +
+      'selection again to try them again; tiles already downloaded are skipped.',
+      [LResult.Failed]));
 end;
 
 end.

@@ -204,6 +204,74 @@ So, in the same session:
 Next: the owner's timings of the cut pieces on the GPU, zoomed out and
 zoomed in, and a check of the Graphics setting on the laptop.
 
+The View menu's two timing items were then removed (commit `cc5a6c2`
+"Mainform" has the final form). The owner is leaving performance testing
+until GDEM tiles are drawn, which may change it anyway, and is testing on
+macOS and Linux.
+
+### lib and ui (27 October 2026)
+
+At the owner's request the units were split into `GDEMFetch/lib/`
+(reusable, no FMX) and `GDEMFetch/ui/` (forms, map, themes, drawing),
+with the project files left in `GDEMFetch/`. The owner chose folders
+inside `GDEMFetch/` rather than at the repository root. Files were moved
+with `git mv`; the `.dpr` `in` paths and `.dproj` `DCCReference`s point
+into the folders.
+
+- `lib/GDEMDownloadBatch` (new): `TDownloadBatch` holds what was
+  `TfrmMain.RunDownloads` (lookup, report, throttle, worker threads,
+  summary), unchanged in logic, reporting through `OnLog`, `OnStatus`,
+  `OnOverall`, `OnItem` and `OnTileDownloaded`, and returning a
+  `TDownloadBatchResult`. `MAX_DOWNLOAD_FAILURES` moved with it.
+  `TfrmMain.RunDownloads` now creates the batch, points its events at
+  `AddLog`, `ProgressStatus`, `ProgressOverall`, `ProgressItemText` and
+  `QueueMarkDownloaded`, and shows the "N tiles failed" dialog.
+- `FormatDuration` moved to `lib/GDEMStore` beside `FormatByteSize`;
+  `TfrmMain.FormatDuration` calls it.
+- No separate UI helper unit was needed: the only borderline unit,
+  `GDEMDrawing` (reads settings, sets Skia's FMX switches), goes in `ui/`
+  by its FMX dependency. `GDEMBrowser` and `GDEMGpuPreference` have no
+  FMX, so they are in `lib/`.
+- `tools/pasdoc_check.py` reads subfolders, prints paths relative to the
+  project folder, and reports any `lib/` unit that uses `FMX.*` or a `ui/`
+  unit (tested by planting both in a copy).
+
+Not yet built: the first build after the move, and a download to check
+`TDownloadBatch` behaves as `RunDownloads` did (a small fresh area is
+enough; the report and Debug tab lines should read as before).
+
+Owner's tests the same morning (of the build before the split):
+
+- macOS: fine. Settings offers GPU or CPU; Skia draws with Metal.
+- Linux: mostly fine. No GPU or CPU choice (as intended); Skia's CPU
+  canvas. The menu bar and its submenus showed only the first letter of
+  each item. First fixed with Sprite3D's workaround (move `mnuMain`'s
+  items onto an FMX `TMenuBar`, free `mnuMain`), which crashed at
+  start-up before the window appeared: access violation in
+  `libgobject-2.0` (`g_object_ref` on a stale pointer). FMX has already
+  made the GTK menu by `FormCreate`; each `TMenuItem` keeps a handle to its
+  GTK widget, freeing `mnuMain` destroys the widgets, and the next
+  property change on a moved item (`UpdateButtons` sets several
+  `Enabled`) touches a dead one. Sprite3D has the same bug but changes
+  only one item, so it gets GTK-CRITICAL warnings at start-up
+  (`gtk_menu_item_set_label: assertion 'GTK_IS_MENU_ITEM'`) instead of a
+  crash. Runtime error 217 with Skia off was very likely the same crash
+  surfacing differently.
+- Now `TfrmMain.UseFmxMenuBar` copies each item (Text, Enabled, Visible,
+  AutoCheck, IsChecked, RadioItem, GroupIndex, ShortCut, Tag, OnClick,
+  and submenus) onto the `TMenuBar` with the form as owner, frees
+  `mnuMain` with its originals (FMX tears the GTK menu down normally, and
+  `RemoveComponent` sets each original's field to nil), then names each
+  copy after its original, which makes `SetReference` point the form's
+  field at the copy. The bar gets `Position.Y := -1` before
+  `Align := Top`, so it sits above `layTop`. Tried on Linux: no crash,
+  menus work, but the GTK bar stayed above the new one showing "F D V":
+  freeing a `TMainMenu` with items in it does not make FMX rebuild the GTK
+  bar. So the originals are now freed one by one first (each removal
+  rebuilds the GTK bar; empty, it goes, as in Sprite3D), then
+  `RecreateOSMenu`, then `mnuMain` is freed. Not yet tried.
+  Sprite3D would benefit from the same change.
+
 Anything delivered after that is in the conversation, not here: ask the
 owner whether it has been applied before changing the same units.
 
@@ -298,6 +366,14 @@ owner whether it has been applied before changing the same units.
 
 These cost time once; the README's rules cover most of them, and the
 reasons are here.
+
+- FMX on Linux shows a `TMainMenu` as a native GTK menu bar that shows
+  only the first letter of each item. Sprite3D's fix (in its main form,
+  not its README) moves the items onto an FMX `TMenuBar`, but moved items
+  keep handles to GTK widgets that freeing the `TMainMenu` destroys, which
+  crashed GDEMFetch; copy the items instead (see above). Check Sprite3D's
+  source, not just its README, for platform workarounds, and check its
+  start-up output for warnings before copying one.
 
 - `<WelcomePageFile Path="..\README.md"/>` in the `.dproj` opens the
   README with the project: the path is relative to the project file.

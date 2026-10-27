@@ -4,14 +4,16 @@ Usage, from the repository root:
 
     python3 tools/pasdoc_check.py GDEMFetch
 
-It reads every .pas file in the folder, and the program's .dpr, and
-reports, per unit:
+It reads every .pas file in the folder and the folders inside it (lib and
+ui), and the program's .dpr, and reports, per unit:
   - a missing @abstract unit comment before `unit X;`
   - interface declarations with no comment immediately before them
   - unbalanced parentheses inside @tag(...) in comments
   - @link(...) targets that are not declared anywhere in the project
   - fields declared after a method or property in the same section of a
     class, which Delphi rejects (E2169)
+  - a unit in lib that uses FMX or a unit in ui: lib must stay free of the
+    user interface, so other programs can reuse it
 
 It does not parse Pascal fully, so it can miss things PasDoc would warn
 about, but it has no dependencies beyond Python 3. Prints
@@ -20,7 +22,12 @@ about, but it has no dependencies beyond Python 3. Prints
 import re, sys, pathlib
 
 root = pathlib.Path(sys.argv[1])
-files = sorted(root.glob('*.pas')) + sorted(root.glob('*.dpr'))
+files = sorted(root.rglob('*.pas')) + sorted(root.glob('*.dpr'))
+
+
+def label(path):
+    """The file's path inside the project folder, for messages."""
+    return path.relative_to(root).as_posix()
 
 DECL_KW = re.compile(r'^\s*(class\s+)?(procedure|function|constructor|destructor|property|operator)\b', re.I)
 TYPE_DECL = re.compile(r'^\s*([A-Za-z_]\w*)(<[^>]*>)?\s*=\s*(?!\s*$)', re.I)
@@ -57,7 +64,7 @@ for f in files:
     if m:
         before = text[:m.start()].rstrip()
         if not before.endswith('}') or '@abstract' not in before[-4000:]:
-            problems.append(f'{f.name}: unit/program comment without @abstract')
+            problems.append(f'{label(f)}: unit/program comment without @abstract')
     # comments: tag balance and links
     for cm in re.finditer(r'\{(?!\$)(.*?)\}', text, re.S):
         body = cm.group(1)
@@ -71,11 +78,11 @@ for f in files:
                     depth -= 1
                 i += 1
             if depth:
-                problems.append(f'{f.name}:{lineno}: unbalanced @{tm.group(1)}(')
+                problems.append(f'{label(f)}:{lineno}: unbalanced @{tm.group(1)}(')
         for lm in re.finditer(r'@link\(([^)\s]+)', body):
             target = lm.group(1).split('.')[-1].lower()
             if target not in declared and target not in KNOWN_EXTERNAL:
-                problems.append(f'{f.name}:{lineno}: @link({lm.group(1)}) not found')
+                problems.append(f'{label(f)}:{lineno}: @link({lm.group(1)}) not found')
     if f.suffix == '.dpr':
         continue
     # interface declarations need a comment before them
@@ -132,7 +139,7 @@ for f in files:
             if DECL_KW.match(s):
                 seen_member = True
             elif FIELD.match(s) and seen_member:
-                problems.append(f'{f.name}:{i+1}: field after a method or property '
+                problems.append(f'{label(f)}:{i+1}: field after a method or property '
                                 f'(Delphi E2169): {s[:60]}')
         # previous non-blank line, skipping compiler directives
         j = i - 1
@@ -142,9 +149,23 @@ for f in files:
         prev = lines[j].strip()
         documented = prev.endswith('}') or prev.startswith('//') or prev.endswith('*)')
         if not documented:
-            problems.append(f'{f.name}:{i+1}: undocumented: {s[:70]}')
+            problems.append(f'{label(f)}:{i+1}: undocumented: {s[:70]}')
         paren_depth = s.count('(') - s.count(')')
         if paren_depth < 0:
             paren_depth = 0
+
+# lib must not depend on the user interface
+ui_units = {p.stem.lower() for p in (root / 'ui').glob('*.pas')}
+for f in sorted((root / 'lib').glob('*.pas')):
+    code = re.sub(r'\{(?!\$).*?\}', ' ', texts[f], flags=re.S)
+    code = re.sub(r'\(\*.*?\*\)', ' ', code, flags=re.S)
+    code = re.sub(r'//[^\n]*', ' ', code)
+    code = re.sub(r"'[^']*'", "''", code)
+    for clause in re.finditer(r'\buses\b(.*?);', code, re.S | re.I):
+        for name in re.sub(r'\{\$.*?\}', ' ', clause.group(1)).split(','):
+            name = name.strip().split()[0] if name.strip() else ''
+            if name.lower().startswith('fmx.') or name.lower() in ui_units:
+                problems.append(f'{label(f)}: lib unit uses {name}, which belongs to the '
+                                f'user interface')
 
 print('\n'.join(problems) if problems else 'No problems found')

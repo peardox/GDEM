@@ -230,35 +230,36 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
-        <DCCReference Include="MainForm.pas">
+        <DCCReference Include="ui\MainForm.pas">
             <Form>frmMain</Form>
             <FormType>fmx</FormType>
         </DCCReference>
-        <DCCReference Include="GDEMDownloader.pas"/>
-        <DCCReference Include="GDEMCMR.pas"/>
-        <DCCReference Include="GDEMSettings.pas"/>
-        <DCCReference Include="GDEMBrowser.pas"/>
-        <DCCReference Include="SettingsForm.pas">
+        <DCCReference Include="lib\GDEMDownloader.pas"/>
+        <DCCReference Include="lib\GDEMDownloadBatch.pas"/>
+        <DCCReference Include="lib\GDEMCMR.pas"/>
+        <DCCReference Include="lib\GDEMSettings.pas"/>
+        <DCCReference Include="lib\GDEMBrowser.pas"/>
+        <DCCReference Include="ui\SettingsForm.pas">
             <Form>frmSettings</Form>
             <FormType>fmx</FormType>
         </DCCReference>
-        <DCCReference Include="GDEMTiles.pas"/>
-        <DCCReference Include="GDEMWorldMap.pas"/>
-        <DCCReference Include="GDEMTileIndex.pas"/>
-        <DCCReference Include="GDEMCancel.pas"/>
-        <DCCReference Include="GDEMStore.pas"/>
-        <DCCReference Include="ProgressForm.pas">
+        <DCCReference Include="lib\GDEMTiles.pas"/>
+        <DCCReference Include="ui\GDEMWorldMap.pas"/>
+        <DCCReference Include="lib\GDEMTileIndex.pas"/>
+        <DCCReference Include="lib\GDEMCancel.pas"/>
+        <DCCReference Include="lib\GDEMStore.pas"/>
+        <DCCReference Include="ui\ProgressForm.pas">
             <Form>frmProgress</Form>
             <FormType>fmx</FormType>
         </DCCReference>
-        <DCCReference Include="GDEMStyles.pas"/>
-        <DCCReference Include="GDEMTitleBar.pas"/>
-        <DCCReference Include="GDEMThemes.pas"/>
-        <DCCReference Include="GDEMReport.pas"/>
-        <DCCReference Include="GDEMAwake.pas"/>
-        <DCCReference Include="GDEMVectors.pas"/>
-        <DCCReference Include="GDEMDrawing.pas"/>
-        <DCCReference Include="GDEMGpuPreference.pas"/>
+        <DCCReference Include="ui\GDEMStyles.pas"/>
+        <DCCReference Include="ui\GDEMTitleBar.pas"/>
+        <DCCReference Include="ui\GDEMThemes.pas"/>
+        <DCCReference Include="lib\GDEMReport.pas"/>
+        <DCCReference Include="lib\GDEMAwake.pas"/>
+        <DCCReference Include="lib\GDEMVectors.pas"/>
+        <DCCReference Include="ui\GDEMDrawing.pas"/>
+        <DCCReference Include="lib\GDEMGpuPreference.pas"/>
         <None Include="..\styles\GDEMThemes.rc"/>
         <None Include="..\styles\buildstyles.cmd"/>
         <RcItem Include="..\maps\world_1080x540.jpg">
@@ -336,6 +337,12 @@ $(PreBuildEvent)]]></PreBuildEvent>
                     </Platform>
                 </DeployFile>
                 <DeployFile LocalName="$(BDS)\bin\delphi_PROJECTICNS.icns" Configuration="Debug" Class="ProjectOSXResource">
+                    <Platform Name="OSXARM64">
+                        <RemoteName>GDEMFetch.icns</RemoteName>
+                        <Overwrite>true</Overwrite>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="$(BDS)\bin\delphi_PROJECTICNS.icns" Configuration="Release" Class="ProjectOSXResource">
                     <Platform Name="OSXARM64">
                         <RemoteName>GDEMFetch.icns</RemoteName>
                         <Overwrite>true</Overwrite>
@@ -583,8 +590,8 @@ $(PreBuildEvent)]]></PreBuildEvent>
                         <Overwrite>true</Overwrite>
                     </Platform>
                 </DeployFile>
-                <DeployFile LocalName="OSXARM64\Debug\GDEMFetch.dSYM" Configuration="Debug" Class="ProjectOSXDebug">
-                    <Platform Name="OSXARM64">
+                <DeployFile LocalName="Linux64\Release\GDEMFetch" Configuration="Release" Class="ProjectOutput">
+                    <Platform Name="Linux64">
                         <RemoteName>GDEMFetch</RemoteName>
                         <Overwrite>true</Overwrite>
                     </Platform>
@@ -601,6 +608,23 @@ $(PreBuildEvent)]]></PreBuildEvent>
                     </Platform>
                 </DeployFile>
                 <DeployFile LocalName="OSXARM64\Debug\GDEMFetch" Configuration="Debug" Class="ProjectOutput">
+                    <Platform Name="OSXARM64">
+                        <RemoteName>GDEMFetch</RemoteName>
+                        <Overwrite>true</Overwrite>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="OSXARM64\Release\GDEMFetch.entitlements" Configuration="Release" Class="ProjectOSXEntitlements">
+                    <Platform Name="OSXARM64">
+                        <Overwrite>true</Overwrite>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="OSXARM64\Release\GDEMFetch.info.plist" Configuration="Release" Class="ProjectOSXInfoPList">
+                    <Platform Name="OSXARM64">
+                        <RemoteName>Info.plist</RemoteName>
+                        <Overwrite>true</Overwrite>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="OSXARM64\Release\GDEMFetch" Configuration="Release" Class="ProjectOutput">
                     <Platform Name="OSXARM64">
                         <RemoteName>GDEMFetch</RemoteName>
                         <Overwrite>true</Overwrite>

@@ -114,6 +114,11 @@ unreadable settings, a missing world map) are also shown in a dialog. The
 
 ### Menus
 
+On Windows the menus are the usual menu bar, and on macOS they are in the
+system menu bar at the top of the screen. On Linux they are drawn by FMX
+itself, in the program's theme, because the native GTK menu bar FMX would
+otherwise use showed only the first letter of each menu and item.
+
 | Menu | Item | Does |
 |------|------|------|
 | File | Settings... | Bearer token, data folder, free-space reserve, files copied at once when importing, download speed, theme, drawing (GPU or CPU), and on Windows which graphics processor to use |
@@ -486,7 +491,7 @@ Existing Tiles...** and choose that folder.
 | Path | Contents |
 |------|----------|
 | `GDEM.groupproj` | Project group |
-| `GDEMFetch/` | The GDEMFetch application |
+| `GDEMFetch/` | The GDEMFetch application: the project files, with its units in `lib/` and `ui/` (see [GDEMFetch units](#gdemfetch-units)) |
 | `styles/` | FMX styles for the themes, with the resource script and the pre-build script that builds them; see [Themes](#themes) |
 | `maps/` | World map images and vectors. `world_1080x540.jpg` and `world_vectors.bin` (borders and coastlines) are linked into GDEMFetch as resources. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository. |
 | `delphi-neon/` | Neon JSON library (git submodule) |
@@ -498,28 +503,47 @@ Existing Tiles...** and choose that folder.
 
 ### GDEMFetch units
 
+The project files (`GDEMFetch.dpr`, `GDEMFetch.dproj`, the icon and the
+macOS templates) are in `GDEMFetch/`; the units are in two folders inside
+it:
+
+- **`lib/`**: everything that does the work and could serve another
+  program: tiles, NASA, downloads, the data folder, settings. These units
+  never use FMX or anything in `ui/`; `tools/pasdoc_check.py` reports any
+  that do.
+- **`ui/`**: everything to do with the user interface: the forms, the
+  map, themes and drawing. These use `lib/` freely.
+
+**lib/**
+
 | Unit | Purpose |
 |------|---------|
-| `MainForm` | Main window: toolbar and menus over three tabs (Map, 3D, Debug), with progress and status bars |
+| `GDEMTiles` | Tile names and `TTileRect`, a block of tiles |
+| `GDEMTileIndex` | `TTileIndex` bitmap of which tiles exist, and its CMR builder |
+| `GDEMCMR` | Neon models for CMR search results; no networking |
+| `GDEMDownloader` | Finds and downloads tiles: CMR lookups, single downloads, `TDownloadThrottle` |
+| `GDEMDownloadBatch` | `TDownloadBatch`, a whole batch of downloads: lookup, parallel workers, retries and summary, reporting through events |
+| `GDEMReport` | `TDownloadReport`, the report file for each batch of downloads; `HideURLQueries` |
+| `GDEMStore` | The data folder: block layout, downloaded-tiles bitmap, importing, rescanning, moving, deleting, free space; `FormatByteSize` and `FormatDuration` |
+| `GDEMVectors` | `TWorldVectors`: country borders, coastlines and country names |
+| `GDEMSettings` | Loads and saves `settings.json` with Neon |
+| `GDEMCancel` | `TCancelToken`, shared by the Cancel button and background jobs |
+| `GDEMAwake` | `TKeepAwake`, which keeps the computer from sleeping while a job runs |
+| `GDEMBrowser` | Opens web links in the default browser on each platform |
+| `GDEMGpuPreference` | Reads and sets Windows' graphics processor preference for the program (ported from Sprite3D's `GpuPreference`); does nothing on other platforms |
+
+**ui/**
+
+| Unit | Purpose |
+|------|---------|
+| `MainForm` | Main window: toolbar and menus over three tabs (Map, 3D, Debug), with progress and status bars; runs the jobs and shows their progress |
 | `SettingsForm` | Modal settings dialog |
-| `ProgressForm` | Modal progress dialog shown while data is downloaded |
+| `ProgressForm` | Modal progress dialog shown while data is downloaded or imported |
+| `GDEMWorldMap` | `TWorldMapView`, the zoomable map with tile selection, borders and coastlines |
+| `GDEMDrawing` | `ConfigureDrawing`, called from the `.dpr` before `Application.Initialize`, which tells Skia to draw on the GPU or the CPU and applies the Windows graphics processor choice |
 | `GDEMThemes` | The themes, and `ApplyTheme` |
 | `GDEMStyles` | Switches FMX styles at run time (ported from Sprite3D) |
 | `GDEMTitleBar` | Colours title bars to match the style (ported from Sprite3D) |
-| `GDEMSettings` | Loads and saves `settings.json` with Neon |
-| `GDEMBrowser` | Opens web links in the default browser on each platform |
-| `GDEMWorldMap` | `TWorldMapView`, the zoomable map with tile selection |
-| `GDEMTiles` | Tile names and `TTileRect`, a block of tiles; no FMX |
-| `GDEMTileIndex` | `TTileIndex` bitmap of which tiles exist, and its CMR builder |
-| `GDEMCMR` | Neon models for CMR search results; no networking |
-| `GDEMReport` | `TDownloadReport`, the report file for each batch of downloads |
-| `GDEMAwake` | `TKeepAwake`, which keeps the computer from sleeping while a job runs |
-| `GDEMVectors` | `TWorldVectors`: country borders, coastlines and country names for the map; no FMX |
-| `GDEMDrawing` | `ConfigureDrawing`, called from the `.dpr` before `Application.Initialize`, which tells Skia to draw on the GPU or the CPU and applies the Windows graphics processor choice |
-| `GDEMGpuPreference` | Reads and sets Windows' graphics processor preference for the program (ported from Sprite3D's `GpuPreference`); does nothing on other platforms |
-| `GDEMDownloader` | Finds and downloads tiles |
-| `GDEMStore` | The data folder: block layout, downloaded-tiles bitmap, rescanning, moving, deleting, free space |
-| `GDEMCancel` | `TCancelToken`, shared by the Cancel button and background jobs |
 
 The world map image `maps/world_1080x540.jpg` is linked into GDEMFetch as
 the `WORLDMAP` RCDATA resource, and `maps/world_vectors.bin` as
@@ -602,10 +626,11 @@ got to, what has been tested and what was learned along the way.
   - Things declared only in an implementation section are not in the
     generated docs, but are documented anyway.
   - Before delivering, run `python3 tools/pasdoc_check.py GDEMFetch`. It
-    reports undocumented interface items, `@link` targets that do not
-    exist, unbalanced `@tag(...)` brackets, and class fields declared
-    after a method or property (which Delphi rejects), and prints
-    `No problems found` when all is well.
+    reads `lib/` and `ui/` as well, and reports undocumented interface
+    items, `@link` targets that do not exist, unbalanced `@tag(...)`
+    brackets, class fields declared after a method or property (which
+    Delphi rejects), and `lib/` units that use FMX or a `ui/` unit. It
+    prints `No problems found` when all is well.
 - **Source files are ASCII only.** Delphi reads files without a byte
   order mark as ANSI, so write characters such as the degree sign as
   character codes (`#$00B0`).
@@ -619,12 +644,30 @@ got to, what has been tested and what was learned along the way.
   a script), disable its entry for every platform in the `.dproj`'s
   Deployment section (`<Enabled>false</Enabled>`), as is done for the map
   and `buildstyles.cmd`; the IDE otherwise deploys it.
+- On Linux, a form's `TMainMenu` is replaced by an FMX `TMenuBar`
+  (`TfrmMain.UseFmxMenuBar`): the native GTK menu bar showed only the
+  first letter of each item. Copy the items onto the bar, free the
+  original items one by one (so FMX rebuilds the GTK bar empty; freeing
+  the `TMainMenu` with items in it leaves the GTK bar showing), free the
+  `TMainMenu`, then give each copy its original's name, which points the
+  form's field at it. Do not move the original items: FMX has already
+  given them GTK widgets, which freeing the `TMainMenu` destroys, and the
+  next change to a moved item crashes in GTK. A new form with a menu needs
+  the same.
 - On macOS, every privacy-sensitive location the program touches needs a
   usage description in the Version Info keys; keep them accurate.
 - Naming: fields `F`, parameters `A`, locals `L`; non-visual units
   `GDEM*.pas`; forms `*Form.pas`.
-- Keep non-visual logic in its own units, out of forms, so later programs
-  can reuse it.
+- **Units go in `lib/` or `ui/`.** Anything that does the work goes in
+  `lib/`, never using FMX or a `ui/` unit, so later programs can reuse it;
+  `tools/pasdoc_check.py` reports a `lib/` unit that breaks this. Forms,
+  controls, themes and anything else that needs FMX go in `ui/`. Keep
+  work out of forms: a form starts a job and shows it, as `MainForm` does
+  with `TDownloadBatch`, whose events it points at its progress and log
+  methods. A unit that is mostly one but needs a little of the other goes
+  where its dependencies put it (`GDEMDrawing` reads settings, but must
+  set Skia's FMX switches, so it is in `ui/`). Add a new unit to both the
+  `.dpr` (`in 'lib\Name.pas'`) and the `.dproj`.
 - Long-running work runs on a `TTask`. Controls are only touched through
   `TThread.Queue`. Long-running classes can be cancelled from another
   thread, and the main window waits for them before closing.
