@@ -181,7 +181,8 @@ type
 implementation
 
 uses
-  System.Math, System.Generics.Defaults;
+  // System.Character for Char's IsLetter and ToLower
+  System.Math, System.Character, System.Generics.Defaults;
 
 type
   { @abstract(A match with what it is ranked by.) }
