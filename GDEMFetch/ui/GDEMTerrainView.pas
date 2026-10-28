@@ -31,7 +31,17 @@ the viewport, letting the mouse through
   middle of the tile asked for, and looks ahead and a little down. Keys,
   held: Up and Down change the speed (never below a hover), Left and Right
   turn, Page Up and Page Down climb and descend, Q and A tilt the camera
-  up and down; Space stops to a hover; R starts again. Going below the
+  up and down; H stops to a hover; Space pauses and carries on; B asks
+  for a bookmark (@link(TTerrainView.OnBookmark)); L turns the place
+  names on and off; R starts again. The keys are listed in a panel at the
+  bottom left, which collapses to its title.
+
+  Named places (@link(TTerrainView.PlaceLabels): towns and cities,
+  mountains, the user's markers) within @link(LABEL_RANGE_KM) are labelled
+  on poles standing on the ground under them, the most important first,
+  as many as fit. Their ground is projected onto the screen as the camera
+  sees it: field of view @code(TERRAIN_FOV) up and down, wider across by
+  the view's shape. Going below the
   ground is a crash, which stops the flight until R. Left-drag looks round
   (turns and tilts), the wheel climbs and descends, a double click starts
   again. Each tick moves the flight by the time gone, so its speed does not
@@ -72,7 +82,8 @@ interface
 uses
   System.SysUtils, System.Classes, System.Types, System.UITypes, System.Math.Vectors,
   System.Diagnostics, System.Generics.Collections,
-  FMX.Types, FMX.Controls, FMX.Layouts, FMX.Types3D, FMX.Controls3D, FMX.Objects3D,
+  FMX.Types, FMX.Controls, FMX.Graphics, FMX.Layouts, FMX.Types3D, FMX.Controls3D,
+  FMX.Objects3D,
   Gorilla.Viewport, Gorilla.Camera, Gorilla.Light, Gorilla.Mesh, Gorilla.Material.VertexColor,
   Gorilla.Material.Default,
   GDEMTerrain, GDEMTerrainLod, GDEMTerrainHud, GDEMFlight, GDEMImagery;
@@ -81,6 +92,13 @@ const
   { The most milliseconds a timer tick spends turning patches into meshes;
     what is left waits for the next tick. }
   UPLOAD_BUDGET_MS = 12;
+
+  { Places nearer the flight than this are labelled, kilometres. }
+  LABEL_RANGE_KM = 100;
+
+  { The list of places in reach is made again when the flight has moved
+    this far, kilometres. }
+  LABEL_REFRESH_KM = 10;
 
   { Milliseconds before a patch whose imagery could not be made asks for
     it again. }
@@ -98,11 +116,56 @@ const
     milliseconds, so one whose wait runs out takes over. }
   IMAGERY_LOOK_MS = 100;
 
+  { How often the imagery along the way ahead is looked for while
+    flying, milliseconds. }
+  IMAGERY_AHEAD_MS = 2000;
+
+  { How far ahead imagery is fetched: the distance flown in this many
+    seconds at the speed now, up to @link(IMAGERY_AHEAD_KM). }
+  IMAGERY_AHEAD_SECONDS = 60;
+
+  { The farthest ahead imagery is fetched, kilometres. }
+  IMAGERY_AHEAD_KM = 30;
+
+  { The most imagery tiles asked for ahead at each look. }
+  IMAGERY_AHEAD_TILES = 24;
+
 type
   { @abstract(Reports a line for the log.)
     @param(Sender The view.)
     @param(AText The line.) }
   TTerrainReportEvent = procedure(Sender: TObject; const AText: string) of object;
+
+  { @abstract(Where the flight is and how it is going: all a bookmark needs
+    to come back to it.) }
+  TTerrainFlightState = record
+    { Latitude, degrees. }
+    Latitude: Double;
+    { Longitude, degrees. }
+    Longitude: Double;
+    { True height above sea level, metres. }
+    Altitude: Double;
+    { The way the flight goes, degrees clockwise from true north. }
+    Heading: Double;
+    { Speed over the ground, metres a second. }
+    Speed: Double;
+    { The camera's tilt below the level, degrees. }
+    Tilt: Double;
+  end;
+
+  { @abstract(A named place to label in the view.) }
+  TTerrainPlaceLabel = record
+    { The name to show. }
+    Name: string;
+    { Latitude, degrees. }
+    Latitude: Double;
+    { Longitude, degrees. }
+    Longitude: Double;
+    { What it is, which sets its colour. }
+    Kind: TTerrainLabelKind;
+    { How much it matters: lower first, so it wins a place on screen. }
+    Rank: Single;
+  end;
 
   { @abstract(A patch's mesh, with where the patch is, for its imagery.) }
   TTerrainPatchMesh = class(TGorillaSingletonMesh)
@@ -246,6 +309,48 @@ type
     { @true when a texture has been put on a mesh since the tree last
       looked. }
     FImageryArrived: Boolean;
+    { Times the gap between looks for the imagery along the way ahead. }
+    FImageryAhead: TStopwatch;
+    { Backing field for @link(Paused). }
+    FPaused: Boolean;
+    { Says the view is paused, below the crash banner's place. }
+    FPauseBanner: TTerrainBanner;
+    { Hides the view while @link(Covered). }
+    FCover: TTerrainCover;
+    { The keys, bottom left, collapsible. }
+    FControls: TTerrainControls;
+    { Backing field for @link(OnBookmark). }
+    FOnBookmark: TNotifyEvent;
+    { Backing field for @link(OnControlsToggle). }
+    FOnControlsToggle: TNotifyEvent;
+    { @true while Space is held, so its repeats and its character do not
+      pause and carry on again. }
+    FSpaceDown: Boolean;
+    { @true while B is held, for the same reason. }
+    FBookmarkKeyDown: Boolean;
+    { @true while L is held, for the same reason. }
+    FLabelsKeyDown: Boolean;
+    { @true from a bookmark key until @link(OnBookmark) has been called. }
+    FBookmarkQueued: Boolean;
+    { The place names, under the instruments. }
+    FLabelLayer: TTerrainLabelLayer;
+    { Backing field for @link(PlaceLabels). }
+    FPlaceLabels: TArray<TTerrainPlaceLabel>;
+    { The places within reach of the flight, as indexes into
+      @link(FPlaceLabels), sorted most important first. }
+    FNearLabels: TArray<Integer>;
+    { Where the flight was when @link(FNearLabels) was made, latitude. }
+    FNearLatitude: Double;
+    { Where the flight was when @link(FNearLabels) was made, longitude. }
+    FNearLongitude: Double;
+    { @true while @link(FNearLabels) fits the labels given. }
+    FNearValid: Boolean;
+    { Backing field for @link(ShowLabels). }
+    FShowLabels: Boolean;
+    { Backing field for @link(OnLabelsToggle). }
+    FOnLabelsToggle: TNotifyEvent;
+    { Backing field for @link(OnFlightMoved). }
+    FOnFlightMoved: TNotifyEvent;
     { Backing field for @link(OnSettled). }
     FOnSettled: TTerrainReportEvent;
     { Backing field for @link(OnLog). }
@@ -305,6 +410,13 @@ type
     { Asks for the imagery of every patch on show that has none and is not
       waiting for it. }
     procedure SweepImagery;
+
+    { Asks the imagery service to fetch, into its disk cache, the tiles
+      under the way ahead at the detail the ground below the flight is
+      drawn with, so they are there when the patches under them are made:
+      up to @link(IMAGERY_AHEAD_TILES), nearest first, a line along the
+      heading and one each side. }
+    procedure PrefetchImagery;
 
     { For the tree: whether a mesh may take over from the patches it
       replaces. With @link(Realistic) on, only once its imagery has
@@ -382,6 +494,59 @@ type
       @param(AValue Metres; less than 0 is taken as 0.) }
     procedure SetStartHeight(AValue: Integer);
 
+    { Writer for @link(Paused): stops or carries on the flight, and shows
+      or hides the banner saying so.
+      @param(AValue @true to pause.) }
+    procedure SetPaused(AValue: Boolean);
+
+    { Reader for @link(Covered). @returns(@true while covered.) }
+    function GetCovered: Boolean;
+
+    { Writer for @link(Covered).
+      @param(AValue @true to cover the view.) }
+    procedure SetCovered(AValue: Boolean);
+
+    { A picture of the 3D drawing as it is now, for the cover.
+      @returns(The picture, the caller's to free; @nil if none could be
+        had, or it came out empty.) }
+    function PictureOfView: TBitmap;
+
+    { Writer for @link(FlightSpeed).
+      @param(AValue Metres a second.) }
+    procedure SetFlightSpeed(AValue: Double);
+
+    { Reader for @link(ControlsCollapsed). @returns(@true if collapsed.) }
+    function GetControlsCollapsed: Boolean;
+
+    { Writer for @link(ControlsCollapsed).
+      @param(AValue @true to show only the panel's title.) }
+    procedure SetControlsCollapsed(AValue: Boolean);
+
+    { Moves the panel to the bottom again when it opens or closes, keeps
+      the keyboard here, and tells @link(OnControlsToggle).
+      @param(Sender The panel.) }
+    procedure ControlsToggled(Sender: TObject);
+
+    { Calls @link(OnBookmark) once the key's handling is over, and only
+      once for a key that came both as a key and as a character. }
+    procedure AskForBookmark;
+
+    { Finds the places within @link(LABEL_RANGE_KM) of the flight again,
+      most important first, when it has moved far enough. }
+    procedure FindNearLabels;
+
+    { Projects the places near the flight onto the screen and gives them
+      to the label layer; nothing when @link(ShowLabels) is off. }
+    procedure UpdateLabels;
+
+    { Writer for @link(PlaceLabels).
+      @param(AValue The places.) }
+    procedure SetPlaceLabels(const AValue: TArray<TTerrainPlaceLabel>);
+
+    { Writer for @link(ShowLabels).
+      @param(AValue @true to label places.) }
+    procedure SetShowLabels(AValue: Boolean);
+
     { Reader for @link(ShownPatches). @returns(Patches on show.) }
     function GetShownPatches: Integer;
   protected
@@ -453,6 +618,57 @@ type
       @link(StartHeight) above the middle of the tile asked for. }
     procedure ResetView;
 
+    { Where the flight is and how it is going now.
+      @returns(The state, for a bookmark.) }
+    function FlightState: TTerrainFlightState;
+
+    { Puts the flight exactly in a state, measuring the view again from
+      there if it is far from where it is measured from now. Call after
+      @link(ShowArea), with a tile near the state's place.
+      @param(AState The state, from a bookmark.)
+      @param(AAboveGround @true if the state's altitude is a height above
+        the ground there, which the flight lifts to once that ground is
+        known.) }
+    procedure JumpTo(const AState: TTerrainFlightState; AAboveGround: Boolean = False);
+
+    { Starts the flight again looking at a place: a little south of it,
+      facing north, @link(StartHeight) above the ground there, tilted so
+      the place is in the middle of the view. Call after @link(ShowArea).
+      @param(ALatitude The place's latitude.)
+      @param(ALongitude Its longitude.) }
+    procedure StartLookingAt(ALatitude, ALongitude: Double);
+
+    { Starts the flight again looking at a place from a heading, height
+      and tilt, as a bookmark keeps them: back from it along the heading,
+      facing it, tilted so it is in the middle of the view once the ground
+      is known; hovering. Call after @link(ShowArea).
+      @param(ALatitude The place's latitude.)
+      @param(ALongitude Its longitude.)
+      @param(AHeading The way to face, degrees from north.)
+      @param(AHeight The height, metres.)
+      @param(AAboveGround @true if above the ground; @false if above the
+        sea.)
+      @param(ATilt The camera's tilt below the level, degrees.) }
+    procedure StartLookingAlong(ALatitude, ALongitude, AHeading, AHeight: Double;
+      AAboveGround: Boolean; ATilt: Double);
+
+    { Says a tile has been downloaded since it was drawn flat: its
+      patches are made again from its heights.
+      @param(ASouth The tile's south edge.)
+      @param(AWest Its west edge.) }
+    procedure TileDownloaded(ASouth, AWest: Integer);
+
+    { @true once a tile has been shown and every patch wanted, and with
+      @link(Realistic) on every texture, has been made.
+      @returns(@true if settled.) }
+    function Settled: Boolean;
+
+    { How far the work since the last change has got, for a progress bar.
+      @param(ADone Patches and textures made.)
+      @param(ATotal Those made and those still to come.)
+      @param(AText A line saying so.) }
+    procedure WorkProgress(out ADone, ATotal: Integer; out AText: string);
+
     { Says what each tile holds; set before @link(ShowArea). Called on the
       main thread. }
     property TileLookup: TTerrainTileLookup read FTileLookup write FTileLookup;
@@ -492,6 +708,42 @@ type
 
     { Reports problems, changes of frame, of display and crashes. }
     property OnLog: TTerrainReportEvent read FOnLog write FOnLog;
+
+    { @true while the flight is paused: it does not move, the movement keys
+      and the wheel do nothing, and looking round still works. }
+    property Paused: Boolean read FPaused write SetPaused;
+
+    { @true to hide the view behind a plain cover saying it is being got
+      ready, while it goes on working underneath, so a new place and its
+      imagery are not seen coming in. }
+    property Covered: Boolean read GetCovered write SetCovered;
+
+    { The flight's speed, metres a second; setting it changes it at once. }
+    property FlightSpeed: Double write SetFlightSpeed;
+
+    { @true while the controls panel shows only its title. }
+    property ControlsCollapsed: Boolean read GetControlsCollapsed write SetControlsCollapsed;
+
+    { Told when B is pressed, to make a bookmark; called after the key's
+      handling, so it may open a modal dialog. }
+    property OnBookmark: TNotifyEvent read FOnBookmark write FOnBookmark;
+
+    { Told when the controls panel is opened or closed with the mouse, to
+      remember it. }
+    property OnControlsToggle: TNotifyEvent read FOnControlsToggle write FOnControlsToggle;
+
+    { The named places to label: towns and cities, mountains, markers. }
+    property PlaceLabels: TArray<TTerrainPlaceLabel> read FPlaceLabels write SetPlaceLabels;
+
+    { @true to label the places near the flight. }
+    property ShowLabels: Boolean read FShowLabels write SetShowLabels;
+
+    { Told when L turns the place names on or off, to remember it. }
+    property OnLabelsToggle: TNotifyEvent read FOnLabelsToggle write FOnLabelsToggle;
+
+    { Told whenever the instruments are updated, as the flight moves or
+      the ground under it sharpens; @link(FlightState) says where it is. }
+    property OnFlightMoved: TNotifyEvent read FOnFlightMoved write FOnFlightMoved;
   end;
 
 implementation
@@ -503,7 +755,8 @@ uses
   Gorilla.DefTypes,
   // For FMX's vertex and index buffer setters to be expanded inline
   System.RTLConsts,
-  System.Math, System.TypInfo, FMX.Forms, FMX.Graphics, GDEMDisplays;
+  System.Math, System.TypInfo, System.Generics.Defaults, FMX.Forms, GDEMDisplays,
+  GDEMTiles;
 
 const
   { The viewport's background, a dark blue-grey that reads as sky. }
@@ -577,6 +830,7 @@ begin
   FStartHeight := DEFAULT_FLIGHT_START_HEIGHT;
   FFlight := TFlight.Create(FlightGround);
   FFlight.StartHeight := FStartHeight;
+  FFlight.LookStretch := FExaggeration;
   FMeshes := TDictionary<Int64, TTerrainPatchMesh>.Create;
   FTexCoords := ImageryPatchTexCoords;
 
@@ -593,6 +847,12 @@ begin
   FNearPlane := NEAR_PLANE_KM;
   FViewport.NearPlane := FNearPlane;
   FViewport.FarPlane := FAR_PLANE_KM;
+
+  // The place names, made before the instruments so they are drawn under
+  // them
+  FLabelLayer := TTerrainLabelLayer.Create(Self);
+  FLabelLayer.Parent := Self;
+  FShowLabels := True;
 
   FCentre := TDummy.Create(Self);
   FCentre.Parent := FViewport;
@@ -639,11 +899,23 @@ begin
   FBanner.Parent := Self;
   FCredit := TTerrainCredit.Create(Self);
   FCredit.Parent := Self;
+  FPauseBanner := TTerrainBanner.Create(Self);
+  FPauseBanner.Parent := Self;
+  FPauseBanner.Colour := BANNER_NOTE;
+  FControls := TTerrainControls.Create(Self);
+  FControls.Parent := Self;
+  FControls.OnToggle := ControlsToggled;
+  // Last, so it is over everything
+  FCover := TTerrainCover.Create(Self);
+  FCover.Parent := Self;
+  FCover.Colour := TERRAIN_BACKGROUND;
+  FCover.Text := 'Preparing for flight...';
   PlaceInstruments;
   FRateWatch := TStopwatch.StartNew;
   FFlightWatch := TStopwatch.StartNew;
   FImagerySweep := TStopwatch.StartNew;
   FImageryLook := TStopwatch.StartNew;
+  FImageryAhead := TStopwatch.StartNew;
 
   FTimer := TTimer.Create(Self);
   FTimer.Interval := TICK_MS;
@@ -715,6 +987,7 @@ begin
 
   FCameraMoved := True;
   UpdateInstruments;
+  UpdateLabels;
 end;
 
 procedure TTerrainView.UpdateInstruments;
@@ -745,6 +1018,8 @@ begin
   FCompass.Known := True;
   FSpeedPanel.Speed := FFlight.Speed;
   FSpeedPanel.Tilt := FFlight.Tilt;
+  if Assigned(FOnFlightMoved) then
+    FOnFlightMoved(Self);
 end;
 
 procedure TTerrainView.PlaceInstruments;
@@ -752,7 +1027,7 @@ var
   LTop: Single;
 begin
   if (FAltimeter = nil) or (FFrameRate = nil) or (FSpeedPanel = nil) or (FCompass = nil) or
-     (FBanner = nil) or (FCredit = nil) then
+     (FBanner = nil) or (FCredit = nil) or (FPauseBanner = nil) or (FControls = nil) then
     Exit;
   LTop := HUD_MARGIN;
   FAltimeter.Position.Point := PointF(HUD_MARGIN, LTop);
@@ -766,12 +1041,27 @@ begin
     Max(Height * 0.35 - BANNER_HEIGHT / 2, 0));
   FCredit.SetBounds(HUD_MARGIN, Max(Height - HUD_MARGIN - CREDIT_HEIGHT, 0),
     Max(Width - 2 * HUD_MARGIN, 0), CREDIT_HEIGHT);
+  FPauseBanner.Position.Point := PointF(Max((Width - BANNER_WIDTH) / 2, 0),
+    Max(Height * 0.35 + BANNER_HEIGHT / 2 + HUD_GAP, 0));
+  if FLabelLayer <> nil then
+    FLabelLayer.SetBounds(0, 0, Width, Height);
+  if FCover <> nil then
+    FCover.SetBounds(0, 0, Width, Height);
+  // Kept to the bottom edge, whether open or collapsed
+  FControls.Position.Point := PointF(HUD_MARGIN,
+    Max(Height - HUD_MARGIN - FControls.PanelHeight, 0));
 end;
 
 procedure TTerrainView.Resize;
 begin
   inherited;
   PlaceInstruments;
+  // The view's shape has changed, so the labels' places on the screen and
+  // the patches in view have too, even when hovering or paused, when the
+  // camera does not move; the next tick looks again with the viewport at
+  // its new size
+  FCameraMoved := True;
+  UpdateLabels;
 end;
 
 procedure TTerrainView.CheckFrameRate;
@@ -822,9 +1112,9 @@ begin
   // Up is -Y
   Result.Right := Point3D(0, -1, 0).CrossProduct(Result.Forward).Normalize;
   Result.Up := Result.Forward.CrossProduct(Result.Right);
-  LHeight := Max(Height, 1);
+  LHeight := Max(FViewport.Height, 1);
   Result.TanY := Tan(DegToRad(TERRAIN_FOV / 2)) * VIEW_MARGIN;
-  Result.TanX := Result.TanY * Max(Width, 1) / LHeight;
+  Result.TanX := Result.TanY * Max(FViewport.Width, 1) / LHeight;
 end;
 
 procedure TTerrainView.ResetView;
@@ -952,7 +1242,7 @@ begin
     FFlightWatch := TStopwatch.StartNew;
     LWasCrashed := FFlight.Crashed;
     LSpeed := FFlight.Speed;
-    if FFlight.Step(FHeld, LSeconds) then
+    if not FPaused and FFlight.Step(FHeld, LSeconds) then
       PlaceCamera;
     if FFlight.Crashed and not LWasCrashed then
       ReportCrash(LSpeed);
@@ -990,6 +1280,11 @@ begin
         FImagerySweep := TStopwatch.StartNew;
         SweepImagery;
       end;
+      if FImageryAhead.ElapsedMilliseconds >= IMAGERY_AHEAD_MS then
+      begin
+        FImageryAhead := TStopwatch.StartNew;
+        PrefetchImagery;
+      end;
     end;
 
     // Imagery that arrived (or failed) may let a patch take over; while
@@ -1010,8 +1305,10 @@ begin
     begin
       FCameraMoved := False;
       FLod.Update(MakeEye);
-      // Finer heights under the flight change its height above them
+      // Finer heights under the flight change its height above them, and
+      // under the places their poles
       UpdateInstruments;
+      UpdateLabels;
     end;
 
     // Settled once the patches and, with Realistic on, their imagery are
@@ -1041,10 +1338,10 @@ begin
           LReport := LReport + Format('; %d could not be made', [FLod.FailedCount]);
         if FRealistic and (FImagery <> nil) then
           LReport := LReport + Format('; imagery: %d textures, %.0f ms each, %d tiles ' +
-            'downloaded, %d still to come, %d could not be made; EOX pace %.1f tiles a ' +
-            'second, %d refused so far', [FTextures, FTextureMs / Max(FTextures, 1),
-             FTilesDownloaded, FImagery.Pending, FTextureFailures, FImagery.Rate,
-             FImagery.Refusals]);
+            'downloaded, %d still to come, %d could not be made; %d fetched ahead; EOX pace ' +
+            '%.1f tiles a second, %d refused so far', [FTextures,
+             FTextureMs / Max(FTextures, 1), FTilesDownloaded, FImagery.Pending,
+             FTextureFailures, FImagery.Prefetched, FImagery.Rate, FImagery.Refusals]);
         FOnSettled(Self, LReport);
       end;
     end;
@@ -1411,6 +1708,71 @@ begin
       RequestImagery(LMesh);
 end;
 
+procedure TTerrainView.PrefetchImagery;
+var
+  LGround, LAbove, LAhead, LStep, LDistance, LTileKm, LLatitude, LLongitude, LSideLatitude,
+    LSideLongitude: Double;
+  LDepth, LZoom, LSide: Integer;
+  LTiles: TArray<TImageryTileRef>;
+begin
+  if not FRealistic or (FImagery = nil) or FPaused or FFlight.Crashed or (FLod = nil) or
+     not FLod.Started then
+    Exit;
+  // Hovering: the ground below is already asked for by its patches
+  if FFlight.Speed < 1 then
+  begin
+    FImagery.ClearPrefetch;
+    Exit;
+  end;
+  // The depth the tree draws straight below: the first it does not split,
+  // the camera being no nearer than Range times its size (in the scene's
+  // kilometres, stretched with the heights)
+  if not FlightGround(FFlight.Latitude, FFlight.Longitude, LGround) then
+    LGround := 0;
+  LAbove := Max(FFlight.Altitude - LGround, 0) * FExaggeration / 1000;
+  LDepth := 0;
+  while (LDepth < FMaxDetail) and (LAbove < FLod.Range * NodeSizeKm(LDepth)) do
+    Inc(LDepth);
+  LZoom := ImageryZoomFor(NODE_ARCSEC[LDepth] / TILE_ARCSEC);
+  // A tile's height north to south, and samples every half tile
+  LTileKm := 180 / (1 shl LZoom) * KM_PER_DEGREE;
+  LStep := LTileKm * 500;
+  LAhead := Min(FFlight.Speed * IMAGERY_AHEAD_SECONDS, IMAGERY_AHEAD_KM * 1000);
+  LTiles := nil;
+  LDistance := LStep;
+  while (LDistance <= LAhead) and (Length(LTiles) < IMAGERY_AHEAD_TILES) do
+  begin
+    DestinationPoint(FFlight.Latitude, FFlight.Longitude, FFlight.Heading, LDistance,
+      LLatitude, LLongitude);
+    LTiles := LTiles + [ImageryTileAt(LLatitude, LLongitude, LZoom)];
+    // A tile to each side, as the view is wider than one tile
+    for LSide := -1 to 1 do
+      if LSide <> 0 then
+      begin
+        DestinationPoint(LLatitude, LLongitude, FFlight.Heading + 90 * LSide, LTileKm * 1000,
+          LSideLatitude, LSideLongitude);
+        LTiles := LTiles + [ImageryTileAt(LSideLatitude, LSideLongitude, LZoom)];
+      end;
+    LDistance := LDistance + LStep;
+  end;
+  // Samples half a tile apart find most tiles twice; the service leaves
+  // out repeats and tiles it has
+  FImagery.Prefetch(LTiles);
+end;
+
+procedure TTerrainView.TileDownloaded(ASouth, AWest: Integer);
+begin
+  if (FLod = nil) or not FLod.Started then
+    Exit;
+  if FLod.RefreshTile(ASouth, AWest) then
+  begin
+    LodLog(Format('3D: tile %s downloaded while flying; its ground is made again from its ' +
+      'heights', [TileName(ASouth, AWest)]));
+    // The next tick looks again and makes its patches
+    FCameraMoved := True;
+  end;
+end;
+
 procedure TTerrainView.SetRealistic(AValue: Boolean);
 var
   LMesh: TTerrainPatchMesh;
@@ -1419,7 +1781,10 @@ begin
     Exit;
   FRealistic := AValue;
   if FImagery <> nil then
+  begin
     FImagery.CancelAll;
+    FImagery.ClearPrefetch;
+  end;
   for LMesh in FMeshes.Values do
   begin
     DropImagery(LMesh);
@@ -1464,6 +1829,7 @@ begin
   if SameValue(AValue, FExaggeration) then
     Exit;
   FExaggeration := AValue;
+  FFlight.LookStretch := AValue;
   if FLod <> nil then
   begin
     FLod.Exaggeration := AValue;
@@ -1539,8 +1905,11 @@ procedure TTerrainView.MouseWheel(Shift: TShiftState; WheelDelta: Integer;
   var Handled: Boolean);
 begin
   inherited;
-  FFlight.Climb(WheelDelta / 120);
-  PlaceCamera;
+  if not FPaused then
+  begin
+    FFlight.Climb(WheelDelta / 120);
+    PlaceCamera;
+  end;
   Handled := True;
 end;
 
@@ -1586,17 +1955,42 @@ begin
   inherited;
   if KeyControl(Key, KeyChar, LControl) then
   begin
-    // A crash holds everything until the flight starts again
-    if not FFlight.Crashed then
+    // A crash or a pause holds the flight
+    if not FFlight.Crashed and not FPaused then
       Include(FHeld, LControl);
   end
-  else if (Key = vkR) or (UpCase(KeyChar) = 'R') then
-    ResetView
-  else if (Key = vkSpace) or (KeyChar = ' ') then
+  else if (Key = vkSpace) or ((Key = 0) and (KeyChar = ' ')) then
+  begin
+    // Once a press: a held key repeats, and some systems also send it
+    // as a character
+    if not FSpaceDown then
+      Paused := not FPaused;
+    FSpaceDown := True;
+  end
+  else if (Key = vkB) or ((Key = 0) and (UpCase(KeyChar) = 'B')) then
+  begin
+    if not FBookmarkKeyDown then
+      AskForBookmark;
+    FBookmarkKeyDown := True;
+  end
+  else if (Key = vkL) or ((Key = 0) and (UpCase(KeyChar) = 'L')) then
+  begin
+    // Once a press, as for Space
+    if not FLabelsKeyDown then
+    begin
+      ShowLabels := not FShowLabels;
+      if Assigned(FOnLabelsToggle) then
+        FOnLabelsToggle(Self);
+    end;
+    FLabelsKeyDown := True;
+  end
+  else if (Key = vkH) or ((Key = 0) and (UpCase(KeyChar) = 'H')) then
   begin
     FFlight.Stop;
     UpdateInstruments;
   end
+  else if (Key = vkR) or ((Key = 0) and (UpCase(KeyChar) = 'R')) then
+    ResetView
   else
     Exit;
   Key := 0;
@@ -1608,17 +2002,330 @@ var
   LControl: TFlightControl;
 begin
   inherited;
-  if not KeyControl(Key, KeyChar, LControl) then
+  if KeyControl(Key, KeyChar, LControl) then
+    Exclude(FHeld, LControl)
+  else if (Key = vkSpace) or (KeyChar = ' ') then
+    FSpaceDown := False
+  else if (Key = vkB) or (UpCase(KeyChar) = 'B') then
+    FBookmarkKeyDown := False
+  else if (Key = vkL) or (UpCase(KeyChar) = 'L') then
+    FLabelsKeyDown := False
+  else
     Exit;
-  Exclude(FHeld, LControl);
   Key := 0;
   KeyChar := #0;
+end;
+
+procedure TTerrainView.AskForBookmark;
+begin
+  if FBookmarkQueued or not FHasArea or not Assigned(FOnBookmark) then
+    Exit;
+  FBookmarkQueued := True;
+  // After the key's handling, so the handler may open a modal dialog
+  TThread.ForceQueue(nil,
+    procedure
+    begin
+      FBookmarkQueued := False;
+      if Assigned(FOnBookmark) then
+        FOnBookmark(Self);
+    end);
+end;
+
+procedure TTerrainView.SetPaused(AValue: Boolean);
+begin
+  if AValue = FPaused then
+    Exit;
+  FPaused := AValue;
+  FHeld := [];
+  if FPaused then
+  begin
+    FPauseBanner.ShowText('Paused', 'Press Space to carry on.');
+    PlaceInstruments;
+  end
+  else
+    FPauseBanner.Visible := False;
+  // No jump when carrying on: the time paused is not flown
+  FFlightWatch := TStopwatch.StartNew;
+end;
+
+procedure TTerrainView.StartLookingAt(ALatitude, ALongitude: Double);
+begin
+  // From the south, at the start height and the starting tilt
+  StartLookingAlong(ALatitude, ALongitude, 0, FStartHeight, True, DEFAULT_FLIGHT_TILT);
+end;
+
+procedure TTerrainView.StartLookingAlong(ALatitude, ALongitude, AHeading, AHeight: Double;
+  AAboveGround: Boolean; ATilt: Double);
+var
+  LPoint: TPoint3D;
+begin
+  if (FLod = nil) or not FLod.Started then
+    Exit;
+  FHeld := [];
+  FBanner.Visible := False;
+  FFlight.StartHeight := FStartHeight;
+  FFlight.LookStretch := FExaggeration;
+  FFlight.StartLookingAlong(ALatitude, ALongitude, AHeading, AHeight, AAboveGround, ATilt);
+  LPoint := FLod.Frame.ToLocal(FFlight.Latitude, FFlight.Longitude, 0);
+  if FLod.NeedsRebase(LPoint.X, LPoint.Z) then
+    FLod.Start(Floor(FFlight.Latitude), Floor(FFlight.Longitude));
+  BeginWork;
+  FFlightWatch := TStopwatch.StartNew;
+  PlaceCamera;
+end;
+
+function TTerrainView.GetCovered: Boolean;
+begin
+  Result := FCover.Visible;
+end;
+
+procedure TTerrainView.SetCovered(AValue: Boolean);
+begin
+  if AValue = FCover.Visible then
+    Exit;
+  if AValue then
+  begin
+    // A picture of the view as it is now, so it seems to stay still while
+    // the new place is made underneath; the plain cover if none can be had
+    FCover.SetPicture(PictureOfView);
+    FCover.SetBounds(0, 0, Width, Height);
+    FCover.BringToFront;
+  end
+  else
+    FCover.SetPicture(nil);
+  FCover.Visible := AValue;
+end;
+
+function TTerrainView.PictureOfView: TBitmap;
+var
+  LData: TBitmapData;
+  LSeen: Boolean;
+  I: Integer;
+begin
+  Result := nil;
+  if not FHasArea or not ParentedVisible or (FViewport.Width < 1) or (FViewport.Height < 1) then
+    Exit;
+  try
+    Result := FViewport.MakeScreenshot;
+    LSeen := False;
+    // A picture with nothing in it (the 3D drawing not caught) is no use:
+    // a few pixels across the middle row must not all be clear
+    if (Result <> nil) and not Result.IsEmpty and Result.Map(TMapAccess.Read, LData) then
+    try
+      for I := 1 to 15 do
+        if TAlphaColorRec(LData.GetPixel(Result.Width * I div 16, Result.Height div 2)).A <> 0 then
+          LSeen := True;
+    finally
+      Result.Unmap(LData);
+    end;
+    if not LSeen then
+      FreeAndNil(Result);
+  except
+    FreeAndNil(Result);
+  end;
+  if Assigned(FOnLog) then
+    if Result <> nil then
+      FOnLog(Self, Format('3D: covered with a picture of the view (%d x %d) while it is got ' +
+        'ready', [Result.Width, Result.Height]))
+    else
+      FOnLog(Self, '3D: covered while it is got ready (no picture of the view could be had)');
+end;
+
+procedure TTerrainView.SetFlightSpeed(AValue: Double);
+begin
+  FFlight.SetSpeed(AValue);
+  UpdateInstruments;
+end;
+
+function TTerrainView.Settled: Boolean;
+begin
+  Result := FHasArea and (FLod <> nil) and not FWasBusy;
+end;
+
+procedure TTerrainView.WorkProgress(out ADone, ATotal: Integer; out AText: string);
+var
+  LPatchesToCome, LTexturesToCome: Integer;
+begin
+  ADone := 0;
+  ATotal := 0;
+  AText := '';
+  if FLod = nil then
+    Exit;
+  LPatchesToCome := FLod.PendingCount;
+  if FRealistic and (FImagery <> nil) then
+    LTexturesToCome := FImagery.Pending
+  else
+    LTexturesToCome := 0;
+  ADone := FUploads + FTextures;
+  ATotal := ADone + LPatchesToCome + LTexturesToCome;
+  AText := Format('Ground: %d patches made, %d to come', [FUploads, LPatchesToCome]);
+  if FRealistic and (FImagery <> nil) then
+    AText := AText + Format('; imagery: %d textures, %d to come', [FTextures,
+      LTexturesToCome]);
+end;
+
+procedure TTerrainView.SetPlaceLabels(const AValue: TArray<TTerrainPlaceLabel>);
+begin
+  FPlaceLabels := AValue;
+  FNearValid := False;
+  UpdateLabels;
+end;
+
+procedure TTerrainView.SetShowLabels(AValue: Boolean);
+begin
+  if AValue = FShowLabels then
+    Exit;
+  FShowLabels := AValue;
+  UpdateLabels;
+end;
+
+procedure TTerrainView.FindNearLabels;
+var
+  LCos, LKm: Double;
+  I: Integer;
+  LNear: TArray<Integer>;
+begin
+  if FNearValid and (KM_PER_DEGREE * Sqrt(Sqr(FFlight.Latitude - FNearLatitude) +
+     Sqr((FFlight.Longitude - FNearLongitude) * Cos(DegToRad(FFlight.Latitude)))) <
+     LABEL_REFRESH_KM) then
+    Exit;
+  FNearLatitude := FFlight.Latitude;
+  FNearLongitude := FFlight.Longitude;
+  FNearValid := True;
+  LCos := Cos(DegToRad(FFlight.Latitude));
+  LNear := nil;
+  // A little beyond the range, so places come into it between refreshes
+  for I := 0 to High(FPlaceLabels) do
+  begin
+    LKm := KM_PER_DEGREE * Sqrt(Sqr(FPlaceLabels[I].Latitude - FFlight.Latitude) +
+      Sqr((WrapDegrees(FPlaceLabels[I].Longitude - FFlight.Longitude + 180) - 180) * LCos));
+    if LKm <= LABEL_RANGE_KM + LABEL_REFRESH_KM then
+      LNear := LNear + [I];
+  end;
+  // Most important first, so they win their place on the screen
+  TArray.Sort<Integer>(LNear, TComparer<Integer>.Construct(
+    function(const A, B: Integer): Integer
+    begin
+      Result := CompareValue(FPlaceLabels[A].Rank, FPlaceLabels[B].Rank);
+    end));
+  FNearLabels := LNear;
+end;
+
+procedure TTerrainView.UpdateLabels;
+var
+  LScreen: TArray<TTerrainScreenLabel>;
+  LItem: TTerrainScreenLabel;
+  LCamera, LForward, LRight, LUp, LDelta, LPoint: TPoint3D;
+  LTanX, LTanY, LX, LY, LZ, LGround, LWidth, LHeight: Double;
+  I: Integer;
+begin
+  if FLabelLayer = nil then
+    Exit;
+  // The picture is the viewport's, so its size is what counts
+  LWidth := FViewport.Width;
+  LHeight := FViewport.Height;
+  if not FShowLabels or (FLod = nil) or not FLod.Started or (Length(FPlaceLabels) = 0) or
+     (LWidth < 1) or (LHeight < 1) then
+  begin
+    FLabelLayer.SetLabels(nil);
+    Exit;
+  end;
+  FindNearLabels;
+  // The camera's way ahead, right and up; up is -Y, and east is on the
+  // right when looking north
+  LCamera := FCamera.Position.Point;
+  LForward := (FCentre.Position.Point - LCamera).Normalize;
+  LRight := LForward.CrossProduct(Point3D(0, -1, 0)).Normalize;
+  LUp := LRight.CrossProduct(LForward);
+  LTanY := Tan(DegToRad(TERRAIN_FOV / 2));
+  LTanX := LTanY * LWidth / LHeight;
+  LScreen := nil;
+  for I in FNearLabels do
+  begin
+    if not FLod.GroundHeight(FPlaceLabels[I].Latitude, FPlaceLabels[I].Longitude, LGround) then
+      Continue;
+    LPoint := FLod.Frame.ToLocal(FPlaceLabels[I].Latitude, FPlaceLabels[I].Longitude,
+      LGround * FExaggeration / 1000);
+    LDelta := LPoint - LCamera;
+    LZ := LDelta.DotProduct(LForward);
+    // Behind the camera, or nearer than it draws
+    if LZ < FNearPlane then
+      Continue;
+    LX := LDelta.DotProduct(LRight);
+    LY := LDelta.DotProduct(LUp);
+    LItem.Ground := PointF(FViewport.Position.X + LWidth / 2 * (1 + LX / (LZ * LTanX)),
+      FViewport.Position.Y + LHeight / 2 * (1 - LY / (LZ * LTanY)));
+    // The ground must be on the screen, with room above it for the name
+    if (LItem.Ground.X < 0) or (LItem.Ground.X > Width) or (LItem.Ground.Y < LABEL_POLE) or
+       (LItem.Ground.Y > Height) then
+      Continue;
+    LItem.Text := FPlaceLabels[I].Name;
+    LItem.Kind := FPlaceLabels[I].Kind;
+    LScreen := LScreen + [LItem];
+  end;
+  FLabelLayer.SetLabels(LScreen);
+end;
+
+function TTerrainView.GetControlsCollapsed: Boolean;
+begin
+  Result := FControls.Collapsed;
+end;
+
+procedure TTerrainView.SetControlsCollapsed(AValue: Boolean);
+begin
+  FControls.Collapsed := AValue;
+  PlaceInstruments;
+end;
+
+procedure TTerrainView.ControlsToggled(Sender: TObject);
+begin
+  PlaceInstruments;
+  SetFocus;
+  if Assigned(FOnControlsToggle) then
+    FOnControlsToggle(Self);
+end;
+
+function TTerrainView.FlightState: TTerrainFlightState;
+begin
+  Result.Latitude := FFlight.Latitude;
+  Result.Longitude := FFlight.Longitude;
+  Result.Altitude := FFlight.Altitude;
+  Result.Heading := FFlight.Heading;
+  Result.Speed := FFlight.Speed;
+  Result.Tilt := FFlight.Tilt;
+end;
+
+procedure TTerrainView.JumpTo(const AState: TTerrainFlightState; AAboveGround: Boolean);
+var
+  LPoint: TPoint3D;
+begin
+  if (FLod = nil) or not FLod.Started then
+    Exit;
+  FHeld := [];
+  FBanner.Visible := False;
+  if AAboveGround then
+    FFlight.SetStateAboveGround(AState.Latitude, AState.Longitude, AState.Altitude,
+      AState.Heading, AState.Speed, AState.Tilt)
+  else
+    FFlight.SetState(AState.Latitude, AState.Longitude, AState.Altitude, AState.Heading,
+      AState.Speed, AState.Tilt);
+  // Measured again from the tile under it if it is far from the frame's
+  // point
+  LPoint := FLod.Frame.ToLocal(FFlight.Latitude, FFlight.Longitude, 0);
+  if FLod.NeedsRebase(LPoint.X, LPoint.Z) then
+    FLod.Start(Floor(FFlight.Latitude), Floor(FFlight.Longitude));
+  BeginWork;
+  FFlightWatch := TStopwatch.StartNew;
+  PlaceCamera;
 end;
 
 procedure TTerrainView.DoExit;
 begin
   inherited;
   FHeld := [];
+  FSpaceDown := False;
+  FBookmarkKeyDown := False;
+  FLabelsKeyDown := False;
   FDragging := False;
 end;
 

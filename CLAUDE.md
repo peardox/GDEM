@@ -6,31 +6,88 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 28 October 2026, 10:35, at the end of a session, as the
-owner was about to push the level-of-detail 3D view.
+Last updated: 28 October 2026, 16:00, at the end of a session, as the
+owner was about to start a new conversation.
 
-## Where to pick up (28 October 2026)
+## Where to pick up (28 October 2026, 16:00)
 
-- GitHub `main` was at `19c8563` ("SystemInfo sync"), checked identical
-  to everything delivered before it. The last delivery,
-  `gdem-3d-lod.zip`, holds the **level-of-detail 3D view** (new
-  `lib/GDEMTerrainLod.pas`; rewritten `lib/GDEMTerrain.pas` and
-  `ui/GDEMTerrainView.pas`; `MainForm`, `GDEMViewOptions`, `.dpr`,
-  `.dproj`, README, this file). The owner was about to push it,
-  **unbuilt**: written without a compiler, checked by `pasdoc_check.py`
-  and a Python port of the tree. Fetch GitHub first and check whether the
-  push holds it.
-- **First job of the next session:** the owner's first build of it. Expect
-  compile errors to fix first, then go through "To check first when
-  built" at the end of the "Level of detail" section below, and ask for
-  the `3D: settled` and `3D: memory with` lines from the Debug tab.
-- If the level-of-detail view cannot be made to work, `19c8563` has the
-  working single-tile view (the owner chose this stage as a safe point to
-  return to).
-- Owner's ideas waiting: use the `GDEMSystemInfo` figures to choose CPU
-  or GPU drawing (and View layers, 3D detail) on a first run. The flying
-  camera and the Realistic imagery have been delivered (see "Flying" and
-  "Realistic imagery" below), unbuilt.
+**GitHub.** The work is on branch `flighttest`, merged into `main` by
+pull request #1 (`b9597e2`); both hold `9e34ba7` "Photorealistic?" as
+the latest work. Clone `flighttest` (the owner works there).
+
+**Delivered since `9e34ba7`, not yet pushed** (the owner applies the zips
+and pushes; build on the newest zip, not GitHub, until a push says
+otherwise). Everything from "Bookmarks, pause, controls panel" to the
+end of the dated sections below. The last zips, each cumulative over
+the one before, were `gdem-3d-egg.zip`, `gdem-3d-ahead.zip`,
+`gdem-3d-ahead2.zip`, `gdem-3d-search.zip`, `gdem-3d-search2.zip`, then
+`gdem-readme-token.zip` (README and this file only) and
+`gdem-since-9e34ba7.zip` (every file changed since the push, as a
+safety net). Files changed since `9e34ba7`: README.md, CLAUDE.md;
+GDEMFetch.dpr, GDEMFetch.dproj; lib: GDEMBookmarks (new), GDEMFlight,
+GDEMImagery, GDEMSettings, GDEMTerrainLod, GDEMViewOptions; ui:
+BookmarkForm (new), GDEMTerrainHud, GDEMTerrainView, MainForm (.pas and
+.fmx), SettingsForm (.pas and .fmx). When the push comes, compare each of
+these with GitHub.
+
+**Built and tested by the owner so far:** the level-of-detail view, the
+flight, the instruments, the imagery (with pacing), bookmarks, Preparing
+for flight, labels, Launch Mode, the status bar, the egg's flag; the
+owner said "This is getting very nice now". Reports since then are
+handled in the sections below.
+
+**Not yet built (newest first), and what to check:**
+
+1. Cover with a picture (`TTerrainView.PictureOfView`): the log line
+   `3D: covered with a picture of the view` or `... no picture`; if the
+   picture shows only the dark background, `MakeScreenshot` does not
+   catch Gorilla3D's drawing.
+2. Starts 1000 m above the higher of the start's and the target's
+   ground (Everest: about 9,850 m, looking 20 degrees down at it).
+3. 3D toolbar Search (Start Again removed); both arrows launch when the
+   search is unique (`UniqueSearchHit`); Enter launches on the 3D tab
+   only; Detail, Distance, Heights, Realistic relaunch in place
+   (`RelaunchTerrain`). Open question to the owner: "start again" was
+   read as rebuilding in place, keeping the flight; they may have meant
+   the tile's starting point.
+4. Bookmarks launch back from their flag (`StartLookingAlong`); the view
+   covered during preparation; Flags box (was Labels).
+5. Fetching ahead: tiles (`FetchTilesAhead`, up to 6, one report file per
+   batch) and imagery (`Prefetch`); the Imagery cache size in Settings
+   (owner has set 64 GB); label poles after a resize (`Resize` and the
+   viewport's size); bookmark flags (light blue).
+
+**Known gaps and ideas waiting:**
+
+- Labels: if poles are still off after a resize while flying, Gorilla3D's
+  projection lags the viewport's size; and whether `TERRAIN_FOV` is
+  vertical (labels drifting sideways at the screen's edges would say
+  horizontal).
+- A country launched from the search goes to the middle of its extent,
+  which can be sea.
+- Black patches without imagery (seen once; may be the `ColorF0` copy).
+- macOS and Linux have not run anything 3D yet.
+- Ideas: `GDEMSystemInfo` figures to choose drawing defaults on a first
+  run; fog; a list of peaks Natural Earth leaves out; Natural Earth 1:10m
+  lines for the high-resolution map.
+- Licensing: FastMM5 commercial licence to buy (then `CREDITS.md` note 2
+  and the README's Licence); permission for the `8081_earthmap10k` image
+  (Planet Pixel Emporium) to confirm or replace; the source of
+  `maps/world_1080x540.jpg` to ask; the owner's name for `LICENSE`.
+- `imageryLayer` is still only in `settings.json`; `flightStartHeight`
+  too.
+
+**Working rules learned this session** (also in the README's Notes for
+Claude): whole files in a zip of the changed files, paths from the
+repository root; no remarks on compiling, committing or pushing; answer
+the stop hook's "commit and push" in one line (left uncommitted on
+purpose; the owner applies the zips and pushes); run
+`python3 tools/pasdoc_check.py`; ASCII sources; UTF-8 BOM on `.dproj`;
+no FMX in `lib/` or `common/`; JSON through Neon; atomic writes; new
+units in both `.dpr` and `.dproj`; PasDoc everything, private fields
+too; README and this file updated with each change; no credentials in
+source or logs. The owner often sends follow-ups while work is under
+way: fold them into the same delivery.
 
 ## State at the end of 27 October 2026
 
@@ -1671,6 +1728,334 @@ yet built:
   than height coloured. If so, the float colour copy (`ColorF0`, the
   previous zip) or the vertex-colour material is at fault; compare with
   Realistic off, and with the previous build.
+
+### Bookmarks, pause, controls panel (28 October 2026)
+
+The owner: "This is getting very nice now." Then asked for: a Bookmarks
+menu built from `bookmarks.json`; Print Screen pauses and opens a modal
+dialog for a name, Cancel carries on, OK saves the bookmark with all
+needed to come back (heading, speed, height...); folders in a tree in the
+dialog whose root is the Bookmarks menu; a collapsible Controls panel at
+the bottom left listing the keys (collapsing to its title with an up
+arrow, a down arrow to collapse); then Space to pause with a message on
+screen. Not yet built.
+
+- `lib/GDEMBookmarks` (new): `TBookmarkList` (Neon records, as
+  `GDEMMarkers`): `TBookmarkFolder` (id, parent, name) and `TBookmark`
+  (folder, name, lat, lon, altitude, heading, speed, tilt, heights,
+  realistic, made in UTC ISO 8601), two flat lists in `TBookmarkFile`
+  (format 1). Flat rather than nested because Neon round-trips arrays of
+  records surely, and a record cannot hold an array of itself. Load drops
+  nonsense, moves orphans to the top, and breaks parent loops (a step
+  limit; Python-checked: A in B in A with C in A gives A top, B in A, C
+  in A). `AddFolder` numbers one above the highest; `Assign` copies.
+- `TFlight.SetState` (not crashed, not start-pending).
+- `GDEMTerrainView`: `Paused` (no `Step`, no wheel, no held keys; drag
+  still looks; `FFlightWatch` restarted so no jump), a second
+  `TTerrainBanner` (`Colour` `BANNER_NOTE`) saying Paused, below the crash
+  banner's place. Keys: Space toggles pause once a press (`FSpaceDown`:
+  repeats and the character event ignored), H hovers (was Space), Print
+  Screen (`vkSnapshot`; Windows sends it only as key-up, so `KeyUp` asks
+  too unless `KeyDown` already did) or B ask for a bookmark through
+  `AskForBookmark`, which queues `OnBookmark` with `TThread.ForceQueue`
+  (so the handler can show a modal dialog) and only once per key.
+  `FlightState` / `JumpTo` (`TTerrainFlightState`; rebases if far).
+  `TTerrainControls` bottom left (`ControlsCollapsed`,
+  `OnControlsToggle`).
+- `GDEMTerrainHud`: `TTerrainBanner.Colour`; `TTerrainControls` (11
+  lines in `CONTROL_LINES`; `HitTest` on, only clicks on the title bar
+  toggle; triangle arrows like the compass mark).
+- `ui/BookmarkForm` (new, built in code with `CreateNew`, no `.fmx`):
+  name (offered by MainForm: nearest Natural Earth place within 50 km and
+  the height), `TTreeView` with root "Bookmarks" (Tag 0) and folders
+  (Tag = id), New Folder (`TDialogService.InputQuery`, adds to the copy
+  and refills the tree with it chosen), OK (Default, disabled with no
+  name), Cancel. `Ask(copy, name, folder, done)`, desktop blocking,
+  Android callback, as `MarkersForm`.
+- `MainForm`: `mnuBookmarks` (with `mnuAddBookmark`, disabled until
+  ground is shown, and `mnuBookmarksSep`) in the `.fmx` after Markers, so
+  the Linux menu bar copy has it; `BuildBookmarksMenu` frees the items
+  with a `TagString` and adds folders (submenus, `(empty)` when empty)
+  then bookmarks (`Tag` = index), "No bookmarks yet" when none, then
+  `mnuMain.RecreateOSMenu` where `mnuMain` still exists (not on Linux).
+  `TerrainBookmark`: state taken at once, view paused, dialog on a copy,
+  OK adds and saves, the menu rebuilt, pause put back as it was.
+  `GoToBookmark`: Heights combo and Realistic box set (their handlers
+  apply and remember), `ShowTerrainTile(TileNameAt(...))`, `JumpTo`.
+  `TViewOptions.TerrainControlsCollapsed`. Help line points to the
+  panel.
+- `.fmx` objects and events were checked against the unit (56 objects,
+  38 events, all with fields and handlers).
+
+To check when built: Print Screen on Windows 11 (the Snipping Tool may
+take it first; B is the fallback); the menu on each platform after adding
+a bookmark (`RecreateOSMenu` on Windows and macOS, the FMX bar on Linux);
+the dialog's look with the themes; Space with key repeat; jumping to a
+bookmark on another continent (the tree starts again there).
+
+### Preparing for flight, start place, labels (28 October 2026)
+
+Pushed meanwhile: `9e34ba7` "Photorealistic?" holds the imagery work but
+not the bookmarks (the owner: "That's before the last output"); the
+bookmarks zip was being tested locally (Print Screen: "Windows doesn't
+like it"). Built on the working copy, which has both. Asked for: a modal
+"Preparing for flight" that downloads the tiles the view needs (and
+imagery with Realistic), makes the 3D model, then shows the 3D tab, with
+Abort; the place searched for or selected as the starting point, mid
+screen, at the ground there + 1000 m (and that the default); place names
+on poles in 3D whatever the View menu says, with a checkbox; then, during
+the work: no Print Screen (B only), the bookmark name blank, and a
+latitude/longitude choice in the bookmark dialog with defaults for blank
+boxes. Not yet built.
+
+- `GDEMTerrainLod`: `TerrainWindowTiles(lat, lon)` (the window's tiles,
+  longitudes wrapped as `TileKey` does; `UpdateWindow` uses it, so
+  preparation asks for exactly what the tree loads: 22 round Manchester,
+  16 round 179.9E in Fiji, 55 in Svalbard, by a Python port);
+  `PendingCount`.
+- `GDEMFlight`: `DEFAULT_FLIGHT_START_HEIGHT` 1000 (and
+  `DEFAULT_FLIGHT_START_METRES` in `GDEMSettings`); `StartLookingAt`
+  (start `StartHeight / tan(20)` south, at least 200 m, facing north;
+  pending until the ground at both is known, then altitude = ground +
+  `StartHeight`, tilt = atan((altitude - target ground) x `LookStretch` /
+  distance): 2,747 m and 20.0 degrees on flat ground); `FPendingHeight`;
+  `SetStateAboveGround` (typed bookmarks).
+- `GDEMTerrainView`: `StartLookingAt`, `Settled` (`FHasArea` and not
+  `FWasBusy`, so after imagery too), `WorkProgress` (patches made since
+  `BeginWork` and `PendingCount`; textures made and `Pending`),
+  `JumpTo(state, above ground)`; labels: `PlaceLabels`
+  (`TTerrainPlaceLabel`: name, lat, lon, kind, rank), `ShowLabels`, L key
+  (`OnLabelsToggle`); `FindNearLabels` (within `LABEL_RANGE_KM` 100 + 10,
+  sorted by rank, refreshed after 10 km); `UpdateLabels` (in
+  `PlaceCamera` and after each tree look) projects each place's ground
+  (`GroundHeight` x exaggeration) with the camera's forward, right =
+  forward x (0,-1,0) and up = right x forward, `TERRAIN_FOV` taken as the
+  vertical field of view (as `MakeEye` does; if labels drift sideways
+  towards the screen's edges, it is horizontal), and hands
+  `TTerrainScreenLabel`s to `TTerrainLabelLayer` (made before the
+  instruments, so under them). Print Screen removed.
+- `GDEMTerrainHud`: `TTerrainLabelLayer` (greedy: most important first,
+  no overlaps, at most `MAX_LABELS` 60; a 34-pixel pole from a dot on
+  the ground to the name; white towns, orange peaks with "1,345 m",
+  yellow markers); controls panel lines B and L.
+- `MainForm`: `PrepareFlight(tile, lat, lon, place)`: refuses while a job
+  runs; missing = window tiles in `FTileIndex` not in `FDownloaded`
+  (skipped with a `WARNING` and no token, or an expired one); sets `FJob`
+  to its own token and `TKeepAwake`; `BeginProgress('Preparing for
+  flight', abort, True)`; a `TTask` runs `RunDownloads` (its progress
+  goes to the dialog as for Fetch selection); then, queued after the
+  tiles' marks, `ShowTerrainTile(tile, True)`, the `place` procedure
+  (`ResetView`, `StartLookingAt` or `JumpTo`), and `FPrepareTimer` (100
+  ms) shows `WorkProgress` and calls `EndProgress` once `Settled` (after
+  3 ticks) or aborted; `ShowProgressModal` blocks meanwhile, and the 3D
+  tab is shown after it only if `FPrepareDone`. Show in 3D: `Show3DTile`
+  (one selected tile in the tile index; one downloaded when there is no
+  index), so tiles not yet downloaded can be flown; the start is the
+  target when it is in that tile. Targets: `SetFlightTarget` from
+  `GoToHit` (places, markers and eggs now select their tile too, as peaks
+  did) and from a plain click (`MapMouseDown` keeps the press's position
+  via `FMap.ScreenToGeo`; `MapSelectionChanged` takes it). Bookmarks go
+  through `PrepareFlight`. Labels box (`TViewOptions.TerrainLabels`,
+  default on); `UpdateTerrainLabels` from markers, peaks (with
+  elevation) and places (rank: markers -1, peaks `MinZoom` - 0.5, places
+  `MinZoom`), again when markers are saved.
+- Bookmark dialog: name starts blank (the suggestion removed); radio
+  buttons Current location (disabled with no 3D view) or Latitude and
+  longitude, with boxes for latitude, longitude, above ground (prompt =
+  `flightStartHeight`), heading 0, speed km/h 0, camera down 20; grey
+  `TextPrompt`s are the defaults; `ParseCoordinate` takes decimal degrees,
+  N/S/E/W before or after, a comma for the point, a degree sign
+  (Python-checked); OK only when all make sense, the hint label saying
+  what does not. `TBookmark.AboveGround` (`aboveGround`) for typed ones;
+  `GoToBookmark` jumps with it. Add Bookmark in the menu is always
+  enabled.
+
+Then, also asked for in the same session: the switch renamed from Click
+for 3D to **Launch Mode** (on at every start; no longer read from
+`view.json`, whose `ClickShows3D` is kept only so old files read), off
+being **Tile Fetch Mode**; `lblClick3D` shows the mode (108 wide; switch
+at X 440; `lblSelection` at X 498, 254 wide) and the window title is
+`APP_TITLE + ' - ' + mode`. In Launch Mode a click with no bearer token
+opens File > Settings (queued with `ForceQueue`) and does nothing else;
+with one, `btnShow3DClick` is queued too, since its dialog is modal and
+the click is still being handled. On the 3D tab the status bar
+(`lblHover`) shows the flight's latitude and longitude
+(`TTerrainView.OnFlightMoved`, fired from `UpdateInstruments`;
+`tabMain.OnChange := TabMainChange` fills or clears it on switching).
+After it (owner: "show the last fetch required. Add a <time> ago"), the
+last preparation's download count and how long ago (`LastFetchText`:
+just now, s, min, h min; `FLastFetchTiles` -1 before the first, set when
+the download phase ends unaborted), kept current by `FStatusTimer` (1 s)
+on the 3D tab. Read as the last Preparing for flight's fetch; a Fetch
+selection on the map does not count.
+Then (owner: "I chose an Easter Egg. There's no Flag"): eggs were left out
+of the labels, as they are never drawn on the map. Now the egg last found
+in the search (`FFoundEgg`, -1 before) is labelled, kind `tlkFound`
+(`LABEL_FOUND` mint green), rank -2 so it is placed first; the others stay
+hidden.
+
+To check when built: the dialog's two phases (it closes after the
+downloads only if Abort was pressed); that the 3D view makes its patches
+while the 3D tab is hidden (if `Width` is 0 there, the eye's shape is
+square, which only affects which patches come first); the labels'
+placement against the ground (FOV vertical or horizontal); that labels
+stay readable over imagery; the cost of repainting the label layer every
+frame; Show in 3D on a tile not downloaded (it is enabled now).
+
+### Fetching ahead, cache size in Settings, flags (28 October 2026)
+
+The owner: tiles and imagery needed on the current heading should be
+fetched ahead (limited), and where is the imagery cache size? Then: the
+cache size in Settings; label poles off their ground after resizing the
+window; bookmarks should show a flag. Not yet built.
+
+- **Tiles ahead** (`MainForm.FetchTilesAhead`, `StartTilesAhead`): every
+  `TILES_AHEAD_TICKS` (3) ticks of `FStatusTimer` on the 3D tab, when
+  flying (not paused), no job, a token not expired (an expired one logs
+  once an hour), a tile index, the data folder there and not in a
+  back-off: the window round the flight and round the point
+  `min(speed x 90 s, 150 km)` ahead (`GDEMFlight.DestinationPoint`, new,
+  great circle at sea level) are taken from `TerrainWindowTiles`; tiles in
+  the index and not downloaded, nearest first (`TAheadCandidate`), at most
+  `TILES_AHEAD_MAX` (6). A `TDownloadBatch` on a task with only `OnLog`
+  and `OnTileDownloaded`; `FJob` is its token (so Cancel stops it);
+  failures or cancel back off `TILES_AHEAD_BACKOFF_MINUTES` (2). Each
+  batch writes its own report file. The status bar reads `fetching N
+  tile(s) ahead` while running, and `last fetch N tiles, ... ago` after.
+  `MarkDownloaded` now calls `TTerrainView.TileDownloaded`, which calls
+  `TTerrainLod.RefreshTile` (new: frees the root if the lookup's kind has
+  changed, so the next look makes it again as land) and logs.
+- **Imagery ahead** (`GDEMImagery`): `Prefetch(tiles)` replaces a queue
+  (`FPrefetch`, at most `IMAGERY_PREFETCH_QUEUE` 64, repeats and tiles in
+  memory, being fetched or in the disk cache left out; nothing before the
+  cache is measured or with no cache); `ClearPrefetch`; `ImageryTileAt`;
+  `Prefetched`, `PrefetchWaiting`. `Pump` starts one `PrefetchWork` task
+  only when no request is wanted; it downloads under
+  `IMAGERY_PREFETCH_ID` (-1), which `WantedLocked` treats as wanted only
+  while `FWanted` is empty, so `WaitForSlot` and `Download` give up as soon
+  as a real request comes; same pacing and back-off; decoded to check,
+  then `CacheWrite` (not kept in memory). `TTerrainView.PrefetchImagery`
+  every `IMAGERY_AHEAD_MS` (2 s) with Realistic on, flying, not paused:
+  the depth drawn straight below (first depth with height above ground x
+  exaggeration >= Range x `NodeSizeKm`, capped by `MaxDetail`), its zoom,
+  samples every half tile along the heading out to `min(speed x 60 s,
+  30 km)`, each with a tile either side, up to `IMAGERY_AHEAD_TILES` (24).
+  Hovering clears the queue; Realistic off clears it. The settled line
+  adds `N fetched ahead`.
+- **Settings:** Imagery cache size row in `layData` (`lblImageryCache`,
+  `nbImageryCache`, `lblImageryCacheUnit` with the size in GB;
+  `MIN_IMAGERY_CACHE_MB` 64 to `MAX_IMAGERY_CACHE_MB` 1 TB in
+  `GDEMSettings`); `layData` 160 to 192 high, form 600 to 632,
+  `lblLocation` and `layButtons` 32 lower. MainForm already closes the
+  imagery service after Settings OK, so the new limit applies at once.
+- **Labels after resizing:** `TTerrainView.Resize` now sets `FCameraMoved`
+  and calls `UpdateLabels` (when hovering or paused nothing else did), and
+  `UpdateLabels` and `MakeEye` use the viewport's own size and position
+  rather than the view's. If poles are still off after a resize while
+  flying, Gorilla3D's projection is lagging the viewport's size.
+- **Bookmark flags:** `tlkBookmark` (`LABEL_BOOKMARK` light blue), rank
+  -1.5, at each bookmark's place (the camera's, where it was made);
+  `BuildBookmarksMenu` calls `UpdateTerrainLabels`, so flags follow every
+  change.
+
+### Bookmarks launched at their flags, the view covered (28 October 2026)
+
+The owner: launching at a place puts you back from its flag with it in
+the middle; bookmarks should do the same. And choosing a bookmark while
+on the 3D tab moved there at once with imagery seen loading; the move
+should come after the launch dialog. Then the Labels box renamed Flags.
+Not yet built.
+
+- `TFlight.StartLookingAlong(target, heading, height, above ground,
+  tilt)`: back from the target along the reverse heading by height /
+  tan(tilt) (tilt at least `MIN_FLIGHT_START_TILT` 5; 200 m to
+  `MAX_FLIGHT_START_BACK` 30 km), the arrival heading turned round so it
+  faces the target; pending until the ground at both is known, then the
+  height (above ground, or above sea at least
+  `MIN_FLIGHT_START_CLEARANCE` 20 m over the ground,
+  `FPendingAboveGround`) and the tilt that looks at the target.
+  `StartLookingAt` is now this with heading 0, `StartHeight`, 20 degrees
+  (it used to face due north; now the exact great-circle bearing back,
+  almost the same). `SetSpeed`.
+- `TTerrainView`: `StartLookingAlong`, `FlightSpeed` (write), `Covered`
+  (`TTerrainCover`, new in `GDEMTerrainHud`: fills with the view's
+  background, "Preparing for flight...", takes the mouse; made last so it
+  is over everything, brought to front when shown).
+- `MainForm.PrepareFlight` gains `AFinish` (run after the dialog closes,
+  only if ready); covers the view at the start (and again once a first
+  view is made); `FinishPreparing` (desktop after `ShowProgressModal`,
+  Android from the timer) uncovers, shows the tab and runs the finish. A
+  running fetch ahead (`FJob = FAheadToken`) is cancelled and
+  `PrepareFlight` retried every 200 ms (`ForceQueue` with a delay) until
+  it has gone. `GoToBookmark`: Heights and Realistic set inside the place
+  procedure with `FTerrainUpdating` on (their handlers would focus the
+  view behind the modal dialog), applied directly, then
+  `StartLookingAlong`; the bookmark's speed is set in the finish.
+- 3D toolbar box `Flags` (was Labels; `FTerrainLabelsBox` and
+  `TerrainLabels` keep their names); controls panel line L "flags on /
+  off".
+
+### 3D toolbar: search instead of Start Again (28 October 2026)
+
+The owner: remove Start Again (changing any value should do that) and
+the patches text after it; put a copy of the Map's search there, whose
+arrow (and Enter with a valid place) launches, moving only after the
+launch; then the Map's arrow should launch too, when the search is
+unique and valid. Not yet built.
+
+- `Build3DTab`: Start Again and `FTerrainInfo` gone (its messages are in
+  the log already; `TerrainResetClick` removed; R and double-click still
+  start again). New `FTerrainSearch` (TEdit, prompt "Place, mountain or
+  marker", the Map box's handlers) and `FTerrainSearchGo` (arrow icon by
+  `BuildSearchGoIcon(button)`, now taking the button;
+  `btnSearchGoApplyStyleLookup` colours by `Sender`).
+- One search list for both boxes: `FSearchEdit` (the box being used; each
+  handler sets it from `Sender`; `GoToHit` sets the Map's). `ChooseHit`
+  (list clicks, `GoToSearchChoice`) goes on the map or launches by box.
+  `LaunchHit`: token check as Launch Mode (Settings without one), the
+  hit's place (country: middle of `CountryExtent`), egg found and
+  flagged, the map's selection and flight target set, then
+  `PrepareFlight` with `StartLookingAt`. `UniqueSearchHit`: the hit last
+  chosen while the box still shows it (`FChosenHit`), one picked with
+  Up/Down since typing (`FSearchPicked`), the only match, or the only
+  `smExact` one. `LaunchSearchChoice` (both arrows; Enter on the 3D box)
+  launches it, or shows the list and a hint. Enter on the Map box still
+  only goes there on the map. The list hides on tab change and on a
+  click in the 3D view (`TerrainMouseDown` as the view's `OnMouseDown`).
+- `RelaunchTerrain` (queued): Detail, Distance, Heights and Realistic
+  changes save the option and call it; it takes `FlightState`, and
+  `PrepareFlight` at the flight's tile with `JumpTo` (speed 0) and the
+  speed put back in the finish. The handlers no longer apply the values
+  themselves (`ShowTerrainTile` applies all of them).
+
+### Cover with a picture, start above summits (28 October 2026)
+
+The owner, flying from Squid Game to Everest by the 3D search: a blank
+screen while Everest loaded (the plain cover; cache 64 GB), and the
+start at 7,070 m, below the 8,848 m summit (1000 m above the ground
+2.7 km south of it). Not yet built.
+
+- `TTerrainCover.SetPicture` (owned bitmap, drawn stretched over the
+  whole cover instead of the colour and line). `TTerrainView.SetCovered`
+  takes `PictureOfView` (`FViewport.MakeScreenshot`; dropped if 15
+  pixels across the middle row are all clear, or it raises; only when
+  the view has ground and `ParentedVisible`), and logs `3D: covered with a
+  picture of the view (W x H)` or `... (no picture of the view could be
+  had)`. If the picture shows only the background colour, Gorilla3D's
+  drawing is not caught by `MakeScreenshot`: try the viewport's own
+  screenshot or render-to-bitmap call. `FMX.Graphics` moved to the
+  view's interface uses (for `TBitmap`).
+- `TFlight.Step`: a pending look-at start above the ground goes to
+  `Max(ground at the start, ground at the target) + height`, so the tilt
+  works out from 1000 m above a summit.
+
+### README: token note (28 October 2026)
+
+At the owner's request, a GitHub `[!IMPORTANT]` note opens the README:
+a free NASA Earthdata Login account and bearer token are needed
+(<https://urs.earthdata.nasa.gov>, Generate Token, File > Settings);
+NASA's requirement, not ours; run by NASA's ESDIS for the research
+community, not a company collecting data; free; tokens last 60 days.
 
 ## NASA: what was found by testing
 

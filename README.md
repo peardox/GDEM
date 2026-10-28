@@ -1,5 +1,19 @@
 # GDEM
 
+> [!IMPORTANT]
+> **You need a free NASA Earthdata Login account and a bearer token to use
+> GDEMFetch.** Sign up at <https://urs.earthdata.nasa.gov>, log in, and
+> choose **Generate Token**; then paste the token into GDEMFetch's
+> **File > Settings**. Without it GDEMFetch cannot download any elevation
+> data, and the 3D view and nearly everything else depend on that data.
+>
+> This is not our choice: NASA requires a login for every download of
+> this data, whatever program you use. Earthdata Login is run by NASA's
+> Earth Science Data and Information System for the scientific research
+> community. It is a public research archive, not a company collecting
+> your data. The account and the data cost nothing. Tokens last 60 days,
+> and GDEMFetch warns you before yours runs out.
+
 GDEM is a cross-platform Delphi FMX project for working with the
 **ASTER Global Digital Elevation Model, version 3** (ASTER GDEM V3, NASA
 product code `ASTGTM.003`): worldwide elevation data at 1 arc-second
@@ -107,15 +121,15 @@ If you already cloned without submodules, run
    This takes about a dozen requests and needs no token.
 4. Select tiles on the map (a single tile is a left click) and press
    **Fetch selection**.
-5. To see a downloaded tile and the land round it in 3D, select it and
-   press **Show in 3D** (or find a mountain first, such as Everest); see
-   [The 3D view](#the-3d-view).
+5. To fly over the land round a place in 3D, find it (or click it on the
+   map) and press **Show in 3D**; tiles not downloaded yet are fetched
+   first. See [The 3D view](#the-3d-view).
 
 ### Using the map
 
 | Action | Control |
 |--------|---------|
-| Show the selected tile in 3D | Show in 3D, on the toolbar; or switch on Click for 3D and click a downloaded tile; see [The 3D view](#the-3d-view) |
+| Fly over the selected tile in 3D | Show in 3D, on the toolbar; or, in Launch Mode, click a tile; see [The 3D view](#the-3d-view) |
 | Select a block of tiles | Left-drag. The size and tile counts update as you drag. A left click selects one tile. To reach beyond the screen, drag towards an edge and the map scrolls that way, faster the nearer the edge, or use the mouse wheel to zoom while still dragging. On Windows the pointer stays inside the map until you let go. |
 | Select a whole country | Right-click it (on a Mac trackpad, click with two fingers). Every tile the country touches is selected and tinted, including tiles along its borders and coasts, so neighbouring countries' tiles are included where they share one. Overseas parts count too: France includes French Guiana, the United States includes Alaska and Hawaii. The selection label then gives the country, its tile count, and how many have data and are downloaded, such as `Germany: 68 tile(s), ...`. Fetch selection and Delete Selected Downloads work on just those tiles. Dragging a new selection or clicking replaces it. |
 | Add a country to the selection | Shift + right-click it (on a Mac trackpad, Shift + two-finger click). Its tiles join those already selected, whether a country, several countries or a dragged block; a tile in both is selected once. The label names the countries, such as `Germany + France: 146 tile(s), ...`, or the first two and how many more when there are over three (a dragged block is named `Selected area`). With nothing selected it is the same as a right-click. |
@@ -161,6 +175,8 @@ otherwise use showed only the first letter of each menu and item.
 | View | Copy Log / Clear Log | Copy the Debug tab's log to the clipboard, or empty it |
 | Markers | Add Marker at Map Centre... | Asks for a name and puts a marker in the middle of the map |
 | Markers | Edit Markers... | Lists the markers, to go to, rename or delete them |
+| Bookmarks | Add Bookmark... (B) | Bookmarks the 3D view as it is now, or a typed latitude and longitude; see [Bookmarks](#bookmarks) |
+| Bookmarks | (your bookmarks) | Goes back to a bookmarked view; folders are submenus |
 
 What the View menu shows is remembered from one run to the next. Out of
 the box the tile tints and markers are shown, and the layers that cost the
@@ -332,26 +348,64 @@ the mountains, still read).
 
 ### The 3D view
 
-The **3D** tab shows the ground round a downloaded tile in 3D: the tile
-and its neighbours, about 340 km north to south and as wide east to west,
-fine near the camera and coarser further away. Select a single downloaded
-tile on the map (a left click, or find a mountain), then press **Show in
-3D** on the Map tab's toolbar: the 3D tab opens at once, and the ground
-sharpens over the next moments as its pieces are made. The 3D tab keeps
-showing that place, whatever is selected on the map afterwards, until
-Show in 3D sends another.
+The **3D** tab shows the ground round a place in 3D: the tiles within
+about 170 km, fine near the camera and coarser further away. Find a
+place (a town, a mountain, a marker), or click on the map, so a single
+tile with data is selected, then press **Show in 3D** on the Map tab's
+toolbar.
 
-With **Click for 3D** switched on (beside Show in 3D), a left click that
-selects a single downloaded tile also shows it in 3D, saving the press of
-the button; off, as it starts, a click only selects. Only your own clicks
-count: finding a mountain selects its tile but stays on the map. The
-switch is remembered in `view.json`.
+**Preparing for flight.** A dialog of that name shows what is happening,
+with an **Abort** button:
 
-The camera flies. It starts hovering over the middle of the tile, facing
-north, 10,000 m above the ground there (set by `flightStartHeight` in
-`settings.json`, see below), looking ahead and 20 degrees down. Click the
-view, or press Show in 3D, so it has the keyboard; the keys act for as
-long as they are held.
+1. The tiles the view will load round the place (the 170 km window: about
+   20 tiles in Britain) that exist but are not downloaded yet are
+   downloaded, as Fetch selection would. With no bearer token they are
+   left out and drawn flat.
+2. The ground is made, and with Realistic on its imagery is fetched, the
+   bar counting the pieces made and still to come.
+3. The dialog closes and the 3D tab opens, ready to fly.
+
+While it works the 3D view is hidden behind a still picture of the view
+as it was, so the new place and its imagery are never seen coming in,
+even when you were already on the 3D tab; the view moves there only once
+the dialog has closed. If no picture can be taken, a plain cover saying
+"Preparing for flight..." is shown instead, and the Debug tab says
+which. Tiles being fetched ahead of a
+flight are stopped first, so they do not hold it up.
+
+**Tiles ahead.** While you fly, every 3 seconds GDEMFetch looks at the
+window round you and round where you will be in 90 seconds at your speed
+(at most 150 km ahead). Tiles there that exist but are not downloaded are
+downloaded quietly, nearest first, up to 6 at a time, with no dialog: the
+Debug tab says which, and the status bar reads `fetching 3 tile(s)
+ahead` meanwhile. Each tile's ground changes from flat grey to its real
+heights as it lands. It needs a bearer token that has not expired, waits
+while any other job runs (and is itself a job, so the Map tab's Cancel
+stops it), and after a failure or a cancel waits 2 minutes before
+looking again. Each run writes its own download report, as Fetch
+selection does.
+
+Abort stops it and stays on the map. The 3D tab keeps showing that place,
+whatever is selected on the map afterwards, until Show in 3D sends
+another.
+
+**Where you start.** If you found a place, or clicked on the map, inside
+the tile shown, the flight starts a short way south of that spot, facing
+north, 1000 m above the ground there or at the spot, whichever is higher
+(set by `flightStartHeight` in `settings.json`, see below), with the
+camera tilted so the spot is in the middle of the view. So a summit is
+looked down on from 1000 m above it, not up at from its slopes. Otherwise it starts over the middle of the tile, 1000 m
+up, looking ahead and 20 degrees down. The keys act for as long as they
+are held, once the view has the keyboard (it does after Show in 3D, or
+click it).
+
+The switch beside Show in 3D chooses the mode, shown beside it and in
+the window's title. **Launch Mode**, on at every start: a left click that
+selects a single tile with data prepares for flight and shows it in 3D,
+starting at the spot clicked, as Show in 3D would; it needs a bearer
+token, and without one File > Settings opens instead. **Tile Fetch Mode**
+(switched off): a click only selects, for Fetch selection. Only your own
+clicks count: finding a place selects its tile but stays on the map.
 
 | Action | Control |
 |--------|---------|
@@ -359,18 +413,27 @@ long as they are held.
 | Turn left or right | Left and Right, 45 degrees a second; or left-drag across |
 | Climb or descend | Page Up and Page Down, faster the higher you are above the ground (half that height a second, at least 50 m a second); or the mouse wheel, a tenth of the height a notch |
 | Tilt the camera up or down | Q and A, 30 degrees a second, from 30 degrees above the level to straight down; or left-drag up and down |
-| Stop to a hover | Space |
-| Start again over the tile | R, double-click, or Start Again |
+| Stop to a hover | H |
+| Pause, and carry on | Space. While paused the flight stays still and a banner says so; looking round with the mouse still works |
+| Bookmark the view | B; see [Bookmarks](#bookmarks) |
+| Flags (place names) on or off | L, or **Flags** on the 3D toolbar |
+| Start again over the tile | R or double-click |
+| Fly somewhere else | **Search** on the 3D toolbar, then Enter or the arrow; see [Finding places](#finding-places) |
 | Detail near the camera | **Detail**: Coarse (226 samples across a tile), Medium (451), Fine (901), Very fine (1801) or Full (3601, every sample, the default) |
 | Detail further away | **Distance**: Low, Medium (the default) or High |
 | Stretch the heights | **Heights**: 1, 2 (the default), 3, 5 or 10 times true scale |
+
+Changing **Detail**, **Distance**, **Heights** or **Realistic** makes the
+view again where you are, behind the Preparing for flight dialog, and
+puts you back exactly as you were: hovering while it works, then off
+again at your speed once the dialog closes.
 
 Going below the ground is a **crash**: the flight stops where it hit, a
 banner says so (and the Debug tab where), and nothing moves until it
 starts again. The flight goes straight on over the globe (a great
 circle), and there is no edge: tiles further on are loaded as it goes.
 
-`flightStartHeight` (metres above the ground, default 10000) is not in
+`flightStartHeight` (metres above the ground, default 1000) is not in
 the Settings dialog yet. Add or change it in `settings.json` (see
 [Where files are kept](#where-files-are-kept)), for example
 `"flightStartHeight": 2000`, while GDEMFetch is closed; it is read at
@@ -400,6 +463,58 @@ Instruments over the view:
 The instruments let the mouse through, so dragging and the wheel work
 over them too.
 
+**Place names.** Towns and cities, mountains (with their heights) and
+your markers within 100 km stand on poles above the ground under them,
+each pole rising from the ground to its name: towns in white, mountains
+in orange, markers in yellow, and an easter egg you have found in the
+search in mint green (the others stay hidden). Bookmarks have flags too,
+in light blue, where each was made. The most important are drawn first (bookmarks, markers,
+then mountains and the larger towns, as Natural Earth ranks them) and as
+many as fit without overlapping, up to 60. This is apart from the View
+menu's Towns and Cities, which is for the map; **Flags** on the 3D
+toolbar (or L) turns them off, and the choice is kept in `view.json`.
+
+On the 3D tab the status bar shows the flight's latitude and longitude,
+where on the map it shows the tile under the pointer, then what the last
+Preparing for flight had to download and how long ago, such as `last
+fetch 3 tiles, 2 min ago` or `no fetch needed, just now`.
+
+The **Controls** panel at the bottom left lists the keys. Click its title
+to collapse it to the bottom edge (the arrow points down) or open it
+again (the arrow points up); it stays as you leave it, in `view.json`.
+
+#### Bookmarks
+
+Press **B** in the 3D view to bookmark it. The flight pauses and a dialog
+asks for a name and a folder, chosen from a tree whose top is the
+**Bookmarks** menu itself. Instead of the current location, choose
+**Latitude and longitude** to bookmark a place by typing it: decimal
+degrees, negative to the south and west, or with N, S, E or W (such as
+`54.45N` and `3.21W`). The height above the ground, heading, speed (km/h)
+and the camera's tilt may be typed too; a box left blank takes the
+default shown in grey (the start height, north, hovering, 20 degrees
+down). Bookmarks > Add Bookmark... opens the same dialog, also before any
+3D view, when only typed coordinates can be chosen. **New Folder...** makes a folder inside the one
+chosen, to any depth. OK saves the bookmark; Cancel leaves everything as
+it was, new folders included; either way the flight carries on (or stays
+paused, if you had paused it).
+
+A bookmark keeps everything about the moment: the place, the height above
+sea level, the heading, the speed and the camera's tilt, and how the view
+was drawn (Heights and Realistic). Choosing it from the **Bookmarks**
+menu, where folders are submenus, prepares for flight there as Show in
+3D does (downloading any tiles missing round it). As when launching at a
+place, you start back from the bookmark's flag along its heading, at its
+height, with the camera tilted so the flag is in the middle of the
+screen; once the dialog closes you set off at the bookmark's speed. How
+far back depends on the height and the bookmark's tilt (height over the
+tangent of the tilt, 200 m to 30 km). A typed bookmark keeps its height
+as above the ground, which is found when you go to it.
+
+Bookmarks are kept in `bookmarks.json` in the settings folder, as two
+lists, folders and bookmarks, each naming the folder it is in (0 is the
+top level), so it can be edited by hand while GDEMFetch is closed.
+
 **Realistic**, on the 3D toolbar, draws the ground with satellite imagery
 instead of height colours: EOX's
 [Sentinel-2 cloudless](https://s2maps.eu) mosaic, a cloud-free picture of
@@ -421,8 +536,9 @@ along the bottom while Realistic is on, and the choice is remembered in
   non-commercial use only** (CC BY-NC-SA 4.0). See
   [CREDITS.md](CREDITS.md).
 - **The cache:** imagery is kept in an `Imagery` folder in the data
-  folder, one folder per layer, up to `imageryCacheMB` megabytes (default
-  2048, 2 GB). Past that, the tiles used least recently are deleted, so
+  folder, one folder per layer, up to **Imagery cache size** megabytes in
+  File > Settings (`imageryCacheMB` in `settings.json`; default 2048,
+  2 GB; 64 MB to 1 TB). Past that, the tiles used least recently are deleted, so
   places you fly over often stay; a tile's file time says when it was last
   used, so the order lasts from one run to the next. With no data folder,
   imagery is downloaded each time and kept only in memory. Delete the
@@ -440,10 +556,19 @@ along the bottom while Realistic is on, and the choice is remembered in
   EOX first limits requests and every fiftieth time, and the `3D: settled`
   line adds the textures made, how long each took, the tiles downloaded,
   the pace reached and the refusals.
+- **Fetching ahead:** while you fly, every 2 seconds the tiles under the
+  way ahead (60 seconds at your speed, at most 30 km) are queued to be
+  fetched into the cache: a line along your heading and one each side, at
+  the detail the ground below you is drawn with (from your height above
+  it and the Distance setting), up to 24 at a look and 64 waiting. They
+  go one at a time, only while no texture is waiting to be made, at the
+  same pace and with the same pauses, so they never hold up what is on
+  screen. Each look replaces the last, so turning drops what is no longer
+  ahead; hovering or pausing stops it. The `3D: settled` line counts the
+  tiles fetched ahead.
 
-`imageryLayer` and `imageryCacheMB` are not in the Settings dialog yet:
-change them in `settings.json` while GDEMFetch is closed, as with
-`flightStartHeight`.
+`imageryLayer` is not in the Settings dialog yet: change it in
+`settings.json` while GDEMFetch is closed, as with `flightStartHeight`.
 
 How it works:
 
@@ -494,8 +619,17 @@ in use (see [Memory and graphics in the log](#memory-and-graphics-in-the-log)).
 The **Search** box at the right of the Map tab's toolbar finds countries,
 towns and cities, mountains, and your [markers](#markers). Matches are
 listed under it as you type, best first; Up and Down move through them,
-Enter, the arrow button beside the box or a click goes to one, and Escape
-closes the list. Clicking into the box empties it, ready for a new search
+Enter or a click goes to one on the map, and Escape closes the list.
+
+The **arrow** beside the box flies there instead: Preparing for flight at
+the place, then the 3D tab, looking at it, as a click does in Launch Mode
+(a country at its middle). It does so only when the box means one place:
+a match you have chosen, one picked with Up or Down, the only match, or
+the only one by exactly that name; otherwise the matches are listed to
+choose from. Like Launch Mode it needs a bearer token, and opens File >
+Settings without one. The 3D toolbar has the same **Search** box, where
+Enter, the arrow and a click on a match all fly there; the view moves
+only once the dialog has closed. Clicking into the box empties it, ready for a new search
 (as does a click on the box while it shows a place you have gone to);
 text you are typing is left alone.
 
@@ -829,7 +963,8 @@ Removable drives are normally mounted under `/media/<user>/` or
 | Tile index (`tileindex.bin`) | Same folder as the settings |
 | Download reports (`Reports/download-*.log`) | Same folder as the settings |
 | Markers (`markers.json`) | Same folder as the settings |
-| What the View menu shows, the 3D tab's Detail, Distance, Heights and Realistic, and Click for 3D (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
+| What the View menu shows, the 3D tab's Detail, Distance, Heights and Realistic, whether its Controls panel is collapsed, and its Labels (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
+| Bookmarks of 3D views (`bookmarks.json`) | Same folder as the settings |
 | Windows' graphics processor choice | Windows only: the registry value named after the program's path in `HKEY_CURRENT_USER\Software\Microsoft\DirectX\UserGpuPreferences`; see [Drawing](#drawing) |
 | Downloaded tiles | The **data folder**, chosen in File > Settings. Default: `ASTGTM` in your documents folder. |
 | The 3D view's imagery cache | `Imagery` in the data folder, a folder for each layer, then level, row and column (`Imagery/s2cloudless-2025/13/1662/8090.jpg`, near Manchester); see [The 3D view](#the-3d-view) |
@@ -1155,6 +1290,7 @@ it:
 | `GDEMTerrain` | The pieces of the 3D surface: `TTerrainFrame` (positions on a sphere, from a point, and back to latitude, longitude and height; east and north at any place), `TTerrainTile` (a tile's heights, each overview read when first needed), `BuildTerrainPatch` (one patch's positions, normals, shaded colours and skirt) and `TerrainPatchIndices` (the triangles every patch shares) |
 | `GDEMTerrainLod` | `TTerrainLod`: the trees of patches for the tiles round the camera, which patches to show from where it is, and making them on worker threads |
 | `GDEMImagery` | `TImageryService`: the 3D view's satellite imagery, EOX's tiles fetched on worker threads, kept in a disk cache with a size limit (least recently used deleted first), and made into a 256 x 256 texture for each patch; `ImageryCredit`, `ImageryLicence`, `ImageryPatchTexCoords` |
+| `GDEMBookmarks` | `TBookmarkList`: the user's bookmarks of 3D views and their folders, kept in `bookmarks.json` with Neon |
 | `GDEMFlight` | `TFlight`: the 3D view's flight (latitude, longitude, true altitude, heading, speed, camera tilt), moved along a great circle by the controls held, and the crash test |
 
 **ui/**
@@ -1165,8 +1301,9 @@ it:
 | `SettingsForm` | Modal settings dialog |
 | `ProgressForm` | Modal progress dialog shown while data is downloaded or imported |
 | `MarkersForm` | Modal dialog listing the markers, to go to, rename or delete them |
+| `BookmarkForm` | Modal dialog, built in code, asking for a bookmark's name and its folder from a tree under the Bookmarks menu, with New Folder |
 | `GDEMWorldMap` | `TWorldMapView`, the zoomable map with tile selection, borders and coastlines, the high-resolution map's tiles (`MapTiles`), town and city names, markers, and `ZoomToArea` and `CentreOn` for the search |
-| `GDEMTerrainHud` | The instruments over the 3D view: `TTerrainAltimeter` (height above ground, altitude, the ground's height), `TTerrainSpeedPanel`, `TTerrainFrameRate`, `TTerrainCompass` and `TTerrainBanner` (a crash), painted controls that let the mouse through |
+| `GDEMTerrainHud` | The instruments over the 3D view: `TTerrainAltimeter` (height above ground, altitude, the ground's height), `TTerrainSpeedPanel`, `TTerrainFrameRate`, `TTerrainCompass`, `TTerrainBanner` (a crash, or Paused), `TTerrainCredit` and the collapsible `TTerrainControls` (the keys); painted controls that let the mouse through, except the controls panel's title |
 | `GDEMDisplays` | Which display a form is on and its refresh rate (from Sprite3D's `DisplayData`), so the 3D view draws no faster than the display shows |
 | `GDEMTerrainView` | `TTerrainView`, the 3D tab's Gorilla3D view of the ground round a tile, flown over with the keyboard and mouse; turns patches into meshes |
 | `GDEMDrawing` | `ConfigureDrawing`, called from the `.dpr` before `Application.Initialize`, which tells Skia to draw on the GPU or the CPU and applies the Windows graphics processor choice |

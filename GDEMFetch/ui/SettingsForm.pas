@@ -58,6 +58,9 @@ const
   { What follows the free-space percentage in the dialog. }
   MIN_FREE_UNIT_TEXT = '% free drive space';
 
+  { What follows the imagery cache size in the dialog. }
+  IMAGERY_CACHE_UNIT_TEXT = 'MB of satellite imagery kept for the 3D view';
+
 type
   { Called when the settings dialog closes.
     @param(ASaved @true if the user pressed OK and the settings were
@@ -112,6 +115,14 @@ type
     cbDownloadSpeed: TComboBox;
     { Advice shown after @link(cbDownloadSpeed). }
     lblDownloadSpeedHint: TLabel;
+    { Caption for @link(nbImageryCache). }
+    lblImageryCache: TLabel;
+    { The most the imagery cache in the data folder may hold, megabytes,
+      from @link(MIN_IMAGERY_CACHE_MB) to @link(MAX_IMAGERY_CACHE_MB). }
+    nbImageryCache: TNumberBox;
+    { Shown after @link(nbImageryCache): what it is, and the size in
+      gigabytes. }
+    lblImageryCacheUnit: TLabel;
     { Holds the theme controls. }
     layTheme: TLayout;
     { Caption for @link(cbTheme). }
@@ -278,6 +289,9 @@ begin
   nbMinFree.Max := MAX_RESERVE_PERCENT;
   // Whole megabytes only
   nbMinFree.DecimalDigits := 0;
+  nbImageryCache.Min := MIN_IMAGERY_CACHE_MB;
+  nbImageryCache.Max := MAX_IMAGERY_CACHE_MB;
+  nbImageryCache.DecimalDigits := 0;
   cbImportWorkers.Items.Clear;
   for LWorkers in IMPORT_WORKER_CHOICES do
     cbImportWorkers.Items.Add(IntToStr(LWorkers));
@@ -311,6 +325,8 @@ begin
     lblMinFreeUnit.Text := Format('%s (%s on that drive)',
       [MIN_FREE_UNIT_TEXT, FormatByteSize(LReserve)]);
   end;
+  lblImageryCacheUnit.Text := Format('%s (%s)', [IMAGERY_CACHE_UNIT_TEXT,
+    FormatByteSize(Int64(Round(nbImageryCache.Value)) * 1024 * 1024)]);
 end;
 
 class procedure TfrmSettings.SelectChoice(ACombo: TComboBox;
@@ -388,6 +404,8 @@ begin
   LForm.nbMinFree.Value := EnsureRange(ASettings.MinFreePercent, MIN_RESERVE_PERCENT,
     MAX_RESERVE_PERCENT);
   LForm.SetImportWorkers(ASettings.ImportWorkers);
+  LForm.nbImageryCache.Value := EnsureRange(ASettings.ImageryCacheMB, MIN_IMAGERY_CACHE_MB,
+    MAX_IMAGERY_CACHE_MB);
   LForm.cbDownloadSpeed.ItemIndex := Ord(DownloadSpeedFromKey(ASettings.DownloadSpeed));
   LForm.cbTheme.ItemIndex := Ord(ThemeFromKey(ASettings.Theme));
   LForm.cbDrawing.ItemIndex := Ord(DrawingModeFromKey(ASettings.Drawing));
@@ -406,6 +424,8 @@ begin
         ASettings.MinFreePercent := EnsureRange(Round(LForm.nbMinFree.Value),
           MIN_RESERVE_PERCENT, MAX_RESERVE_PERCENT);
         ASettings.ImportWorkers := LForm.GetImportWorkers;
+        ASettings.ImageryCacheMB := EnsureRange(Round(LForm.nbImageryCache.Value),
+          MIN_IMAGERY_CACHE_MB, MAX_IMAGERY_CACHE_MB);
         if LForm.cbDownloadSpeed.ItemIndex >= 0 then
           ASettings.DownloadSpeed :=
             DOWNLOAD_SPEED_KEYS[TDownloadSpeed(LForm.cbDownloadSpeed.ItemIndex)];

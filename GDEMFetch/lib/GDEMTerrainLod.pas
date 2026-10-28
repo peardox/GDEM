@@ -507,7 +507,27 @@ type
     { Sets @link(BuiltCount), @link(BuildMilliseconds) and
       @link(FailedCount) back to 0. }
     procedure ResetCounts;
+
+    { Patches waiting for a worker or being made now.
+      @returns(How many.) }
+    function PendingCount: Integer;
+
+    { Looks at a tile again: if what it holds has changed (it has been
+      downloaded since, say), its patches are dropped and the next look
+      makes them again from it. A tile not in the window is left alone.
+      @param(ASouth The tile's south edge.)
+      @param(AWest Its west edge.)
+      @returns(@true if it had changed.) }
+    function RefreshTile(ASouth, AWest: Integer): Boolean;
   end;
+
+{ The tiles the window holds round a place: those whose nearest point is
+  within @link(TERRAIN_WINDOW_KM). @link(TTerrainLod) loads these round
+  the point looked at, so they are what a 3D view there needs.
+  @param(ALatitude The place's latitude.)
+  @param(ALongitude Its longitude.)
+  @returns(Each tile's south edge in Y and west edge, -180 to 179, in X.) }
+function TerrainWindowTiles(ALatitude, ALongitude: Double): TArray<TPoint>;
 
 implementation
 
@@ -700,6 +720,28 @@ begin
   LDLon := Max(Abs(LDLon) - 0.5, 0);
   Result := KM_PER_DEGREE * Sqrt(Sqr(LDLat) +
     Sqr(LDLon * Cos(DegToRad(EnsureRange(ALatitude, -89.9, 89.9)))));
+end;
+
+function TerrainWindowTiles(ALatitude, ALongitude: Double): TArray<TPoint>;
+var
+  LReach, LReachLon: Double;
+  LSouth, LWest, LWrapped: Integer;
+begin
+  Result := nil;
+  LReach := TERRAIN_WINDOW_KM / KM_PER_DEGREE;
+  for LSouth := Floor(ALatitude - LReach) to Floor(ALatitude + LReach) do
+  begin
+    if not InRange(LSouth, -90, 89) then
+      Continue;
+    LReachLon := Min(LReach / Max(Cos(DegToRad(LSouth + 0.5)), 0.02), 179);
+    for LWest := Floor(ALongitude - LReachLon) to Floor(ALongitude + LReachLon) do
+      if TileDistanceKm(ALatitude, ALongitude, LSouth, LWest) <= TERRAIN_WINDOW_KM then
+      begin
+        // The same tile whichever way round the world it was reached
+        LWrapped := LWest - 360 * Floor((LWest + 180) / 360);
+        Result := Result + [Point(LWrapped, LSouth)];
+      end;
+  end;
 end;
 
 { TTerrainLod }
@@ -932,22 +974,14 @@ end;
 
 procedure TTerrainLod.UpdateWindow(const ATarget: TPoint3D);
 var
-  LLatitude, LLongitude, LReach, LReachLon: Double;
-  LSouth, LWest: Integer;
+  LLatitude, LLongitude: Double;
+  LTile: TPoint;
   LRoots: TArray<TTerrainRoot>;
   LRoot: TTerrainRoot;
 begin
   FFrame.ToGeo(ATarget.X, ATarget.Z, LLatitude, LLongitude);
-  LReach := TERRAIN_WINDOW_KM / KM_PER_DEGREE;
-  for LSouth := Floor(LLatitude - LReach) to Floor(LLatitude + LReach) do
-  begin
-    if not InRange(LSouth, -90, 89) then
-      Continue;
-    LReachLon := Min(LReach / Max(Cos(DegToRad(LSouth + 0.5)), 0.02), 179);
-    for LWest := Floor(LLongitude - LReachLon) to Floor(LLongitude + LReachLon) do
-      if TileDistanceKm(LLatitude, LLongitude, LSouth, LWest) <= TERRAIN_WINDOW_KM then
-        EnsureRoot(LSouth, LWest);
-  end;
+  for LTile in TerrainWindowTiles(LLatitude, LLongitude) do
+    EnsureRoot(LTile.Y, LTile.X);
   LRoots := FRoots.Values.ToArray;
   for LRoot in LRoots do
     if TileDistanceKm(LLatitude, LLongitude, LRoot.South, LRoot.West) >
@@ -1170,6 +1204,27 @@ begin
   if (FFailedCount = 1) and Assigned(FOnLog) then
     FOnLog(Format('WARNING: a 3D patch of %s could not be made (%s); it is left out',
       [TileName(ANode.Root.South, ANode.Root.West), AWhy.TrimRight(['.'])]));
+end;
+
+function TTerrainLod.RefreshTile(ASouth, AWest: Integer): Boolean;
+var
+  LRoot: TTerrainRoot;
+  LInfo: TTerrainTileInfo;
+begin
+  Result := False;
+  if not FRoots.TryGetValue(TileKey(ASouth, AWest), LRoot) then
+    Exit;
+  LInfo := FLookup(LRoot.South, LRoot.West);
+  if LInfo.Kind = LRoot.Tile.Kind then
+    Exit;
+  // Made again at the next look, now with what it holds
+  FreeRoot(LRoot);
+  Result := True;
+end;
+
+function TTerrainLod.PendingCount: Integer;
+begin
+  Result := FInFlight + FWaiting.Count;
 end;
 
 function TTerrainLod.Busy: Boolean;

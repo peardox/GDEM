@@ -1,7 +1,9 @@
 { @abstract(Instruments drawn over the 3D view: the camera's height above
   the ground and above sea level, a compass showing which way it looks,
   the frames drawn a second, the flight's speed and the camera's tilt,
-  a banner for a crash, and the imagery's credit.)
+  banners for a crash or a pause, the imagery's credit, a collapsible
+  list of the keys, and the names of places standing on poles above the
+  ground.)
 
   Both are plain FMX controls that paint themselves, laid over the
   Gorilla3D viewport by @code(TTerrainView). They do not take the mouse
@@ -36,6 +38,21 @@ const
   BANNER_WIDTH = 420;
   { The banner's height, pixels. }
   BANNER_HEIGHT = 64;
+  { The controls panel's width, pixels. }
+  CONTROLS_WIDTH = 286;
+  { The controls panel's title bar height, pixels: all that shows when
+    it is collapsed. }
+  CONTROLS_TITLE_HEIGHT = 26;
+  { The height of each line in the controls panel, pixels. }
+  CONTROLS_LINE_HEIGHT = 18;
+  { A crash banner's colour: a dark red, partly see-through. }
+  BANNER_ALERT = $D0801010;
+  { A pause banner's colour: a dark blue-grey, partly see-through. }
+  BANNER_NOTE = $D0203048;
+  { A place label's pole, from the ground up to the name, pixels. }
+  LABEL_POLE = 34;
+  { The most place labels drawn at once. }
+  MAX_LABELS = 60;
 
 type
   { @abstract(A compass card that turns as the view turns.)
@@ -233,6 +250,8 @@ type
     FTitle: string;
     { Backing field for @link(Detail). }
     FDetail: string;
+    { Backing field for @link(Colour). }
+    FColour: TAlphaColor;
   protected
     { Draws the panel and the two lines. }
     procedure Paint; override;
@@ -252,6 +271,59 @@ type
 
     { The line beneath. }
     property Detail: string read FDetail;
+
+    { The panel's colour: @link(BANNER_ALERT) unless set. }
+    property Colour: TAlphaColor read FColour write FColour;
+  end;
+
+  { @abstract(One line of the controls panel: a key and what it does.) }
+  TControlLine = record
+    { The key or mouse action. }
+    Key: string;
+    { What it does. }
+    Action: string;
+  end;
+
+  { @abstract(The keys and mouse actions of the 3D view, in a panel that
+    collapses to its title bar.)
+
+    A click on the title bar opens or closes it; the arrow at its right
+    points the way it will go (up to open, down to close). The rest of the
+    panel lets the mouse through. }
+  TTerrainControls = class(TControl)
+  private
+    { Backing field for @link(Collapsed). }
+    FCollapsed: Boolean;
+    { Backing field for @link(OnToggle). }
+    FOnToggle: TNotifyEvent;
+
+    { Writer for @link(Collapsed).
+      @param(AValue @true to show only the title bar.) }
+    procedure SetCollapsed(AValue: Boolean);
+  protected
+    { Draws the title bar, its arrow and, when open, the lines.}
+    procedure Paint; override;
+
+    { Opens or closes the panel when its title bar is clicked.
+      @param(Button The button.)
+      @param(Shift The keys held.)
+      @param(X Horizontal position.)
+      @param(Y Vertical position.) }
+    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Single); override;
+  public
+    { Makes the panel, open, @link(CONTROLS_WIDTH) wide.
+      @param(AOwner The owner.) }
+    constructor Create(AOwner: TComponent); override;
+
+    { The panel's height as it is: the title bar alone when collapsed.
+      @returns(Pixels.) }
+    function PanelHeight: Single;
+
+    { @true while only the title bar shows. }
+    property Collapsed: Boolean read FCollapsed write SetCollapsed;
+
+    { Told when a click opens or closes the panel. }
+    property OnToggle: TNotifyEvent read FOnToggle write FOnToggle;
   end;
 
   { @abstract(A line of small text in the bottom right corner, on a dark
@@ -274,6 +346,92 @@ type
 
     { The line. }
     property Text: string read FText write SetText;
+  end;
+
+  { @abstract(Hides the view while it is being got ready, so the ground
+    and its imagery are not seen coming in: the view's background colour
+    and a line saying what is happening. Takes the mouse while shown.) }
+  TTerrainCover = class(TControl)
+  private
+    { Backing field for @link(Colour). }
+    FColour: TAlphaColor;
+    { A picture of the view as it was, drawn instead of the colour and
+      the line; owned; @nil for none. }
+    FPicture: TBitmap;
+    { Backing field for @link(Text). }
+    FText: string;
+
+    { Writer for @link(Text).
+      @param(AValue The line.) }
+    procedure SetText(const AValue: string);
+  protected
+    { Fills the control and draws the line in the middle. }
+    procedure Paint; override;
+  public
+    { Makes the cover, hidden.
+      @param(AOwner The owner.) }
+    constructor Create(AOwner: TComponent); override;
+
+    { Frees the picture. }
+    destructor Destroy; override;
+
+    { Shows a picture of the view as it was, so the view seems to stay
+      still while it is got ready underneath; the cover takes ownership.
+      @param(APicture The picture, or @nil for the colour and the line.) }
+    procedure SetPicture(APicture: TBitmap);
+
+    { The colour it fills with. }
+    property Colour: TAlphaColor read FColour write FColour;
+
+    { The line in the middle. }
+    property Text: string read FText write SetText;
+  end;
+
+  { @abstract(What a place label names, which sets its colour.) }
+  TTerrainLabelKind = (
+    { A town or city. }
+    tlkPlace,
+    { A mountain or other named point of the land. }
+    tlkPeak,
+    { One of the user's markers. }
+    tlkMarker,
+    { One of the user's bookmarks, where it was made. }
+    tlkBookmark,
+    { A hidden place the user has found in the search (an easter egg),
+      flagged only once found. }
+    tlkFound);
+
+  { @abstract(A place label where it falls on the screen.) }
+  TTerrainScreenLabel = record
+    { The ground under the place, on the screen, pixels. }
+    Ground: TPointF;
+    { The name to show. }
+    Text: string;
+    { What it names. }
+    Kind: TTerrainLabelKind;
+  end;
+
+  { @abstract(The names of places, each on a pole standing on the ground
+    under it.)
+
+    The view gives the labels in the order they matter, most first; as
+    many as fit without overlapping are drawn, up to @link(MAX_LABELS).
+    It lets the mouse through. }
+  TTerrainLabelLayer = class(TControl)
+  private
+    { The labels, most important first. }
+    FLabels: TArray<TTerrainScreenLabel>;
+  protected
+    { Draws the poles and names that fit. }
+    procedure Paint; override;
+  public
+    { Makes the layer, not taking the mouse.
+      @param(AOwner The owner.) }
+    constructor Create(AOwner: TComponent); override;
+
+    { Shows a new set of labels.
+      @param(ALabels The labels, most important first.) }
+    procedure SetLabels(const ALabels: TArray<TTerrainScreenLabel>);
   end;
 
 { Writes a height for the instruments: metres with thousands separated
@@ -307,8 +465,31 @@ const
   TILT_STEP = 0.1;
   { Metres a second to kilometres an hour. }
   KMH_PER_MPS = 3.6;
-  { The banner's colour: a dark red, partly see-through. }
-  HUD_ALERT = $D0801010;
+  { A town's label colour. }
+  LABEL_PLACE = $FFFFFFFF;
+  { A mountain's label colour: a light orange. }
+  LABEL_PEAK = $FFFFC48A;
+  { A marker's label colour: a light yellow. }
+  LABEL_MARKER = $FFFFE066;
+  { A found hidden place's label colour: a mint green. }
+  LABEL_FOUND = $FF7CFFB2;
+  { A bookmark's label colour: a light blue. }
+  LABEL_BOOKMARK = $FF8AD4FF;
+
+  { The lines of the controls panel. }
+  CONTROL_LINES: array[0..11] of TControlLine = (
+    (Key: 'Up / Down'; Action: 'faster / slower'),
+    (Key: 'Left / Right'; Action: 'turn'),
+    (Key: 'PgUp / PgDn'; Action: 'climb / descend'),
+    (Key: 'Q / A'; Action: 'camera up / down'),
+    (Key: 'H'; Action: 'hover (stop)'),
+    (Key: 'Space'; Action: 'pause / carry on'),
+    (Key: 'B'; Action: 'bookmark this view'),
+    (Key: 'L'; Action: 'flags on / off'),
+    (Key: 'R'; Action: 'start again'),
+    (Key: 'Left-drag'; Action: 'look round'),
+    (Key: 'Wheel'; Action: 'climb / descend'),
+    (Key: 'Double-click'; Action: 'start again'));
   { The least a height must change to be drawn again, metres. }
   HEIGHT_STEP = 0.5;
   { Heights from this many metres up are written in kilometres. }
@@ -723,6 +904,7 @@ begin
   inherited Create(AOwner);
   HitTest := False;
   Visible := False;
+  FColour := BANNER_ALERT;
   SetBounds(0, 0, BANNER_WIDTH, BANNER_HEIGHT);
 end;
 
@@ -741,7 +923,7 @@ begin
   LBounds := RectF(0.5, 0.5, Width - 0.5, Height - 0.5);
   Canvas.Fill.Kind := TBrushKind.Solid;
   Canvas.Stroke.Kind := TBrushKind.Solid;
-  Canvas.Fill.Color := HUD_ALERT;
+  Canvas.Fill.Color := FColour;
   Canvas.FillRect(LBounds, HUD_RADIUS, HUD_RADIUS, AllCorners, 1);
   Canvas.Stroke.Color := HUD_EDGE;
   Canvas.Stroke.Thickness := 1;
@@ -791,6 +973,232 @@ begin
   Canvas.Fill.Color := HUD_DIM;
   Canvas.FillText(RectF(LBounds.Left + 8, 0, LBounds.Right - 8, Height), FText, False, 1, [],
     TTextAlign.Trailing, TTextAlign.Center);
+end;
+
+{ TTerrainCover }
+
+constructor TTerrainCover.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  // So clicks do not reach the view underneath
+  HitTest := True;
+  Visible := False;
+  FColour := TAlphaColors.Black;
+end;
+
+destructor TTerrainCover.Destroy;
+begin
+  FPicture.Free;
+  inherited;
+end;
+
+procedure TTerrainCover.SetPicture(APicture: TBitmap);
+begin
+  if APicture <> FPicture then
+    FPicture.Free;
+  FPicture := APicture;
+  Repaint;
+end;
+
+procedure TTerrainCover.SetText(const AValue: string);
+begin
+  if AValue = FText then
+    Exit;
+  FText := AValue;
+  Repaint;
+end;
+
+procedure TTerrainCover.Paint;
+begin
+  Canvas.Fill.Kind := TBrushKind.Solid;
+  Canvas.Fill.Color := FColour;
+  Canvas.FillRect(LocalRect, 0, 0, AllCorners, 1);
+  // The view as it was, stretched if the window has changed size since
+  if (FPicture <> nil) and not FPicture.IsEmpty then
+  begin
+    Canvas.DrawBitmap(FPicture, RectF(0, 0, FPicture.Width, FPicture.Height), LocalRect, 1);
+    Exit;
+  end;
+  if FText = '' then
+    Exit;
+  Canvas.Font.Size := 16;
+  Canvas.Font.Style := [];
+  Canvas.Fill.Color := HUD_DIM;
+  Canvas.FillText(LocalRect, FText, False, 1, [], TTextAlign.Center, TTextAlign.Center);
+end;
+
+{ TTerrainControls }
+
+constructor TTerrainControls.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  // Takes clicks, for its title bar; MouseDown ignores the rest
+  HitTest := True;
+  SetBounds(0, 0, CONTROLS_WIDTH, PanelHeight);
+end;
+
+function TTerrainControls.PanelHeight: Single;
+begin
+  if FCollapsed then
+    Result := CONTROLS_TITLE_HEIGHT
+  else
+    Result := CONTROLS_TITLE_HEIGHT + Length(CONTROL_LINES) * CONTROLS_LINE_HEIGHT + 8;
+end;
+
+procedure TTerrainControls.SetCollapsed(AValue: Boolean);
+begin
+  if AValue = FCollapsed then
+    Exit;
+  FCollapsed := AValue;
+  Height := PanelHeight;
+  Repaint;
+end;
+
+procedure TTerrainControls.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Single);
+begin
+  inherited;
+  if (Button = TMouseButton.mbLeft) and (Y <= CONTROLS_TITLE_HEIGHT) then
+  begin
+    Collapsed := not FCollapsed;
+    if Assigned(FOnToggle) then
+      FOnToggle(Self);
+  end;
+end;
+
+procedure TTerrainControls.Paint;
+var
+  LBounds: TRectF;
+  LArrow: TPolygon;
+  LMidX, LMidY, LTop: Single;
+  I: Integer;
+begin
+  LBounds := RectF(0.5, 0.5, Width - 0.5, Height - 0.5);
+  Canvas.Fill.Kind := TBrushKind.Solid;
+  Canvas.Stroke.Kind := TBrushKind.Solid;
+  Canvas.Fill.Color := HUD_PANEL;
+  Canvas.FillRect(LBounds, HUD_RADIUS, HUD_RADIUS, AllCorners, 1);
+  Canvas.Stroke.Color := HUD_EDGE;
+  Canvas.Stroke.Thickness := 1;
+  Canvas.DrawRect(LBounds, HUD_RADIUS, HUD_RADIUS, AllCorners, 1);
+
+  // The title, and an arrow the way a click will move it
+  Canvas.Fill.Color := HUD_TEXT;
+  Canvas.Font.Size := 12;
+  Canvas.Font.Style := [TFontStyle.fsBold];
+  Canvas.FillText(RectF(10, 0, Width - 30, CONTROLS_TITLE_HEIGHT), 'Controls', False, 1, [],
+    TTextAlign.Leading, TTextAlign.Center);
+  LMidX := Width - 16;
+  LMidY := CONTROLS_TITLE_HEIGHT / 2;
+  SetLength(LArrow, 3);
+  if FCollapsed then
+  begin
+    LArrow[0] := PointF(LMidX - 6, LMidY + 3);
+    LArrow[1] := PointF(LMidX + 6, LMidY + 3);
+    LArrow[2] := PointF(LMidX, LMidY - 4);
+  end
+  else
+  begin
+    LArrow[0] := PointF(LMidX - 6, LMidY - 3);
+    LArrow[1] := PointF(LMidX + 6, LMidY - 3);
+    LArrow[2] := PointF(LMidX, LMidY + 4);
+  end;
+  Canvas.Fill.Color := HUD_ACCENT;
+  Canvas.FillPolygon(LArrow, 1);
+  if FCollapsed then
+    Exit;
+
+  // The keys in the accent colour, what they do beside them
+  Canvas.Font.Size := 11;
+  LTop := CONTROLS_TITLE_HEIGHT;
+  for I := 0 to High(CONTROL_LINES) do
+  begin
+    Canvas.Font.Style := [TFontStyle.fsBold];
+    Canvas.Fill.Color := HUD_ACCENT;
+    Canvas.FillText(RectF(10, LTop, 120, LTop + CONTROLS_LINE_HEIGHT), CONTROL_LINES[I].Key,
+      False, 1, [], TTextAlign.Leading, TTextAlign.Center);
+    Canvas.Font.Style := [];
+    Canvas.Fill.Color := HUD_DIM;
+    Canvas.FillText(RectF(124, LTop, Width - 10, LTop + CONTROLS_LINE_HEIGHT),
+      CONTROL_LINES[I].Action, False, 1, [], TTextAlign.Leading, TTextAlign.Center);
+    LTop := LTop + CONTROLS_LINE_HEIGHT;
+  end;
+end;
+
+{ TTerrainLabelLayer }
+
+constructor TTerrainLabelLayer.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  HitTest := False;
+end;
+
+procedure TTerrainLabelLayer.SetLabels(const ALabels: TArray<TTerrainScreenLabel>);
+begin
+  // Nothing to draw before or after: no need to paint
+  if (Length(ALabels) = 0) and (Length(FLabels) = 0) then
+    Exit;
+  FLabels := ALabels;
+  Repaint;
+end;
+
+procedure TTerrainLabelLayer.Paint;
+var
+  LTaken: TArray<TRectF>;
+  LLabel: TTerrainScreenLabel;
+  LBox, LOther: TRectF;
+  LWidth: Single;
+  LFree: Boolean;
+  LCount: Integer;
+begin
+  Canvas.Font.Size := 11;
+  Canvas.Font.Style := [TFontStyle.fsBold];
+  Canvas.Fill.Kind := TBrushKind.Solid;
+  Canvas.Stroke.Kind := TBrushKind.Solid;
+  LTaken := nil;
+  LCount := 0;
+  for LLabel in FLabels do
+  begin
+    if LCount >= MAX_LABELS then
+      Break;
+    // The name centred over the pole's top; a label that would overlap one
+    // more important is left out
+    LWidth := Canvas.TextWidth(LLabel.Text) + 10;
+    LBox := RectF(LLabel.Ground.X - LWidth / 2, LLabel.Ground.Y - LABEL_POLE - 18,
+      LLabel.Ground.X + LWidth / 2, LLabel.Ground.Y - LABEL_POLE);
+    LFree := True;
+    for LOther in LTaken do
+      if LBox.IntersectsWith(LOther) then
+      begin
+        LFree := False;
+        Break;
+      end;
+    if not LFree then
+      Continue;
+    LTaken := LTaken + [RectF(LBox.Left - 2, LBox.Top - 2, LBox.Right + 2,
+      LLabel.Ground.Y + 2)];
+    Inc(LCount);
+
+    // The pole and its foot
+    Canvas.Stroke.Color := HUD_DIM;
+    Canvas.Stroke.Thickness := 1.5;
+    Canvas.DrawLine(LLabel.Ground, PointF(LLabel.Ground.X, LLabel.Ground.Y - LABEL_POLE), 1);
+    Canvas.Fill.Color := HUD_TEXT;
+    Canvas.FillEllipse(RectF(LLabel.Ground.X - 2.5, LLabel.Ground.Y - 2.5,
+      LLabel.Ground.X + 2.5, LLabel.Ground.Y + 2.5), 1);
+
+    // The name on a dark panel, in its kind's colour
+    Canvas.Fill.Color := HUD_PANEL;
+    Canvas.FillRect(LBox, 4, 4, AllCorners, 1);
+    case LLabel.Kind of
+      tlkPeak: Canvas.Fill.Color := LABEL_PEAK;
+      tlkMarker: Canvas.Fill.Color := LABEL_MARKER;
+      tlkFound: Canvas.Fill.Color := LABEL_FOUND;
+      tlkBookmark: Canvas.Fill.Color := LABEL_BOOKMARK;
+    else
+      Canvas.Fill.Color := LABEL_PLACE;
+    end;
+    Canvas.FillText(LBox, LLabel.Text, False, 1, [], TTextAlign.Center, TTextAlign.Center);
+  end;
 end;
 
 end.
