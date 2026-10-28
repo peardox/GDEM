@@ -12,8 +12,8 @@
   stretch, and the user's own markers start on. A choice missing from the
   file, such as one added in a later version, keeps its default.
 
-  The 3D tab's detail and height stretch, and the Map tab's Click for 3D
-  switch, are kept here too.
+  The 3D tab's detail, height stretch and distance detail, and the Map
+  tab's Click for 3D switch, are kept here too.
 
   Those defaults suit drawing on the CPU or a low-powered graphics
   processor. The first time the user changes how GDEMFetch draws to
@@ -108,6 +108,10 @@ type
     FTerrainHeights: Integer;
     { Backing field for @link(ClickShows3D). }
     FClickShows3D: Boolean;
+    { Backing field for @link(TerrainRange). }
+    FTerrainRange: Integer;
+    { Backing field for @link(TerrainRealistic). }
+    FTerrainRealistic: Boolean;
   public
     { Sets the defaults: tile tints and markers on, the other layers
       off. }
@@ -155,8 +159,9 @@ type
     property DrawingSuggestionMade: Boolean read FDrawingSuggestionMade
       write FDrawingSuggestionMade;
 
-    { The 3D tab's detail: the most samples across a tile (see
-      @code(TERRAIN_DETAILS) in @code(GDEMTerrain)). 451 by default. }
+    { The 3D tab's detail: the most samples across a tile near the camera
+      (see @code(TERRAIN_DETAILS) in @code(GDEMTerrain)). 3601 (Full) by
+      default. }
     property TerrainDetail: Integer read FTerrainDetail write FTerrainDetail;
 
     { The 3D tab's height stretch, times true scale. 2 by default. }
@@ -165,6 +170,15 @@ type
     { The Map tab's Click for 3D switch: @true if a click selecting a
       single downloaded tile also shows it in 3D. @false by default. }
     property ClickShows3D: Boolean read FClickShows3D write FClickShows3D;
+
+    { The 3D tab's distance detail, in tenths (see @code(TERRAIN_RANGES)
+      in @code(GDEMTerrain)): a patch is split when the camera is nearer
+      than this many tenths of its size. 20 (Medium) by default. }
+    property TerrainRange: Integer read FTerrainRange write FTerrainRange;
+
+    { The 3D tab's Realistic switch: @true to draw satellite imagery
+      instead of height colours. @false by default. }
+    property TerrainRealistic: Boolean read FTerrainRealistic write FTerrainRealistic;
   end;
 
 { The layers to turn on the first time the user chooses how GDEMFetch
@@ -231,8 +245,9 @@ begin
   FShowPlaces := False;
   FShowMarkers := True;
   // Written out, as GDEMTerrain's defaults, so this unit stays small
-  FTerrainDetail := 451;
+  FTerrainDetail := 3601;
   FTerrainHeights := 2;
+  FTerrainRange := 20;
 end;
 
 class function TViewOptions.FileName: string;

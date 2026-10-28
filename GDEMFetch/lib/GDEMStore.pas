@@ -394,6 +394,12 @@ type
       @returns(Size in bytes.) }
     function DataSize(AToken: TCancelToken): Int64;
 
+    { The folder for the 3D view's imagery cache, inside the data folder;
+      it may not exist yet.
+      @param(AName The folder's name.)
+      @returns(Its path.) }
+    function ImageryFolder(const AName: string): string;
+
     { The data folder. }
     property Root: string read FRoot;
 
@@ -789,6 +795,11 @@ end;
 procedure TGDEMStore.SaveDownloadedIndex(AIndex: TTileIndex);
 begin
   AIndex.SaveToFile(DownloadedIndexFileName);
+end;
+
+function TGDEMStore.ImageryFolder(const AName: string): string;
+begin
+  Result := TPath.Combine(FRoot, AName);
 end;
 
 function TGDEMStore.AllTileFiles: TArray<string>;

@@ -43,8 +43,13 @@
       TileMaker) and @link(GDEMTileCache), in the repository's
       @code(common) folder, read it.)
     @item(@link(GDEMGeoTiff), in @code(common), reads the downloaded
-      GeoTIFF tiles; @link(GDEMTerrain) makes a tile's surface from them,
-      and @link(GDEMTerrainView) shows it on the 3D tab with Gorilla3D.)
+      GeoTIFF tiles; @link(GDEMTerrain) makes patches of the surface from
+      them, @link(GDEMTerrainLod) decides which to draw and has them made
+      on worker threads, and @link(GDEMTerrainView) shows them on the 3D
+      tab with Gorilla3D, drawn with @link(GDEMImagery)'s satellite
+      imagery when Realistic is on, flown over as @link(GDEMFlight) moves, with
+      @link(GDEMTerrainHud)'s instruments over it and no faster than the
+      display refreshes (@link(GDEMDisplays)).)
     @item(@link(GDEMSystemInfo), in @code(common), reads the computer's
       memory and graphics processors, and this program's use of them, for
       the log.)
@@ -99,6 +104,11 @@ uses
   GDEMViewOptions in 'lib\GDEMViewOptions.pas',
   GDEMEasterEggs in 'lib\GDEMEasterEggs.pas',
   GDEMTerrain in 'lib\GDEMTerrain.pas',
+  GDEMTerrainLod in 'lib\GDEMTerrainLod.pas',
+  GDEMFlight in 'lib\GDEMFlight.pas',
+  GDEMImagery in 'lib\GDEMImagery.pas',
+  GDEMDisplays in 'ui\GDEMDisplays.pas',
+  GDEMTerrainHud in 'ui\GDEMTerrainHud.pas',
   GDEMTerrainView in 'ui\GDEMTerrainView.pas';
 
 {$R *.res}

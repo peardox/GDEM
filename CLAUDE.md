@@ -6,15 +6,37 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 28 October 2026, early morning, before the owner's push
-of the memory and GPU unit (on top of `d25e46b` "Mountains, Pan, Less
-crap UI", which was checked identical to the delivered files).
+Last updated: 28 October 2026, 10:35, at the end of a session, as the
+owner was about to push the level-of-detail 3D view.
+
+## Where to pick up (28 October 2026)
+
+- GitHub `main` was at `19c8563` ("SystemInfo sync"), checked identical
+  to everything delivered before it. The last delivery,
+  `gdem-3d-lod.zip`, holds the **level-of-detail 3D view** (new
+  `lib/GDEMTerrainLod.pas`; rewritten `lib/GDEMTerrain.pas` and
+  `ui/GDEMTerrainView.pas`; `MainForm`, `GDEMViewOptions`, `.dpr`,
+  `.dproj`, README, this file). The owner was about to push it,
+  **unbuilt**: written without a compiler, checked by `pasdoc_check.py`
+  and a Python port of the tree. Fetch GitHub first and check whether the
+  push holds it.
+- **First job of the next session:** the owner's first build of it. Expect
+  compile errors to fix first, then go through "To check first when
+  built" at the end of the "Level of detail" section below, and ask for
+  the `3D: settled` and `3D: memory with` lines from the Debug tab.
+- If the level-of-detail view cannot be made to work, `19c8563` has the
+  working single-tile view (the owner chose this stage as a safe point to
+  return to).
+- Owner's ideas waiting: use the `GDEMSystemInfo` figures to choose CPU
+  or GPU drawing (and View layers, 3D detail) on a first run. The flying
+  camera and the Realistic imagery have been delivered (see "Flying" and
+  "Realistic imagery" below), unbuilt.
 
 ## State at the end of 27 October 2026
 
-The owner is pushing the evening's 3D work on top of `c1096a1` ("Add
-FastMM5"). Everything since was delivered as zips and is in that push;
-before it, the working copy was validated: `pasdoc_check.py` clean
+The owner pushed the evening's 3D work on top of `c1096a1` ("Add
+FastMM5") as `d25e46b`. Everything since was delivered as zips and is in
+that push; before it, the working copy was validated: `pasdoc_check.py` clean
 (including `tools/GeoTiffCheck`); every source ASCII; both `.dproj` files
 keep their BOM and parse; every unit in `lib/` and `ui/` is in both the
 `.dpr` and the `.dproj`, and every path exists; each `RcItem` exists, its
@@ -44,12 +66,128 @@ below):
 
 Then, after that push: `common/GDEMSystemInfo.pas`, the memory and GPU
 figures in the log (see "Memory and graphics processors" below), working
-on Windows.
+on Windows, pushed as `16c109c` and `19c8563`.
+
+Then the 3D view was rebuilt with level of detail over a window of tiles
+(see "Level of detail" below): delivered on 28 October, not yet built.
 
 Items 5 to 8 compiled (the owner's build reported only the hints of item
 8), but have not been reported on in use. macOS and Linux have not run
 any of items 2 to 8. Sections below that say "Not yet built" were written
 before the owner's builds. No known bugs.
+
+### Level of detail (28 October 2026, after `19c8563`)
+
+The owner's idea: load the tiles round the camera (3 x 3 at first),
+split tiles into finer pieces near the camera and coarser further away,
+halving the detail at each doubling of distance, so far fewer triangles
+are drawn and updating the tree is faster than building whole tiles. The
+owner asked for "any steps that will work properly and particularly ones
+that improve speed", with `19c8563` as the point to go back to if it
+fails. Not yet built. What was done:
+
+- **Patches** (`lib/GDEMTerrain`, rewritten; no FMX): 75 x 75 cells
+  whatever their size (`PATCH_CELLS`). A tile's tree: depth 0 the tile,
+  depth 1 its ninths (3 x 3), then quarters, to depth 5 (`NODE_ARCSEC`
+  3600, 1200, 600, 300, 150, 75 arc-seconds; 48, 16, 8, 4, 2, 1 between
+  samples). 75 was chosen because 3,600 = 75 x 48 and every depth gets a
+  whole number of arc-seconds between samples; 64 does not divide 3,600.
+  `TTerrainTile` (ref-counted, `ITerrainTile`) reads the coarsest image
+  of the `_dem.tif` whose spacing is no wider than wanted, under a lock,
+  when first needed, fills voids, and keeps it. `TTerrainLevel.Sample`
+  blends the four nearest samples at the place the image's own
+  pixel-is-area georeference puts them; checked in Python on the IoW tile
+  against box averages of the full image: closer at every overview than
+  index x 2 or point mapping (226: 0.80 m against 1.12 and 1.57).
+  `BuildTerrainPatch` samples a 78 x 78 grid (a ring beyond the edges,
+  from the neighbouring tiles where they have heights, so normals match
+  across tiles), positions on a sphere (`TTerrainFrame`: east, down,
+  north of a point at sea level; `ToGeo` is its exact inverse on the
+  sphere), normals from neighbour differences, shaded height colours,
+  then a skirt (each edge again, `SKIRT_CELLS` 1.6 cells x stretch + 20 m
+  lower; wound both ways). 6,080 vertices, 12,450 triangles; one shared
+  index list (`TerrainPatchIndices`), same winding as the first view.
+  Sea and missing tiles are flat at 0, blue or grey, never split.
+  Removed: `TTerrainGrid`, `LoadTerrainGrid`, `TerrainChunk` and the rest
+  of the single-tile code.
+- **Tree** (`lib/GDEMTerrainLod`, new; no FMX): `TTerrainLod`, main
+  thread only. Window: tiles whose nearest point is within
+  `TERRAIN_WINDOW_KM` (170) of the point looked at, dropped beyond 1.25
+  times that; the owner's 3 x 3 in kilometres rather than tiles, because
+  tiles are only 108 km wide at the equator (67 km at Manchester), so at
+  higher latitudes it takes more tiles east to west. Split when the
+  camera is nearer than `Range` (Low 1.5, Medium 2, High 3) times the
+  patch's size; put back together beyond 1.15 times that
+  (`SPLIT_HYSTERESIS`). A split patch stays on show until all its
+  children are ready; a patch being put back together keeps its children
+  on show until it is ready. Waiting patches go to `TTask.Run`, at most
+  one per processor, ordered in view first, then depth, then distance;
+  results come back through `ITerrainResults` (a locked queue that
+  outlives the tree), matched by node id and generation, so results for
+  freed nodes or an old frame or stretch are dropped. Boxes are
+  estimated from the corners and middle at the parent's height range
+  until made. Rebase: past `TERRAIN_REBASE_KM` (150) from the frame's
+  point, `Start` again at the tile under the point looked at.
+  `SurfaceY` gives the ground under a point from the finest heights read,
+  without waiting.
+- **View** (`ui/GDEMTerrainView`, rewritten): `ShowArea(south, west,
+  reset)`, `TileLookup` (MainForm's `TerrainTileInfo`: land if
+  downloaded, missing if in the tile index (or no index yet), else sea),
+  `MaxDetail` (`TerrainMaxDepth`: 226 to depth 1 ... 3601 to depth 5),
+  `Range`, `Exaggeration` (makes every patch again; tiles' heights are
+  kept), `OnSettled`, `OnLog`. A 15 ms `TTimer` turns made patches into
+  meshes for up to `UPLOAD_BUDGET_MS` (12) a tick, then calls `Update`
+  if anything changed. Each mesh: `TGorillaSingletonMesh`, hidden until
+  shown, vertices copied straight into the FMX buffer at offsets taken
+  from `VerticesPtr[0]`, `NormalsPtr[0]` and a sentinel colour written
+  with `Color0[0]` and found by scanning (falls back to the setters for
+  whatever cannot be found; the settled line says which), indices moved
+  in one go as 16 or 32-bit (found by writing two indices and looking),
+  `IsDefOwner := True` (the property exists; whether it was already the
+  default is unknown), `TMeshDef` static, one shared
+  `TGorillaVertexColorMaterialSource` parented to the viewport.
+  `NearPlane` 0.05 and `FarPlane` 3000 (km; Gorilla3D's defaults are 0.1
+  and 10000). The centre sits on the ground (`SurfaceY`); the camera is
+  kept 30 m above it. Panning has no limit; zoom 0.3 to 600 km.
+  Gorilla3D's own frustum culling (on by default, using the mesh
+  definition's bounds, which the docs say stay available for static
+  meshes) leaves out patches not in view; the tree's own view test only
+  orders the work.
+- **MainForm**: Show in 3D no longer waits with the hourglass: it calls
+  `ShowArea` and opens the tab. A Distance combo (Low, Medium, High) on
+  the 3D toolbar, kept as `TViewOptions.TerrainRange` (default 20);
+  Detail now defaults to Full and changes only how deep the tree goes
+  (nothing is read again); Heights makes every patch again. Logs: `3D:
+  showing ...` when asked, `3D: settled in N ms: ...` when the work is
+  done, then `3D: memory with ...` a second later.
+
+Checked in Python (no Pascal compiler): a port of the tree on simulated
+land and sea tiles with patches finishing in random order, for six camera
+positions including pans that bring new tiles in: shown patches never
+overlap; holes only before a tile's first patch is made. Counts at
+Medium: from 140 km at 35 degrees, 163 patches shown (2.0 M triangles)
+over 19 tiles; close to the ground at 2 to 5 km, 570 to 650 (7 to 8 M),
+of which roughly a third are in view. Compared with one tile at Full
+before: 13 million vertices, 26 M triangles, 2.5 s on the main thread.
+Same-depth patches share edges exactly; the gap between depths on the
+IoW coast at x2 was up to 0.29 km, which the skirt depth covers.
+
+To check first when built, most likely problems first:
+
+1. Compile errors in the new units (written without a compiler).
+2. The settled line's "vertices copied straight" or "through FMX's
+   setters"; if a patch looks scrambled, the straight copy found a wrong
+   offset: make `FillVertices` always use the setters.
+3. Patches missing at the edges of the view while turning: Gorilla3D's
+   frustum culling using wrong bounds; set each mesh's
+   `FrustumCullingCheck` off (the tree could then hide patches out of
+   view itself).
+4. One shared material: if the surface goes black or a patch shows
+   another's colours, go back to one material per mesh.
+5. Leaks with `REPORT_LEAKS`: `TMeshDef`s would mean `IsDefOwner` is not
+   what it seems.
+6. The settled line's times: how long a patch takes on a worker, and to
+   turn into a mesh; memory with all patches made.
 
 ### Memory and graphics processors (27 October 2026, after `d25e46b`)
 
@@ -69,8 +207,9 @@ GPU 2: Intel(R) Graphics, 128 MB own memory, 47.4 GB shared; this program may us
 Both adapters found, the software renderer left out, DXGI 1.4 budgets
 read. FastMM5's 10 MB allocated against 251 MB in RAM: most of the
 working set is code, the Skia and Vulkan drivers and the decoded map
-tiles held by Skia outside the Delphi heap. Not yet reported: the
-`3D: memory after showing ...` line, and macOS and Linux.
+tiles held by Skia outside the Delphi heap. Not yet reported: the 3D
+memory line (since the level-of-detail view, `3D: memory with ...`, a
+second after the `3D: settled` line), and macOS and Linux.
 
 The owner's plan: later, use these figures to choose the CPU or GPU
 drawing default (and perhaps the View layers and 3D detail) on a first
@@ -106,7 +245,9 @@ run, instead of the fixed defaults.
   `LogDisplays` in `RunStartup`; `DescribeMemoryUse` is logged
   `MEMORY_MEASURE_DELAY` (1 s) after each 3D build
   (`TThread.ForceQueue` with a delay), as `3D: memory after showing
-  <tile>: ...`, so the pieces have been drawn and sent to the GPU.
+  <tile>: ...`, so the pieces have been drawn and sent to the GPU. Since
+  the level-of-detail view: `3D: memory with <tile> on show: ...`, 1 s
+  after the `3D: settled` line (`TfrmMain.TerrainSettled`).
 - To check: the start-up lines on macOS (Apple silicon and Intel) and
   Linux; the 3D line at each detail, which gives the memory cost per
   tile for planning several tiles.
@@ -151,8 +292,14 @@ x 1440 at 0, 0, scale 1.50.
    `main`) and its `delphi-neon` and `FastMM5` submodules.
 2. Read `README.md`, then this file.
 3. The owner's working copy is often ahead of GitHub. If the owner
-   attaches or pastes files, build on those, not on GitHub.
-4. Before delivering code, run `python3 tools/pasdoc_check.py` (it
+   attaches or pastes files, build on those, not on GitHub. When the
+   owner says a push is done, fetch it, compare every file delivered
+   since the last push with GitHub's, and reset the working copy to
+   `origin/main` (removing untracked copies of files GitHub now has).
+4. Answer the stop hook's "commit and push" briefly: changes are left
+   uncommitted on purpose; the owner applies the zips and pushes. There
+   is no push access, and none should be asked for.
+5. Before delivering code, run `python3 tools/pasdoc_check.py` (it
    checks `GDEMFetch/`, `TileMaker/` and `common/`) and fix anything it
    reports.
 
@@ -201,7 +348,10 @@ GDEMFetch is the first program, and it is feature-complete for fetching:
 - Themes ported from Sprite3D; Windows icon; deployment checked on all
   desktop platforms.
 
-The 3D tab is empty, waiting for the next stage.
+The 3D tab shows the ground round a tile with Gorilla3D: first one tile
+as a single mesh (working on Windows, `d25e46b`), now patches with level
+of detail over a window of tiles (delivered, unbuilt; see "Level of
+detail").
 
 ### What is on GitHub
 
@@ -437,13 +587,12 @@ GitHub (see the top of this file).
    tab" and later sections below). To check: macOS and Linux; FastMM5's
    leak report after switching tiles (a `TMeshDef` leak would mean the
    singleton mesh does not own its definition); the new controls in use.
-   The memory and GPU figures (`GDEMSystemInfo`) are there to plan
-   several tiles from: the `3D: memory after showing` line at each
-   detail gives the cost of one.
-   Ideas raised: build the pieces on a worker thread so Full does not
-   freeze the window for 2.5 s; several tiles stitched together; the
-   high-resolution map laid over the surface; a checked list of the peaks
-   Natural Earth leaves out (Lhotse, Makalu, Cho Oyu, Annapurna...).
+   Now with level of detail over a window of tiles, made on worker
+   threads (see "Level of detail" above); the `3D: settled` and `3D:
+   memory with` lines measure it.
+   Ideas raised: the high-resolution map laid over the surface; a camera
+   that flies over the ground; fog; a checked list of the peaks Natural
+   Earth leaves out (Lhotse, Makalu, Cho Oyu, Annapurna...).
 6. Smaller ideas offered but not taken up: parallel workers and the
    progress dialog for moving the data folder; a macOS `.icns` and a
    Linux `.desktop` file; a menu item to open the Reports folder.
@@ -1184,6 +1333,345 @@ set it first). The overlap tests there became a nested `IsClear`, with
 `LFound` set only when a side is found, so no value is unused and none
 can be left unset (W1036, see Lessons learned).
 
+### Instruments over the 3D view (28 October 2026)
+
+Asked for by the owner while the level-of-detail view was still unbuilt
+(after the first compile fixes): height above the ground (the
+heightmap), a compass turning with the heading, both over the viewport;
+then altitude, then frames a second. Not yet built.
+
+- `ui/GDEMTerrainHud` (new; in the `.dpr` and `.dproj`):
+  `TTerrainAltimeter` (above ground large, altitude, then the ground's
+  height above sea level and `(heights xN)` when stretched),
+  `TTerrainFrameRate`, `TTerrainCompass` (card turns, fixed orange mark at
+  the top, N in orange, letters kept upright, heading as `045` plus the
+  degree sign in the middle). Painted with FMX's canvas (not speed
+  critical), fixed colours on a dark see-through panel, `HitTest` off.
+  Each repaints only when its value changes by a step (0.05 degrees,
+  0.5 m, 0.05 fps).
+- `GDEMTerrain`: `TTerrainFrame.ToGeoHeight` (exact inverse of `ToLocal`,
+  height included) and `Directions` (east and north at a place, as local
+  unit vectors; private `FromGlobe` is `ToLocal`'s rotation). Checked in
+  Python: round trip within 1e-12; directions match finite differences;
+  heading 0 at azimuth 0, 270.5 at azimuth 90 at the frame's point (the
+  camera 50 km off sits where north has turned), 2.6 degrees at azimuth 0
+  with the centre 140 km east (the frame's Z is that far off true north
+  there, which is why heading is not just 360 - azimuth).
+- `GDEMTerrainLod`: `GroundHeight(lat, lon, metres)` (true metres, sea and
+  missing tiles 0, as drawn), which `SurfaceY` now uses; behaviour of
+  `SurfaceY` unchanged.
+- `TTerrainView`: the three controls are made after the viewport (so drawn
+  over it), placed by `PlaceInstruments` from an overridden `Resize`;
+  `UpdateInstruments` at the end of `PlaceCamera` and after each
+  `FLod.Update` in `TimerTick` (finer ground changes the height above
+  it). Altitude = the camera's sphere height / exaggeration; above
+  ground = altitude - ground, shown as 0 if below (the camera is kept
+  30 m of scene above `SurfaceY`, which samples a slightly different
+  place). Frame rate: `FViewport.FPS` every 250 ms in `TimerTick`; the
+  Gorilla3D docs (v1.1 viewport page) say that with `UseFixedFrameRate`
+  it is the current frames a second, otherwise an estimate; the type is
+  not documented (`%n` in their example), so it is assigned to a Single.
+
+To check when built: the controls show over the viewport (if Gorilla3D
+draws its viewport above FMX's other controls, they would be hidden; then
+put them on a layout over the view instead); the compass reads 0 from the
+starting view and 90 looking east; the heights look right over the sea
+(ground 0) and over a known peak; the frame rate is not stuck at the
+fixed 60 when the view is slow.
+
+### Flying (28 October 2026)
+
+Asked for by the owner right after the instruments, still before the
+level-of-detail view had been run: the frame rate to follow the display's
+refresh rate (as Sprite3D does); Up/Down speed (0 = hover, never
+negative), Left/Right heading, PgUp/PgDn height with a crash below the
+ground, the camera looking down a little ahead, Q/A to tilt it, and a
+start at the starting position + 10000 m, set in `settings.json`. Not
+yet built. The orbit camera (azimuth, elevation, distance, pan) is gone.
+
+- `lib/GDEMFlight` (new): `TFlight` keeps latitude, longitude, true
+  altitude (m), true heading, speed (m/s), tilt (degrees down), crashed.
+  `Step(controls held, seconds)` (seconds kept to 0.1): speed +- max(20,
+  0.6 x speed) a second, 0 to 3000 m/s; turn 45/s; tilt 30/s, -30 to 89;
+  height +- max(50, 0.5 x height above ground) a second; then moves along a
+  great circle (`MoveOn`, the heading turned to the arrival bearing, at
+  radius R + altitude); then below `GroundHeight` = crash (altitude to the
+  ground, speed 0, nothing moves until `Start`). `Start` puts it
+  `StartHeight` above sea level and marks the start pending: the first
+  `Step` that knows the ground there lifts it to ground + `StartHeight`
+  (a height key or the wheel first cancels that). `Climb(notches)` (the
+  wheel: a tenth of the height above ground, at least 20 m), `Look`
+  (drag), `Stop` (Space). Checked in Python: 66,666 steps of 15 ms at
+  3000 m/s end 0.13 m from one 3000 km jump, same heading; north and east
+  on the equator and across the date line right; holding PgDn from
+  10,000 m crashes in 11.2 s, from 300 m in 4.2 s; Up reaches 500 km/h in
+  4.1 s, the most in 9.2 s.
+- `ui/GDEMDisplays` (new): `DisplayOfForm(form, read rate)`, a cut-down
+  port of Sprite3D's `DisplayData` (`TPeardoxDisplays.IndexOfForm` /
+  `RefreshRateFor`): Windows `MonitorFromWindow` device name, then
+  `EnumDisplaySettings` current `dmDisplayFrequency` (0 and 1 = unknown);
+  macOS `Screen.DisplayFromForm`, CoreGraphics rate (main for primary,
+  others in `CGGetActiveDisplayList` order, as Sprite3D matches them);
+  Linux 0. Naming is cheap; the rate is read only when the name changes.
+- `GDEMSettings`: `FlightStartHeight` (`flightStartHeight`, default
+  `DEFAULT_FLIGHT_START_METRES` 10000). Not in the Settings dialog; the
+  owner asked for `settings.json` for now. Written to the file the next
+  time Settings is closed with OK.
+- `GDEMTerrainView` (rewritten round the flight; mesh code unchanged):
+  `PlaceCamera` puts the camera at `Frame.ToLocal(lat, lon, altitude x
+  exaggeration / 1000)`, and the target 1 km along heading and tilt using
+  `Directions` (up = east x north). The flight is drawn stretched with the
+  heights, so it is the same height above the drawn ground; the
+  instruments show true heights. `NearPlane` follows the flight down: a
+  quarter of the height above ground, 5 to 50 m (changed only when it
+  moves by 10%); unconfirmed that Gorilla3D takes a new `NearPlane` while
+  running. `TimerTick`: every 250 ms `CheckFrameRate` (reads `FPS`; if
+  the window's display changed, `FixedFrameRate` := its rate, 60 if
+  unknown or under 24, logged); then `FFlight.Step(FHeld, seconds since
+  last tick)`; a crash shows `TTerrainBanner` and logs; rebase when the
+  camera is past `TERRAIN_REBASE_KM`, at the tile under the flight.
+  Keys: `KeyDown`/`KeyUp` keep `FHeld` (`KeyControl` maps `vkUp` ...
+  `vkNext`, `vkQ`/`vkA`, and the characters Q and A for systems that send
+  letters only as characters); R = `ResetView`, Space = `Stop`; `DoExit`
+  clears `FHeld`, as the key's release would go elsewhere. `CanFocus`
+  on; `MouseDown` takes the focus. Left-drag = look (right turns right,
+  down tilts down), wheel = height, double-click = start again. Right
+  and middle drag do nothing now.
+- `GDEMTerrainHud`: `TTerrainSpeedPanel` (km/h or Hovering; Camera N
+  degrees down/up), `TTerrainBanner` (crash, dark red, hidden until
+  shown), `TTerrainFrameRate.Limit` (`frames a second, of 144`).
+- `MainForm`: `StartHeight` from settings in `ShowTerrainTile` (logged in
+  the `3D: showing` line); `FocusTerrainView` after Show in 3D, Start
+  Again (was Reset View) and the three combo boxes, which take the
+  keyboard when used; the help line lists the keys.
+- README: the 3D section's table and instruments rewritten; units table.
+
+To check when built, most likely first: the view gets the keys (click
+it; if FMX's form or a toolbar control keeps them, the keys do nothing);
+letters Q, A, R on each platform (both the key code and the character are
+tried); the start lifts to ground + 10,000 m once the tile is read; the
+compass and Left/Right agree (Right turns the card anticlockwise, the
+heading number up); a crash on PgDn; the frame rate panel shows "of N"
+matching each display, and the log line on dragging the window across;
+patches still split ahead of the flight (the tree's window centres on the
+target, 1 km ahead).
+
+### Licence and credits (28 October 2026)
+
+The owner asked for a licence file and a list of credits, first naming
+MIT, then asking for the least restrictive non-commercial licence, then
+for the licence allowing the best imagery, and settling on "the least
+restrictive that [is compatible] with other licenses". That is MIT:
+Neon (MIT), Skia (BSD 3-clause) and Skia4Delphi (MIT) allow anything;
+the owner holds a Gorilla3D licence, and its commercial runtime may be
+compiled into an MIT program (not into a GPL one); the EOX imagery's
+non-commercial terms bind whoever uses the imagery, not the code.
+PolyForm Noncommercial 1.0.0 was written in briefly and replaced.
+
+- `LICENSE`: MIT, "Copyright (c) 2026 peardox" (the owner's name was not
+  known; offer to put it in), plus a line pointing to `CREDITS.md`.
+- `CREDITS.md`: a table (ASTER GDEM V3 with its citation and DOI
+  10.5067/ASTER/ASTGTM.003, NASA Earthdata, Natural Earth, the two world
+  map images, Sentinel-2 cloudless (planned), Neon, FastMM5, Gorilla3D,
+  Skia and Skia4Delphi, RAD Studio and its styles, Sprite3D) and notes.
+- **FastMM5** is GPL v3 or commercial. Under the GPL, GDEMFetch's Windows
+  builds cannot be given out at all (the GPL cannot cover the Gorilla3D
+  runtime in them). The owner will buy the commercial licence, "just not
+  today"; then update `CREDITS.md` note 2 and the README's Licence
+  section. Offered meanwhile: link FastMM5 only when `REPORT_LEAKS` is
+  defined.
+- **The high-resolution map's image**, `8081_earthmap10k`, is Planet Pixel
+  Emporium's (James Hastings-Trew). Its terms (read 28 October 2026)
+  allow it as a resource for rendering, a simulator or game included, but
+  not redistributing it as is, nor including it in a distributed program
+  without permission; `maps/tiles/` and the `MAPTILES` resource are it,
+  resampled. Permission to be confirmed by the owner, or the image
+  replaced (NASA Blue Marble is unrestricted). Where
+  `maps/world_1080x540.jpg` came from is not recorded: ask.
+- The RAD Studio styles in `styles/` are `Redist` files; shipping them in
+  a program is allowed, keeping them in the public repository is less
+  clear, and `buildstyles.cmd` fetches missing ones anyway.
+- Imagery for the Realistic option, discussed and not yet built: the
+  owner wants the best images; Sentinel-2 cloudless (EOX, 10 m,
+  cloud-free) recent years are CC BY-NC-SA 4.0 (non-commercial, credit
+  shown in the map); 2016 is CC BY 4.0; NASA GIBS Blue Marble (500 m) and
+  MODIS/VIIRS (250 m, daily, cloudy) need only an acknowledgement; HLS
+  (30 m) is per-pass with gaps and clouds; Esri, Google and Bing ruled
+  out by their terms. Proposed and awaiting the owner: per-patch 256 x 256
+  textures (about 9 m a pixel at the finest depth), a disk cache with a
+  size limit (least recently used suggested over the owner's FIFO; 2 GB
+  in the data folder suggested), background downloads as an agreed
+  exception to the progress dialog rule, plain imagery without hillshade,
+  the credit drawn in a corner. Whether EOX's public tile service allows
+  caching by a desktop program was not found; check before building.
+- README: Licence section, layout rows, and a Notes for Claude rule to
+  add anything new to `CREDITS.md`.
+
+### Realistic imagery (28 October 2026)
+
+Asked for by the owner ("sync, check and if ok add the image code") after
+`88d0682` "Licenses", which was checked identical to every file delivered
+since `8e2511f` (14 files) and passed every check. The proposals of the
+licence discussion were taken as agreed: EOX Sentinel-2 cloudless, the
+newest year by default; least recently used rather than FIFO; 2 GB in the
+data folder; background downloads as an exception to the progress dialog
+rule (README rule amended); plain imagery, unlit. Not yet built.
+
+- EOX's WMTS capabilities (fetched 28 October 2026): layers
+  `s2cloudless` (2016), `s2cloudless-2017` ... `s2cloudless-2025`, each
+  also `_3857`; the plain ones in `WGS84` (GoogleCRS84Quad: level z is
+  2^(z+1) x 2^z tiles of 256, top left 90, -180, levels 0 to 17), JPEG,
+  REST template `.../wmts/1.0.0/{layer}/default/WGS84/{z}/{row}/{col}.jpg`.
+  2016 and 2017 CC BY 4.0, 2018 to 2025 CC BY-NC-SA 4.0; AccessConstraints
+  "Proper attribution is required for any usage", following the demo map.
+  The sandbox cannot reach `tiles.maps.eox.at` (proxy 403), so nothing was
+  downloaded here.
+- `lib/GDEMImagery` (new): `TImageryService(layer, cache root, MB)`.
+  `Request(id, north, west, size)`, `Cancel`, `CancelAll`, `Take`,
+  `TakeMessage`, `Pending`. Up to `IMAGERY_WORKERS` (6) `TTask`s; each
+  texture: level `ImageryZoomFor(size)` (the coarsest with at least 255
+  pixel gaps across, at most 13: depth 0 level 8, 1 level 10, 2 level 11,
+  3 level 12, 4 and 5 level 13), its tiles (columns wrapped, `FloorDiv`
+  for the column just west of 180), then 256 x 256 pixels bilinear from
+  the level's pixel centres, texture pixel i at west + i x size / 255.
+  Tiles: memory (96 decoded, LRU), the disk cache, or the web (one
+  `THTTPClient` per download, 10 s / 20 s time-outs, the GDEMFetch user
+  agent); two workers wanting one tile do not both fetch it
+  (`FFetching`, the second polls every 20 ms). Decoded with
+  `TSkImage.MakeFromEncoded` and `ReadPixels` as BGRA8888 (TAlphaColor's
+  own byte order). Disk cache `<data>/Imagery/<layer>/<z>/<row>/<col>.jpg`,
+  written as `.tmp` and renamed, only after it decodes; measured at the
+  start on a worker (`.tmp` leftovers deleted); a file's time is its last
+  use (set on every read), so LRU lasts between runs; past the limit the
+  oldest are deleted down to 90%, logged. Problems: the first 5 in full,
+  then every hundredth, as `WARNING:` through `TakeMessage`.
+  `ImageryPatchTexCoords`: u = (0.5 + c x 255 / 75) / 256, so the edge
+  vertices sit on the centres of pixels 0 and 255 and neighbours match.
+  `ImageryCredit`: "Sentinel-2 cloudless - https://s2maps.eu by EOX IT
+  Services GmbH (Contains modified Copernicus Sentinel data YEAR)" plus
+  the licence; the older wording, not EOX's newer EOxCloudless branding:
+  worth comparing with maps.eox.at's demo.
+- Checked in Python (a port of `ImageryZoomFor`, `Work` and
+  `ImageryPatchTexCoords`) on a synthetic world built tile by tile in the
+  WGS84 grid: 56 textures at every depth, including at 180 degrees and
+  near the poles, never missing a tile; on a picture linear in longitude
+  and latitude every texture pixel is within 4e-10 of a level pixel of
+  where it belongs; neighbouring patches match exactly along their shared
+  edges (east-west, north-south, across 180).
+- `GDEMTerrainView`: `TTerrainPatchMesh` (a `TGorillaSingletonMesh` with
+  `ImageryId`, `North`, `West`, `Size`, `Imagery` material, `ImageryAsked`,
+  `ImageryFailed`); `MakeMesh(patch, node)` sets the place from the node
+  and registers the mesh in `FMeshes`; `FillVertices` writes texture
+  coordinates (straight at `TexCoord0Ptr[0]`'s offset, else the setter)
+  if `TVertexFormat.TexCoord0 in ABuffer.Format`, logging a `WARNING:`
+  once if not. `ApplyImagery` (in `TimerTick`, within the same 12 ms
+  budget as the meshes) makes a `TBitmap`, copies rows straight when
+  `PixelFormat` is BGRA (else `SetPixel`), and gives the mesh its own
+  `TGorillaDefaultMaterialSource` (`UseLighting`/`UseSpecular` off,
+  `UseTexturing`, `UseTexture0`, `Texture.Assign(bitmap)`); Gorilla3D's
+  docs say vertex colour and texture cannot be combined in one material,
+  hence one each. `Realistic` off puts every mesh back on the shared
+  vertex-colour material and frees the textures. `ReleaseMesh` cancels a
+  request. The settled line waits for imagery too and adds its counts.
+  `TTerrainCredit` (HUD) draws the credit bottom right while on.
+- `MainForm`: Realistic check box on the 3D toolbar (`view.json`
+  `terrainRealistic`); `ImageryService` makes the service on first need
+  (cache in `FStore.ImageryFolder('Imagery')`, or none if the data folder
+  is missing); `CloseImagery` in `FormDestroy`, after Settings OK and when
+  the store is made again. `GDEMSettings`: `imageryLayer`,
+  `imageryCacheMB`. `GDEMStore.ImageryFolder`.
+
+To check when built, most likely first: `LMaterial.Texture.Assign` (the
+docs show `Texture.LoadFromFile` and `Texture := ...`; if `Texture` is nil,
+create a `TBitmap` and assign it with `:=`, and check who frees it); the
+`WARNING` about texture coordinates (Gorilla's mesh format may lack
+`TexCoord0`); a patch scrambled or mirrored (u and v the wrong way: the
+texture's row 0 is north); black patches (the material wants lighting or
+a diffuse colour); the cost of ~600 materials (all share one shader, by
+the docs); EOX's answer to a desktop program (status codes in the log);
+the `Imagery:` cache line at the first use; that a data folder rescan
+copes with the extra files (it walks the whole folder).
+
+### Realistic imagery, first run (28 October 2026)
+
+The owner's first run (Windows, N50W002, detail 3601, distance High,
+heights x1): the flight view and the instruments worked; `3D: settled in
+1381 ms: 790 patches on show (9,835,500 triangles) of 1017 kept, over 19
+tiles (18 with heights); 1017 made by up to 24 workers, 2.0 ms each; 1017
+meshes in 1064 ms, 1.05 ms each (vertices through FMX's setters)`; memory
+1.7 GB, GPU 1.1 GB. The display line named `\\.\DISPLAY5` at 240 Hz.
+With Realistic on: `imagery: 263 textures, 435 ms each, 1372 tiles
+downloaded, 0 still to come, 754 could not be made`, and about 750
+`403 Forbidden` from EOX, mixed with successes: EOX's public service is
+rate-limited ("due to heavy load", says maps.eox.at; HTTP errors or a
+redirect to a "Heavy load" page; no figures). It had been asked at about
+60 tiles a second. Fixed, not yet built:
+
+- `GDEMImagery`: downloads paced (`WaitForSlot`; one starts every
+  1000 / `Rate` ms): `IMAGERY_START_RATE` 8 a second, + 0.25 per tile
+  downloaded up to 32; a refusal (any status but 200 and 404, no answer,
+  or a body that is not a JPEG or PNG by its first bytes; redirects are not
+  followed) halves the pace (at least 1) and pauses all downloads, 1 s
+  doubling per refusal in a row up to 60 s, reset by a success. A tile is
+  asked for up to `IMAGERY_TRIES` (6) times; 404 is not retried. Logged on
+  the first refusal and every fiftieth; `Rate` and `Refusals` in the
+  settled line.
+- `GDEMTerrainView`: imagery only for meshes on show (`ShowMesh` asks, or
+  cancels when hidden; `MakeMesh` no longer asks, as meshes are made
+  hidden), so hidden parents (227 of 1017 here) fetch nothing. A failure
+  is retried after `IMAGERY_RETRY_MS` (60 s) (`ImageryFailedAt` replaces
+  `ImageryFailed`); `SweepImagery` every 5 s asks for any patch on show
+  that has none. A one-off `3D: vertex layout` line gives the buffer's
+  size, format and the offsets found (-1 not found), to see why vertices
+  went through FMX's setters (the colour or texture coordinates were not
+  found by their markers, or the format has no colour).
+- Not reported yet: how the imagery looked (orientation, colour, seams).
+
+### Realistic imagery, second run (28 October 2026)
+
+With the pacing (N36W002, detail 3601, distance High, x1): `imagery: 407
+textures, 87 ms each, 189 tiles downloaded, 0 still to come, 0 could not
+be made; EOX pace 32.0 tiles a second, 0 refused so far`, settled in
+5963 ms; the cache held 2,793 tiles, 23 MB, from the first run (measured
+in 38 ms). The window's display was `\\.\DISPLAY6` at 60 Hz. GPU memory
+983 MB without imagery, 988 MB with 407 textures. The layout line:
+`72 bytes a vertex, format Vertex Normal ColorF0 TexCoord0 BiNormal
+Tangent; position at 0, normal at 12, colour at -1, texture at 24`.
+So Gorilla3D's meshes keep colour as `ColorF0` (four floats), which FMX's
+`Color0` setter fills (hence colours always showed), and the 4-byte marker
+search never found it: every mesh went through the setters. Now
+`FillVertices` also looks for the marker as four floats
+(`TAlphaColorF.Create(SENTINEL)`, within 1e-5, on 4-byte steps) and
+copies `TAlphaColorF` straight in; the layout line gives both offsets.
+Not yet built. The owner has not yet said how the imagery looks.
+
+### Imagery: patches going black, then back (28 October 2026)
+
+Owner: "some textures go black then reload". The likely cause: when a
+patch split, the tree swapped in its finer patches as soon as their
+meshes were made, and they asked for imagery only when shown, so each
+showed without a texture until its own arrived (and, as the owner saw it,
+black rather than in height colours: to be checked, see below). Now, not
+yet built:
+
+- `GDEMTerrainLod`: `OnMeshReady` (`TTerrainMeshReadyEvent`) and
+  `NodeReady` (failed, or made and `OnMeshReady` agrees); `ChildrenReady`
+  uses it, so a split patch stays on show until its finer ones are ready;
+  and a patch being put back together that is made but not ready keeps
+  its finer ones on show until it is.
+- `GDEMTerrainView.MeshReady`: with Realistic on, a mesh is ready once it
+  has its texture, its texture failed, or it was asked for
+  `IMAGERY_WAIT_MS` (2 s) ago; it asks for it at once if not asked, so
+  hidden patches waiting to take over fetch imagery. `ShowMesh` no longer
+  cancels a hidden patch's request (only `ReleaseMesh` does). The tree
+  looks again when a texture arrives or fails (`FImageryArrived`), and
+  every `IMAGERY_LOOK_MS` (100 ms) while any is pending, so a wait that
+  runs out takes effect.
+- Still to find out: whether patches without imagery are black rather
+  than height coloured. If so, the float colour copy (`ColorF0`, the
+  previous zip) or the vertex-colour material is at fault; compare with
+  Realistic off, and with the previous build.
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection
@@ -1322,3 +1810,46 @@ reasons are here.
 - On macOS, `NSProcessInfo` `beginActivityWithOptions:reason:` with
   `NSActivityUserInitiated` prevents idle sleep and App Nap; the returned
   activity is retained until `endActivity:`.
+- Delphi anonymous methods capture variables, not their values: tasks
+  started in a loop from the same locals would all see the last values.
+  `GDEMTerrainLod.MakeBuildTask` copies its parameters into its own locals
+  and returns the method, so each task gets its own.
+- Gorilla3D facts found for the 3D view (v1.5 docs): the viewport's
+  `NearPlane` and `FarPlane` default to 0.1 and 10000 scene units (FMX's
+  own are 1 and 1000); `FrustumCulling` is on by default; a static mesh's
+  definition keeps its vertex data, so its bounds work after
+  `MeshData.Clear`; desktop index buffers are 32-bit, mobile 16-bit.
+  FMX's `TVertexBuffer` has `Buffer`, `VertexSize`, `VerticesPtr` and
+  `NormalsPtr`, but no pointer for colours.
+- The Python checks (ports of the reader, the terrain and the tree) live
+  only in a session's scratch folder and are lost with it; rewrite them
+  from the Pascal when needed. The real tiles for them are
+  `peardox/volatile`'s `img/iow_dem.tif` and `iow_num.tif`; Pillow reads
+  every overview with `Image.seek`.
+- First build of the level-of-detail view (28 October 2026): in
+  `GDEMTerrainView`, `TMaterialSource` was not declared by the units in
+  its uses, so the field is now `TGorillaVertexColorMaterialSource`
+  (`Gorilla.Material.VertexColor` moved to the interface uses); and
+  `Move(...)` gave E2034 "Too many actual parameters", most likely because
+  a unit used after `System` (probably `Gorilla.DefTypes`, as with
+  `Default`) declares something called `Move`. Write `System.Move` in any
+  unit that uses Gorilla3D.
+- FMX canvas in Delphi 13 (first build of `GDEMTerrainHud`, 28 October
+  2026): `TPolygon` is declared in `System.Math.Vectors`, not in
+  `FMX.Graphics`; `TCanvas.StrokeThickness` is gone, use
+  `Canvas.Stroke.Thickness`.
+- `TTerrainView` could not have a property called `Flight` (E2004
+  "Identifier redeclared", 28 October 2026): something already in scope
+  has the name, not found without the compiler. The property was not
+  needed and was removed; choose another name if one is wanted.
+- FMX's `TVertexBuffer` has `VerticesPtr` and `NormalsPtr` but no
+  `TexCoord0Ptr` (E2003, 28 October 2026), as it has no pointer for
+  colours: `FillVertices` finds the texture coordinates' offset as it finds
+  the colour's, by writing a marker value through the setter and looking
+  for it. `RenameFile` is an inline that wants `Winapi.Windows` (H2443);
+  `TFile.Move` does not.
+- A type used in a unit's interface (a field's type, say) needs its unit
+  in the interface uses, not only the implementation's: one `TStopwatch`
+  field added to `TImageryService`, with `System.Diagnostics` only in the
+  implementation uses, gave 30 errors, most of them knock-on (28 October
+  2026). When adding a field, check the interface uses.
