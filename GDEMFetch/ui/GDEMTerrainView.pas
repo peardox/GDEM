@@ -351,6 +351,10 @@ type
     FOnLabelsToggle: TNotifyEvent;
     { Backing field for @link(OnFlightMoved). }
     FOnFlightMoved: TNotifyEvent;
+    { Backing field for @link(OnCrash). }
+    FOnCrash: TNotifyEvent;
+    { Backing field for @link(OnRestart). }
+    FOnRestart: TNotifyEvent;
     { Backing field for @link(OnSettled). }
     FOnSettled: TTerrainReportEvent;
     { Backing field for @link(OnLog). }
@@ -527,6 +531,10 @@ type
     { Writer for @link(Autopilot).
       @param(AValue @true to turn it on.) }
     procedure SetAutopilot(AValue: Boolean);
+
+    { Writer for @link(FlownKm).
+      @param(AValue Kilometres.) }
+    procedure SetFlownKm(AValue: Double);
 
     { Writer for @link(FlightSpeed).
       @param(AValue Metres a second.) }
@@ -738,6 +746,10 @@ type
     { The flight's speed, metres a second; setting it changes it at once. }
     property FlightSpeed: Double write SetFlightSpeed;
 
+    { How far the current flight has gone, kilometres, shown on the speed
+      panel; less than 0 hides it. Set by whoever records the flight. }
+    property FlownKm: Double write SetFlownKm;
+
     { @true while the controls panel shows only its title. }
     property ControlsCollapsed: Boolean read GetControlsCollapsed write SetControlsCollapsed;
 
@@ -770,6 +782,14 @@ type
     { Told whenever the instruments are updated, as the flight moves or
       the ground under it sharpens; @link(FlightState) says where it is. }
     property OnFlightMoved: TNotifyEvent read FOnFlightMoved write FOnFlightMoved;
+
+    { Told when the flight crashes into the ground; @link(FlightState) says
+      where. }
+    property OnCrash: TNotifyEvent read FOnCrash write FOnCrash;
+
+    { Told when the user starts the flight again (R or a double-click),
+      after it has been put back over the tile. }
+    property OnRestart: TNotifyEvent read FOnRestart write FOnRestart;
   end;
 
 implementation
@@ -1242,6 +1262,8 @@ begin
     FOnLog(Self, Format('3D: crashed into the ground at %s (ground %s), heading %.0f, ' +
       '%s km/h', [LWhere, FormatHudHeight(FFlight.Altitude), FFlight.Heading,
        FormatFloat('#,##0', ASpeed * 3.6)]));
+  if Assigned(FOnCrash) then
+    FOnCrash(Self);
 end;
 
 procedure TTerrainView.TimerTick(Sender: TObject);
@@ -1947,6 +1969,8 @@ begin
   inherited;
   FDragging := False;
   ResetView;
+  if Assigned(FOnRestart) then
+    FOnRestart(Self);
 end;
 
 { Which flight control a key is.
@@ -2025,7 +2049,11 @@ begin
       FFlight.SpeedTo(MACH_1_SPEED, MACH_1_SECONDS);
   end
   else if (Key = vkR) or ((Key = 0) and (UpCase(KeyChar) = 'R')) then
-    ResetView
+  begin
+    ResetView;
+    if Assigned(FOnRestart) then
+      FOnRestart(Self);
+  end
   else
     Exit;
   Key := 0;
@@ -2207,6 +2235,12 @@ procedure TTerrainView.SetAutopilot(AValue: Boolean);
 begin
   FFlight.Autopilot := AValue;
   UpdateInstruments;
+end;
+
+procedure TTerrainView.SetFlownKm(AValue: Double);
+begin
+  if FSpeedPanel <> nil then
+    FSpeedPanel.FlownKm := AValue;
 end;
 
 procedure TTerrainView.SetFlightSpeed(AValue: Double);

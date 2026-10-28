@@ -130,7 +130,7 @@ const
 
   { The camera's starting tilt: degrees below the level, a shallow look
     down ahead. }
-  DEFAULT_FLIGHT_TILT = 20;
+  DEFAULT_FLIGHT_TILT = 10;
 
   { The camera's least tilt, degrees: a little above the level. }
   MIN_FLIGHT_TILT = -30;

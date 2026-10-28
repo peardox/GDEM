@@ -88,7 +88,7 @@ uses
   GDEMCancel, GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex,
   GDEMStore, GDEMThemes, GDEMReport, GDEMVectors, GDEMTileCache, GDEMMarkers,
   GDEMSearch, GDEMViewOptions, GDEMEasterEggs, GDEMTerrainLod, GDEMTerrainView, GDEMImagery,
-  GDEMBookmarks, ProgressForm;
+  GDEMBookmarks, GDEMFlightPath, System.Generics.Collections, ProgressForm;
 
 const
   { The window's title, before the mode. }
@@ -125,6 +125,10 @@ const
   { Kilometres shown round a mountain found by the search. }
   PEAK_VIEW_KM = 40;
 
+  { The least area, kilometres across, the map shows round a flight path
+    in flight when switching to the Map tab. }
+  FLIGHT_PATH_VIEW_KM = 30;
+
   { Milliseconds after the 3D view has made all its patches before its
     memory use is logged, so the frames drawn meanwhile have sent them to
     the graphics processor. }
@@ -150,6 +154,13 @@ type
     mnuSettings: TMenuItem;
     { File > Refresh Tile Index: rebuilds the tile index from CMR. }
     mnuRefreshIndex: TMenuItem;
+    { Separator above the flight path items. }
+    mnuFlightSep: TMenuItem;
+    { File > Save Flight Path: saves the current flight's path. }
+    mnuSaveFlightPath: TMenuItem;
+    { File > Save All Flight Paths: saves every flight's path since the
+      program started. }
+    mnuSaveAllFlightPaths: TMenuItem;
     { Separator above @link(mnuExit). Hidden on macOS. }
     mnuFileSep: TMenuItem;
     { File > Exit. Hidden on macOS, where Quit is in the application menu. }
@@ -234,6 +245,8 @@ type
     mnuShowPlaces: TMenuItem;
     { View > Show Markers. }
     mnuShowMarkers: TMenuItem;
+    { View > Show Flight Path. }
+    mnuShowFlightPath: TMenuItem;
     { The Markers menu. }
     mnuMarkers: TMenuItem;
     { Markers > Add Marker at Map Centre... }
@@ -435,6 +448,19 @@ type
       @param(Sender The menu item, which checks itself.) }
     procedure mnuShowMarkersClick(Sender: TObject);
 
+    { Shows or hides the flight path on the map.
+      @param(Sender The menu item, which checks itself.) }
+    procedure mnuShowFlightPathClick(Sender: TObject);
+
+    { Saves the current flight's path to a @code(.flt) file.
+      @param(Sender The menu item.) }
+    procedure mnuSaveFlightPathClick(Sender: TObject);
+
+    { Saves every flight's path since the program started to one
+      @code(.flt) file.
+      @param(Sender The menu item.) }
+    procedure mnuSaveAllFlightPathsClick(Sender: TObject);
+
     { Asks for a name and adds a marker in the middle of the map.
       @param(Sender The menu item.) }
     procedure mnuAddMarkerClick(Sender: TObject);
@@ -604,6 +630,17 @@ type
       lines, imagery, fetching ahead), kept out of the Debug tab; made at
       the first line, one file per run of the program; @nil until then. }
     FFlightLog: TDownloadReport;
+    { Every flight's path since the program started, oldest first; the
+      last is the current flight's. }
+    FFlights: TObjectList<TFlightPath>;
+    { @true if the Preparing for flight under way starts a new flight
+      (and so a new path); @false when it only makes the view again. }
+    FPrepareNewFlight: Boolean;
+    { The name the path started by the Preparing for flight under way gets. }
+    FPrepareFlightName: string;
+    { The name for the next flight's path, set before
+      @link(PrepareFlight) by what starts it; used once. }
+    FNextFlightName: string;
     { Ticks of @link(FStatusTimer) since the last look ahead. }
     FAheadTicks: Integer;
     { The download of tiles ahead of the flight running now; @nil when
@@ -792,6 +829,31 @@ type
       @param(AText The line.) }
     procedure FlightLog(const AText: string);
 
+    { The current flight's path; @nil before the first flight.
+      @returns(The path.) }
+    function CurrentFlightPath: TFlightPath;
+
+    { Starts a new flight path where the flight is, ending the current one
+      (as Flight Ended) if it has not ended.
+      @param(AName Where it starts.) }
+    procedure StartFlightPath(const AName: string);
+
+    { Ends the current flight path as crashed.
+      @param(Sender The view.) }
+    procedure TerrainCrash(Sender: TObject);
+
+    { Starts a new flight path when the user starts the flight again.
+      @param(Sender The view.) }
+    procedure TerrainRestart(Sender: TObject);
+
+    { Shows the current flight's path on the map. }
+    procedure ShowFlightPathOnMap;
+
+    { Asks where to save flight paths and saves them.
+      @param(AFlights The paths.)
+      @param(AWhat What is saved, for the log, such as @code(1 flight path).) }
+    procedure SaveFlightPathsAs(const AFlights: TArray<TFlightPathRecord>; const AWhat: string);
+
     { The distance detail chosen on the 3D tab.
       @returns(Tenths, from @code(TERRAIN_RANGES).) }
     function ChosenTerrainRange: Integer;
@@ -927,9 +989,12 @@ type
       @param(APlace Places the flight once the view has the tile, such as
         @code(StartLookingAt) or @code(JumpTo).)
       @param(AFinish Run once the dialog has closed and the view is ready,
-        not if aborted, such as to set the flight moving; may be @nil.) }
+        not if aborted, such as to set the flight moving; may be @nil.)
+      @param(ANewFlight @true (the default) if this starts a new flight, and
+        so a new flight path (named @link(FNextFlightName), or the tile);
+        @false when it only makes the view again for the same flight.) }
     procedure PrepareFlight(const ATile: string; ALatitude, ALongitude: Double;
-      const APlace: TProc; const AFinish: TProc = nil);
+      const APlace: TProc; const AFinish: TProc = nil; ANewFlight: Boolean = True);
 
     { Ends Preparing for flight once its dialog has closed: uncovers the
       view and, if it is ready, shows the 3D tab and runs what
@@ -1417,7 +1482,7 @@ uses
   {$ENDIF}
   GDEMTiles, GDEMDownloadBatch, GDEMDrawing, GDEMMapTiles, GDEMTileSet, GDEMGpuPreference,
   GDEMTerrain, GDEMSystemInfo, GDEMTerrainHud, SettingsForm, MarkersForm, BookmarkForm,
-  System.DateUtils, System.Generics.Collections, System.Generics.Defaults, GDEMFlight;
+  System.DateUtils, System.Generics.Defaults, GDEMFlight;
 
 const
   { Ticks of the status timer (a second each) between looks for tiles
@@ -1560,6 +1625,7 @@ begin
   // After the menu bar is in place (on Linux, the copy), so the items go
   // under the Bookmarks menu in use
   FBookmarks := TBookmarkList.Create;
+  FFlights := TObjectList<TFlightPath>.Create(True);
   LoadBookmarks;
   BuildBookmarksMenu;
   LoadEasterEggs;
@@ -1616,9 +1682,12 @@ begin
     FTerrainView.OnControlsToggle := nil;
     FTerrainView.OnLabelsToggle := nil;
     FTerrainView.OnFlightMoved := nil;
+    FTerrainView.OnCrash := nil;
+    FTerrainView.OnRestart := nil;
   end;
   FreeAndNil(FBookmarks);
   FreeAndNil(FFlightLog);
+  FreeAndNil(FFlights);
   FMap.Vectors := nil;
   FVectors.Free;
   FMap.MapTiles := nil;
@@ -1817,6 +1886,7 @@ begin
   mnuShowMapTiles.IsChecked := FViewOptions.ShowMapTiles;
   mnuShowPlaces.IsChecked := FViewOptions.ShowPlaces;
   mnuShowMarkers.IsChecked := FViewOptions.ShowMarkers;
+  mnuShowFlightPath.IsChecked := FViewOptions.ShowFlightPath;
   ApplyViewMenu;
 end;
 
@@ -1829,6 +1899,7 @@ begin
   FMap.ShowMapTiles := mnuShowMapTiles.IsChecked;
   FMap.ShowPlaces := mnuShowPlaces.IsChecked;
   FMap.ShowMarkers := mnuShowMarkers.IsChecked;
+  FMap.ShowFlightPath := mnuShowFlightPath.IsChecked;
 end;
 
 function TfrmMain.ViewLayerItem(ALayer: TViewLayer): TMenuItem;
@@ -1929,6 +2000,7 @@ begin
   FViewOptions.ShowMapTiles := mnuShowMapTiles.IsChecked;
   FViewOptions.ShowPlaces := mnuShowPlaces.IsChecked;
   FViewOptions.ShowMarkers := mnuShowMarkers.IsChecked;
+  FViewOptions.ShowFlightPath := mnuShowFlightPath.IsChecked;
   try
     FViewOptions.Save;
   except
@@ -2115,6 +2187,8 @@ begin
       FTerrainView.OnLabelsToggle := TerrainLabelsToggle;
       FTerrainView.OnFlightMoved := TerrainFlightMoved;
       FTerrainView.OnMouseDown := TerrainMouseDown;
+      FTerrainView.OnCrash := TerrainCrash;
+      FTerrainView.OnRestart := TerrainRestart;
       FTerrainView.ShowLabels := FViewOptions.TerrainLabels;
       FTerrainView.Autopilot := FViewOptions.TerrainAutopilot;
       FTerrainView.GroundHug := FViewOptions.TerrainGroundHug;
@@ -2300,7 +2374,7 @@ begin
 end;
 
 procedure TfrmMain.PrepareFlight(const ATile: string; ALatitude, ALongitude: Double;
-  const APlace: TProc; const AFinish: TProc);
+  const APlace: TProc; const AFinish: TProc; ANewFlight: Boolean);
 var
   LMissing: TArray<string>;
   LTile: TPoint;
@@ -2315,6 +2389,7 @@ var
   LTileArg: string;
   LLatitude, LLongitude: Double;
   LPlaceArg, LFinishArg: TProc;
+  LNewFlightArg: Boolean;
 begin
   // Tiles being fetched ahead of the flight give way: stopped, and this
   // tried again once they have
@@ -2326,10 +2401,11 @@ begin
     LLongitude := ALongitude;
     LPlaceArg := APlace;
     LFinishArg := AFinish;
+    LNewFlightArg := ANewFlight;
     TThread.ForceQueue(nil,
       procedure
       begin
-        PrepareFlight(LTileArg, LLatitude, LLongitude, LPlaceArg, LFinishArg);
+        PrepareFlight(LTileArg, LLatitude, LLongitude, LPlaceArg, LFinishArg, LNewFlightArg);
       end, 200);
     Exit;
   end;
@@ -2377,6 +2453,12 @@ begin
   FPrepareCancelled := False;
   FPrepareDone := False;
   FPrepareFinish := AFinish;
+  FPrepareNewFlight := ANewFlight;
+  if FNextFlightName <> '' then
+    FPrepareFlightName := FNextFlightName
+  else
+    FPrepareFlightName := ATile;
+  FNextFlightName := '';
   // The view is hidden until it is ready, so the new place and its
   // imagery are not seen coming in, even behind the dialog
   if FTerrainView <> nil then
@@ -2480,6 +2562,10 @@ begin
     FTerrainView.Covered := False;
   if not FPrepareDone then
     Exit;
+  // A new flight, and its path, from where it now is; so also when the
+  // last one crashed and the view was only made again
+  if FPrepareNewFlight or (CurrentFlightPath = nil) or CurrentFlightPath.Ended then
+    StartFlightPath(FPrepareFlightName);
   tabMain.ActiveTab := tab3D;
   FocusTerrainView;
   if Assigned(LFinish) then
@@ -2650,10 +2736,22 @@ end;
 procedure TfrmMain.TerrainFlightMoved(Sender: TObject);
 var
   LState: TTerrainFlightState;
+  LPath: TFlightPath;
 begin
-  if (FTerrainView = nil) or (tabMain.ActiveTab <> tab3D) or not FTerrainView.HasTerrain then
+  if (FTerrainView = nil) or not FTerrainView.HasTerrain then
     Exit;
   LState := FTerrainView.FlightState;
+  // The path follows the flight whichever tab is showing
+  LPath := CurrentFlightPath;
+  if (LPath <> nil) and not LPath.Ended then
+    LPath.Update(LState.Latitude, LState.Longitude, LState.Heading);
+  // How far it has come, on the speed panel
+  if LPath <> nil then
+    FTerrainView.FlownKm := LPath.DistanceKm
+  else
+    FTerrainView.FlownKm := -1;
+  if tabMain.ActiveTab <> tab3D then
+    Exit;
   lblHover.Text := FormatLat(LState.Latitude) + '  ' + FormatLon(LState.Longitude);
   if LastFetchText <> '' then
     lblHover.Text := lblHover.Text + '   ' + LastFetchText;
@@ -2878,6 +2976,9 @@ procedure TfrmMain.TabMainChange(Sender: TObject);
 begin
   // It belongs to the other tab's box
   HideSearchList;
+  // The current flight's path, as it is now, on the map
+  if tabMain.ActiveTab = tabMap then
+    ShowFlightPathOnMap;
   if tabMain.ActiveTab = tab3D then
     TerrainFlightMoved(FTerrainView)
   else
@@ -3005,7 +3106,7 @@ begin
         begin
           if LSpeed > 0 then
             FTerrainView.FlightSpeed := LSpeed;
-        end);
+        end, False);
     end);
 end;
 
@@ -3132,6 +3233,7 @@ begin
   if (AIndex < 0) or (AIndex >= FBookmarks.Count) then
     Exit;
   LBookmark := FBookmarks[AIndex];
+  FNextFlightName := 'Bookmark: ' + LBookmark.Name;
 
   // The ground round it; then, hidden behind the dialog, drawn as it was
   // and the flight back from its flag along its heading, at its height,
@@ -3568,6 +3670,7 @@ begin
   SetFlightTarget(LLatitude, LLongitude);
   AddLog(Format('3D: flying to %s, %s %s', [LName, FormatLat(LLatitude),
     FormatLon(LLongitude)]));
+  FNextFlightName := LName;
   PrepareFlight(TileNameAt(LLatitude, LLongitude), LLatitude, LLongitude,
     procedure
     begin
@@ -3862,6 +3965,179 @@ procedure TfrmMain.mnuShowMarkersClick(Sender: TObject);
 begin
   FMap.ShowMarkers := mnuShowMarkers.IsChecked;
   SaveViewOptions;
+end;
+
+procedure TfrmMain.mnuShowFlightPathClick(Sender: TObject);
+begin
+  FMap.ShowFlightPath := mnuShowFlightPath.IsChecked;
+  SaveViewOptions;
+end;
+
+{ Flight paths }
+
+function TfrmMain.CurrentFlightPath: TFlightPath;
+begin
+  if (FFlights = nil) or (FFlights.Count = 0) then
+    Exit(nil);
+  Result := FFlights.Last;
+end;
+
+procedure TfrmMain.StartFlightPath(const AName: string);
+var
+  LState: TTerrainFlightState;
+  LPath: TFlightPath;
+begin
+  if (FTerrainView = nil) or not FTerrainView.HasTerrain then
+    Exit;
+  LState := FTerrainView.FlightState;
+  LPath := CurrentFlightPath;
+  if (LPath <> nil) and not LPath.Ended then
+  begin
+    LPath.Finish(FLIGHT_END_ENDED, LState.Latitude, LState.Longitude, LState.Heading);
+    FlightLog(Format('3D: flight path %d ended (%s, %.1f km, %d points)', [FFlights.Count,
+      LPath.EndReason, LPath.DistanceKm, LPath.PointCount]));
+  end;
+  LPath := TFlightPath.Create(LState.Latitude, LState.Longitude, LState.Heading, AName);
+  FFlights.Add(LPath);
+  FlightLog(Format('3D: flight path %d started at %s %s (%s)', [FFlights.Count,
+    FormatLat(LState.Latitude), FormatLon(LState.Longitude), AName]));
+end;
+
+procedure TfrmMain.TerrainCrash(Sender: TObject);
+var
+  LState: TTerrainFlightState;
+  LPath: TFlightPath;
+begin
+  LPath := CurrentFlightPath;
+  if (LPath = nil) or LPath.Ended or (FTerrainView = nil) then
+    Exit;
+  LState := FTerrainView.FlightState;
+  LPath.Finish(FLIGHT_END_CRASHED, LState.Latitude, LState.Longitude, LState.Heading);
+  AddLog(Format('3D: flight path ended: crashed after %.1f km (%d points)',
+    [LPath.DistanceKm, LPath.PointCount]));
+end;
+
+procedure TfrmMain.TerrainRestart(Sender: TObject);
+begin
+  StartFlightPath(FTerrainTile + ', started again');
+end;
+
+procedure TfrmMain.ShowFlightPathOnMap;
+var
+  LPath: TFlightPath;
+  LTrack: TArray<TPointF>;
+  LNorth, LSouth, LWest, LEast, LLon, LShift, LHalf, LMiddle: Double;
+  I: Integer;
+begin
+  LPath := CurrentFlightPath;
+  if LPath = nil then
+  begin
+    FMap.SetFlightPath(nil, False);
+    Exit;
+  end;
+  LTrack := LPath.Track;
+  FMap.SetFlightPath(LTrack, LPath.EndReason = FLIGHT_END_CRASHED);
+  // Still flying: the map fits the whole path, with longitudes unwrapped
+  // as the map draws them, so a crossing of 180 degrees goes the short way
+  if LPath.Ended or (Length(LTrack) = 0) or not FMap.ShowFlightPath then
+    Exit;
+  LNorth := LTrack[0].Y;
+  LSouth := LTrack[0].Y;
+  LLon := LTrack[0].X;
+  LWest := LLon;
+  LEast := LLon;
+  for I := 1 to High(LTrack) do
+  begin
+    LShift := LTrack[I].X - LTrack[I - 1].X;
+    LShift := LShift - 360 * Round(LShift / 360);
+    LLon := LLon + LShift;
+    LWest := Min(LWest, LLon);
+    LEast := Max(LEast, LLon);
+    LNorth := Max(LNorth, LTrack[I].Y);
+    LSouth := Min(LSouth, LTrack[I].Y);
+  end;
+  // Never closer than a small area round it, so a short flight is not
+  // shown blown up to the closest zoom
+  LHalf := FLIGHT_PATH_VIEW_KM / 2 / KM_PER_DEGREE;
+  if LNorth - LSouth < 2 * LHalf then
+  begin
+    LMiddle := (LNorth + LSouth) / 2;
+    LNorth := LMiddle + LHalf;
+    LSouth := LMiddle - LHalf;
+  end;
+  LHalf := LHalf / Max(Cos(DegToRad((LNorth + LSouth) / 2)), 0.01);
+  if LEast - LWest < 2 * LHalf then
+  begin
+    LMiddle := (LEast + LWest) / 2;
+    LWest := LMiddle - LHalf;
+    LEast := LMiddle + LHalf;
+  end;
+  FMap.ZoomToArea(Min(LNorth, 90), Max(LSouth, -90), LWest, LEast);
+end;
+
+procedure TfrmMain.SaveFlightPathsAs(const AFlights: TArray<TFlightPathRecord>;
+  const AWhat: string);
+var
+  LDialog: TSaveDialog;
+  LFolder: string;
+begin
+  LDialog := TSaveDialog.Create(nil);
+  try
+    LFolder := System.IOUtils.TPath.Combine(TGDEMSettings.SettingsFolder, 'Flights');
+    try
+      ForceDirectories(LFolder);
+    except
+      // Then the dialog starts wherever the system chooses
+    end;
+    LDialog.InitialDir := LFolder;
+    LDialog.Filter := 'Flight paths (*' + FLIGHT_PATH_EXTENSION + ')|*' + FLIGHT_PATH_EXTENSION +
+      '|All files (*.*)|*.*';
+    LDialog.DefaultExt := FLIGHT_PATH_EXTENSION.Substring(1);
+    LDialog.FileName := FormatDateTime('"flight-"yyyymmdd"-"hhnnss', Now) + FLIGHT_PATH_EXTENSION;
+    LDialog.Options := LDialog.Options + [TOpenOption.ofOverwritePrompt];
+    if not LDialog.Execute then
+      Exit;
+    try
+      SaveFlightPaths(ChangeFileExt(LDialog.FileName, FLIGHT_PATH_EXTENSION), AFlights);
+      AddLog(Format('Saved %s to %s', [AWhat, ChangeFileExt(LDialog.FileName,
+        FLIGHT_PATH_EXTENSION)]));
+    except
+      on E: Exception do
+        ReportError(E.Message);
+    end;
+  finally
+    LDialog.Free;
+  end;
+end;
+
+procedure TfrmMain.mnuSaveFlightPathClick(Sender: TObject);
+var
+  LPath: TFlightPath;
+begin
+  LPath := CurrentFlightPath;
+  if LPath = nil then
+  begin
+    ShowMessage('There is no flight path yet: fly in the 3D view first.');
+    Exit;
+  end;
+  SaveFlightPathsAs([LPath.ToRecord], Format('the current flight path (%s, %.1f km)',
+    [LPath.EndReason, LPath.DistanceKm]));
+end;
+
+procedure TfrmMain.mnuSaveAllFlightPathsClick(Sender: TObject);
+var
+  LRecords: TArray<TFlightPathRecord>;
+  LPath: TFlightPath;
+begin
+  if (FFlights = nil) or (FFlights.Count = 0) then
+  begin
+    ShowMessage('There are no flight paths yet: fly in the 3D view first.');
+    Exit;
+  end;
+  LRecords := nil;
+  for LPath in FFlights do
+    LRecords := LRecords + [LPath.ToRecord];
+  SaveFlightPathsAs(LRecords, Format('%d flight path(s)', [Length(LRecords)]));
 end;
 
 procedure TfrmMain.mnuAddMarkerClick(Sender: TObject);

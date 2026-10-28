@@ -100,6 +100,8 @@ type
     FShowPlaces: Boolean;
     { Backing field for @link(ShowMarkers). }
     FShowMarkers: Boolean;
+    { Backing field for @link(ShowFlightPath). }
+    FShowFlightPath: Boolean;
     { Backing field for @link(DrawingSuggestionMade). }
     FDrawingSuggestionMade: Boolean;
     { Backing field for @link(TerrainDetail). }
@@ -160,6 +162,9 @@ type
 
     { The user's markers are drawn. On by default. }
     property ShowMarkers: Boolean read FShowMarkers write FShowMarkers;
+
+    { The current flight path is drawn on the map. On by default. }
+    property ShowFlightPath: Boolean read FShowFlightPath write FShowFlightPath;
 
     { @true once layers have been turned on to suit a faster way of
       drawing (see @link(SuggestedViewLayers)), so it happens only the
@@ -269,6 +274,7 @@ begin
   FShowMapTiles := False;
   FShowPlaces := False;
   FShowMarkers := True;
+  FShowFlightPath := True;
   // Written out, as GDEMTerrain's defaults, so this unit stays small
   FTerrainDetail := 3601;
   FTerrainHeights := 2;

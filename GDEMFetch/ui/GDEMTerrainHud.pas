@@ -33,7 +33,7 @@ const
     panel. }
   FRAME_RATE_HEIGHT = 24;
   { The speed panel's height, pixels; it is as wide as the height panel. }
-  SPEED_PANEL_HEIGHT = 56;
+  SPEED_PANEL_HEIGHT = 74;
   { The banner's width, pixels. }
   BANNER_WIDTH = 420;
   { The banner's height, pixels. }
@@ -219,6 +219,12 @@ type
     FTilt: Double;
     { Backing field for @link(AutopilotText). }
     FAutopilotText: string;
+    { Backing field for @link(FlownKm). }
+    FFlownKm: Double;
+
+    { Writer for @link(FlownKm).
+      @param(AValue Kilometres.) }
+    procedure SetFlownKm(AValue: Double);
 
     { Writer for @link(AutopilotText).
       @param(AValue The text.) }
@@ -250,6 +256,10 @@ type
     { What the autopilot is doing, shown at the right of the camera line:
       empty when it is off. }
     property AutopilotText: string read FAutopilotText write SetAutopilotText;
+
+    { How far the flight has gone since it started, kilometres along the
+      ground, shown on a third line; less than 0 hides it. }
+    property FlownKm: Double read FFlownKm write SetFlownKm;
   end;
 
   { @abstract(A banner across the middle of the view, for news such as a
@@ -854,6 +864,7 @@ begin
   inherited Create(AOwner);
   HitTest := False;
   FTilt := -1000;
+  FFlownKm := -1;
   SetBounds(0, 0, ALTIMETER_WIDTH, SPEED_PANEL_HEIGHT);
 end;
 
@@ -863,6 +874,15 @@ begin
   if (Abs(AValue - FSpeed) < SPEED_STEP) and ((AValue <> 0) or (FSpeed = 0)) then
     Exit;
   FSpeed := AValue;
+  Repaint;
+end;
+
+procedure TTerrainSpeedPanel.SetFlownKm(AValue: Double);
+begin
+  // Drawn again only when the figure shown changes
+  if FormatFloat('0.0', AValue) = FormatFloat('0.0', FFlownKm) then
+    Exit;
+  FFlownKm := AValue;
   Repaint;
 end;
 
@@ -922,13 +942,24 @@ begin
   else
     LTiltText := 'Camera level';
   Canvas.Fill.Color := HUD_DIM;
-  Canvas.FillText(RectF(10, 32, Width - 10, Height - 4), LTiltText, False, 1, [],
+  Canvas.FillText(RectF(10, 32, Width - 10, 52), LTiltText, False, 1, [],
     TTextAlign.Leading, TTextAlign.Center);
   if FAutopilotText <> '' then
   begin
     Canvas.Fill.Color := HUD_ACCENT;
-    Canvas.FillText(RectF(10, 32, Width - 10, Height - 4), FAutopilotText, False, 1, [],
+    Canvas.FillText(RectF(10, 32, Width - 10, 52), FAutopilotText, False, 1, [],
       TTextAlign.Trailing, TTextAlign.Center);
+  end;
+  // How far this flight has gone
+  if FFlownKm >= 0 then
+  begin
+    Canvas.Fill.Color := HUD_DIM;
+    if FFlownKm < 100 then
+      LText := FormatFloat('#,##0.0', FFlownKm) + ' km flown'
+    else
+      LText := FormatFloat('#,##0', FFlownKm) + ' km flown';
+    Canvas.FillText(RectF(10, 52, Width - 10, Height - 4), LText, False, 1, [],
+      TTextAlign.Leading, TTextAlign.Center);
   end;
 end;
 

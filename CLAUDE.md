@@ -2129,6 +2129,56 @@ Not yet built.
   preparing / ready for flight, showing, bookmarks, autopilot and hugging
   switches, heights and Realistic changes, all warnings.
 
+### Flight paths, camera 10 degrees, distance flown (28 October 2026)
+
+The owner: a flight path layer on the main map. Record lat/lon and
+heading when a flight starts and at each change of heading (height of no
+concern); the current position ends the last line. Save to a JSON file,
+`.flt`, a flight in progress ending with the current position; end
+reasons "Crashed", "Flight Ended" (a new flight started) and "In Flight";
+several paths saveable. Only the current path drawn, when switching from
+the 3D to the Map tab. Then: default camera 10 degrees down; in flight,
+the map must show all of the path at a suitable zoom when the tab
+switches; distance travelled on the 3D readouts. Not yet built.
+
+- `lib/GDEMFlightPath` (new; in the `.dpr` and `.dproj`): `TFlightPoint`
+  (lat, lon, heading, time UTC), `TFlightPathRecord` (name, started,
+  ended, endReason, distanceKm, points), `TFlightPathFile` (format 1,
+  program, saved, flights), Neon records. `TFlightPath`: created with the
+  start point; `Update` adds a point when the heading has changed by
+  `FLIGHT_PATH_TURN` (1 degree) since the last point and the flight has
+  moved `FLIGHT_PATH_MIN_MOVE` (1 m) from it (the great circle's own
+  turning makes points on long straight flights too, about one a degree);
+  `Finish(reason, place)`; `Track` (points plus the live position, X =
+  lon); `DistanceKm` (haversine along the points to the live position);
+  `ToRecord` (in flight: ends at the live position now).
+  `SaveFlightPaths` (atomic). `GroundDistance`.
+- `MainForm`: `FFlights` (`TObjectList<TFlightPath>`, the session's);
+  `StartFlightPath(name)` ends the current one as Flight Ended and starts
+  one at the flight's state; called from `FinishPreparing` when
+  `FPrepareNewFlight` (launches; `RelaunchTerrain` passes false, so a
+  settings change carries on the flight) or when there is none or the
+  last ended; named from `FNextFlightName` (search hit, `Bookmark:
+  <name>`) or the tile. `TerrainCrash` (view `OnCrash`) finishes it as
+  Crashed; `TerrainRestart` (view `OnRestart`, R and double-click) starts
+  a new one. `TerrainFlightMoved` updates the path on any tab and sets
+  the view's `FlownKm`. `TabMainChange` to the Map tab calls
+  `ShowFlightPathOnMap` (`FMap.SetFlightPath(track, crashed)`, and in
+  flight `ZoomToArea` round the unwrapped path, at least
+  `FLIGHT_PATH_VIEW_KM` 30 km). File > Save Flight Path... / Save All
+  Flight Paths... (`TSaveDialog`, `Flights` in the settings folder,
+  default `flight-yyyymmdd-hhnnss.flt`). View > Show Flight Path
+  (`TViewOptions.ShowFlightPath`, default on).
+- `GDEMWorldMap`: `SetFlightPath`, `ShowFlightPath`, `PaintFlightPath`
+  (after the markers: longitudes unwrapped along the path so 180 degrees
+  is crossed the short way, drawn on every copy in view; cyan line, green
+  start dot, red end dot or a red cross for a crash).
+- `GDEMFlight`: `DEFAULT_FLIGHT_TILT` 10 (was 20): launches start
+  1000 / tan(10) = 5.7 km back from the place; the bookmark dialog's
+  default follows the constant.
+- HUD: speed panel `FlownKm` third line (`12.3 km flown`; whole km from
+  100), `SPEED_PANEL_HEIGHT` 56 to 74; view `FlownKm` property.
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection

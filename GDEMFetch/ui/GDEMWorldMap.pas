@@ -298,6 +298,12 @@ type
     FMarkers: TMarkerList;
     { Backing field for @link(ShowMarkers). }
     FShowMarkers: Boolean;
+    { Backing field for @link(FlightPath). }
+    FFlightPath: TArray<TPointF>;
+    { Backing field for @link(FlightPathCrashed). }
+    FFlightPathCrashed: Boolean;
+    { Backing field for @link(ShowFlightPath). }
+    FShowFlightPath: Boolean;
     { @true while a point is ringed; see @link(ShowHighlight). }
     FHighlight: Boolean;
     { Latitude of the ringed point. }
@@ -534,6 +540,10 @@ type
       @param(AValue @true to draw the markers.) }
     procedure SetShowMarkers(AValue: Boolean);
 
+    { Writer for @link(ShowFlightPath).
+      @param(AValue @true to draw the flight path.) }
+    procedure SetShowFlightPath(AValue: Boolean);
+
     { Draws a label: text on a dark box, so it can be read over any part of
       the map.
       @param(ARect Where the box goes.)
@@ -562,6 +572,13 @@ type
       @param(AWest Westernmost longitude on screen, not wrapped.)
       @param(AEast Easternmost longitude on screen, not wrapped.) }
     procedure PaintMarkers(AWest, AEast: Double);
+
+    { Draws the flight path: its lines, a dot where it started, and where
+      it ends a dot (still flying) or a cross (crashed). Drawn on every
+      copy of the map in view, and across 180 degrees the short way.
+      @param(AWest Westernmost longitude on screen, not wrapped.)
+      @param(AEast Easternmost longitude on screen, not wrapped.) }
+    procedure PaintFlightPath(AWest, AEast: Double);
 
     { Writer for @link(ShowMapTiles).
       @param(AValue @true to draw the high-resolution map.) }
@@ -822,6 +839,21 @@ type
     { Whether @link(Markers) are drawn. On by default. }
     property ShowMarkers: Boolean read FShowMarkers write SetShowMarkers;
 
+    { Shows a flight path, as points with X the longitude and Y the
+      latitude, from its start to where it ends or the flight is now.
+      @param(APoints The points, in order; empty for none.)
+      @param(ACrashed @true if it ended in a crash, marked with a cross.) }
+    procedure SetFlightPath(const APoints: TArray<TPointF>; ACrashed: Boolean);
+
+    { The flight path shown; see @link(SetFlightPath). }
+    property FlightPath: TArray<TPointF> read FFlightPath;
+
+    { @true if the flight path shown ended in a crash. }
+    property FlightPathCrashed: Boolean read FFlightPathCrashed;
+
+    { Whether the flight path is drawn. On by default. }
+    property ShowFlightPath: Boolean read FShowFlightPath write SetShowFlightPath;
+
     { Fired by a left click with Ctrl (or Cmd, on a Mac) held that does not
       move: no selection is made. }
     property OnMarkerClick: TMapPointEvent read FOnMarkerClick write FOnMarkerClick;
@@ -969,6 +1001,16 @@ const
   HIGHLIGHT_COLOR = $FFFFEB3B;
   { Radius of that ring, in pixels. }
   HIGHLIGHT_RADIUS = 13;
+  { Colour of the flight path. }
+  FLIGHT_PATH_COLOR = $FF00E5FF;
+  { Colour of the dot where the flight path starts. }
+  FLIGHT_START_COLOR = $FF4CFF6A;
+  { Colour of the mark where the flight path ends. }
+  FLIGHT_END_COLOR = $FFFF3B3B;
+  { Width of the flight path's lines, pixels. }
+  FLIGHT_PATH_WIDTH = 2.5;
+  { Radius of the flight path's end marks, pixels. }
+  FLIGHT_MARK_RADIUS = 5;
 
 { TWorldMapView }
 
@@ -1006,6 +1048,7 @@ begin
   FTileTimer.OnTimer := TileTimerTick;
   FShowPlaces := False;
   FShowMarkers := True;
+  FShowFlightPath := True;
   FLabelWidths := TDictionary<Integer, Single>.Create;
 end;
 
@@ -1803,6 +1846,92 @@ begin
   end;
 end;
 
+procedure TWorldMapView.SetShowFlightPath(AValue: Boolean);
+begin
+  if FShowFlightPath <> AValue then
+  begin
+    FShowFlightPath := AValue;
+    Repaint;
+  end;
+end;
+
+procedure TWorldMapView.SetFlightPath(const APoints: TArray<TPointF>; ACrashed: Boolean);
+begin
+  FFlightPath := Copy(APoints);
+  FFlightPathCrashed := ACrashed;
+  Repaint;
+end;
+
+procedure TWorldMapView.PaintFlightPath(AWest, AEast: Double);
+var
+  LLons: TArray<Double>;
+  LMin, LMax, LShift: Double;
+  LFirst, LLast, LCopy, I: Integer;
+  LFrom, LTo, LMark: TPointF;
+begin
+  if not FShowFlightPath or (Length(FFlightPath) = 0) then
+    Exit;
+  // Longitudes unwrapped along the path, so a crossing of 180 degrees
+  // goes the short way rather than round the world
+  SetLength(LLons, Length(FFlightPath));
+  LLons[0] := FFlightPath[0].X;
+  for I := 1 to High(FFlightPath) do
+  begin
+    LShift := FFlightPath[I].X - FFlightPath[I - 1].X;
+    LShift := LShift - 360 * Round(LShift / 360);
+    LLons[I] := LLons[I - 1] + LShift;
+  end;
+  LMin := LLons[0];
+  LMax := LLons[0];
+  for I := 1 to High(LLons) do
+  begin
+    LMin := Min(LMin, LLons[I]);
+    LMax := Max(LMax, LLons[I]);
+  end;
+  // Every whole turn of the path that is at least partly in view
+  LFirst := Ceil((AWest - LMax) / 360);
+  LLast := Floor((AEast - LMin) / 360);
+  Canvas.Stroke.Kind := TBrushKind.Solid;
+  Canvas.Fill.Kind := TBrushKind.Solid;
+  for LCopy := LFirst to LLast do
+  begin
+    Canvas.Stroke.Color := FLIGHT_PATH_COLOR;
+    Canvas.Stroke.Thickness := FLIGHT_PATH_WIDTH;
+    for I := 1 to High(FFlightPath) do
+    begin
+      LFrom := GeoToScreen(FFlightPath[I - 1].Y, LLons[I - 1] + LCopy * 360);
+      LTo := GeoToScreen(FFlightPath[I].Y, LLons[I] + LCopy * 360);
+      Canvas.DrawLine(LFrom, LTo, 1);
+    end;
+    // Where it started
+    LMark := GeoToScreen(FFlightPath[0].Y, LLons[0] + LCopy * 360);
+    Canvas.Fill.Color := FLIGHT_START_COLOR;
+    Canvas.FillEllipse(TRectF.Create(LMark.X - FLIGHT_MARK_RADIUS, LMark.Y - FLIGHT_MARK_RADIUS,
+      LMark.X + FLIGHT_MARK_RADIUS, LMark.Y + FLIGHT_MARK_RADIUS), 1);
+    // Where it ends: a cross for a crash, otherwise a dot
+    LMark := GeoToScreen(FFlightPath[High(FFlightPath)].Y, LLons[High(LLons)] + LCopy * 360);
+    if FFlightPathCrashed then
+    begin
+      Canvas.Stroke.Color := FLIGHT_END_COLOR;
+      Canvas.Stroke.Thickness := 3;
+      Canvas.DrawLine(PointF(LMark.X - FLIGHT_MARK_RADIUS, LMark.Y - FLIGHT_MARK_RADIUS),
+        PointF(LMark.X + FLIGHT_MARK_RADIUS, LMark.Y + FLIGHT_MARK_RADIUS), 1);
+      Canvas.DrawLine(PointF(LMark.X - FLIGHT_MARK_RADIUS, LMark.Y + FLIGHT_MARK_RADIUS),
+        PointF(LMark.X + FLIGHT_MARK_RADIUS, LMark.Y - FLIGHT_MARK_RADIUS), 1);
+    end
+    else
+    begin
+      Canvas.Fill.Color := FLIGHT_END_COLOR;
+      Canvas.FillEllipse(TRectF.Create(LMark.X - FLIGHT_MARK_RADIUS, LMark.Y - FLIGHT_MARK_RADIUS,
+        LMark.X + FLIGHT_MARK_RADIUS, LMark.Y + FLIGHT_MARK_RADIUS), 1);
+      Canvas.Stroke.Color := TAlphaColors.White;
+      Canvas.Stroke.Thickness := 1.5;
+      Canvas.DrawEllipse(TRectF.Create(LMark.X - FLIGHT_MARK_RADIUS, LMark.Y - FLIGHT_MARK_RADIUS,
+        LMark.X + FLIGHT_MARK_RADIUS, LMark.Y + FLIGHT_MARK_RADIUS), 1);
+    end;
+  end;
+end;
+
 procedure TWorldMapView.PaintLabel(const ARect: TRectF; const AText: string;
   AColor: TAlphaColor);
 begin
@@ -2286,6 +2415,9 @@ begin
         PaintTileRect(FSelection, SELECTION_COLOR, 0, LCopy * 360)
       else
         PaintTileRect(FSelection, SELECTION_COLOR, 0.25, LCopy * 360);
+
+  // The flight path under the names
+  PaintFlightPath(LWest, LEast);
 
   // Names on top of everything, markers above towns and cities
   PaintPlaces(LNorth, LSouth, LWest, LEast);

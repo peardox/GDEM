@@ -108,6 +108,7 @@ uses
   GDEMFlight in 'lib\GDEMFlight.pas',
   GDEMImagery in 'lib\GDEMImagery.pas',
   GDEMBookmarks in 'lib\GDEMBookmarks.pas',
+  GDEMFlightPath in 'lib\GDEMFlightPath.pas',
   BookmarkForm in 'ui\BookmarkForm.pas',
   GDEMDisplays in 'ui\GDEMDisplays.pas',
   GDEMTerrainHud in 'ui\GDEMTerrainHud.pas',

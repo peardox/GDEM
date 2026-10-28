@@ -24,6 +24,17 @@ object frmMain: TfrmMain
         Text = 'Refresh Tile Index'
         OnClick = mnuRefreshIndexClick
       end
+      object mnuFlightSep: TMenuItem
+        Text = '-'
+      end
+      object mnuSaveFlightPath: TMenuItem
+        Text = 'Save Flight Path...'
+        OnClick = mnuSaveFlightPathClick
+      end
+      object mnuSaveAllFlightPaths: TMenuItem
+        Text = 'Save All Flight Paths...'
+        OnClick = mnuSaveAllFlightPathsClick
+      end
       object mnuFileSep: TMenuItem
         Text = '-'
       end
@@ -117,6 +128,12 @@ object frmMain: TfrmMain
         IsChecked = True
         Text = 'Show Markers'
         OnClick = mnuShowMarkersClick
+      end
+      object mnuShowFlightPath: TMenuItem
+        AutoCheck = True
+        IsChecked = True
+        Text = 'Show Flight Path'
+        OnClick = mnuShowFlightPathClick
       end
       object mnuLogSep: TMenuItem
         Text = '-'

@@ -162,6 +162,7 @@ otherwise use showed only the first letter of each menu and item.
 |------|------|------|
 | File | Settings... | Bearer token, data folder, how much of the drive to keep free, files copied at once when importing, download speed, theme, drawing (GPU or CPU), and on Windows which graphics processor to use |
 | File | Refresh Tile Index | Rebuilds the list of tiles that exist, from CMR |
+| File | Save Flight Path... / Save All Flight Paths... | Saves the current flight's path, or every flight's since GDEMFetch started, as a `.flt` file; see [Flight paths](#flight-paths) |
 | Data | Import Existing Tiles... | Copies tiles you already have, from any folder, into the data folder. The originals are not changed. |
 | Data | Move Existing Files... | The same, but deletes each original once it is safely in the data folder; see [Moving instead of copying](#moving-instead-of-copying) |
 | Data | Rescan Data Folder | Rebuilds the downloaded-tiles bitmap from the files, files any misplaced downloads into place, and removes leftovers and empty folders |
@@ -172,6 +173,7 @@ otherwise use showed only the first letter of each menu and item.
 | View | Show Country Borders / Show Coastlines | The borders and coastlines drawn over the map |
 | View | High-Resolution Map | Draws the tile set instead of the plain map (greyed out only if the built-in tile set could not be read) |
 | View | Show Towns and Cities / Show Markers | The place names and the markers drawn on the map |
+| View | Show Flight Path | The current flight's path drawn on the map |
 | View | Copy Log / Clear Log | Copy the Debug tab's log to the clipboard, or empty it |
 | Markers | Add Marker at Map Centre... | Asks for a name and puts a marker in the middle of the map |
 | Markers | Edit Markers... | Lists the markers, to go to, rename or delete them |
@@ -395,7 +397,7 @@ north, 1000 m above the ground there or at the spot, whichever is higher
 (set by `flightStartHeight` in `settings.json`, see below), with the
 camera tilted so the spot is in the middle of the view. So a summit is
 looked down on from 1000 m above it, not up at from its slopes. Otherwise it starts over the middle of the tile, 1000 m
-up, looking ahead and 20 degrees down. The keys act for as long as they
+up, looking ahead and 10 degrees down. The keys act for as long as they
 are held, once the view has the keyboard (it does after Show in 3D, or
 click it).
 
@@ -517,7 +519,7 @@ asks for a name and a folder, chosen from a tree whose top is the
 degrees, negative to the south and west, or with N, S, E or W (such as
 `54.45N` and `3.21W`). The height above the ground, heading, speed (km/h)
 and the camera's tilt may be typed too; a box left blank takes the
-default shown in grey (the start height, north, hovering, 20 degrees
+default shown in grey (the start height, north, hovering, 10 degrees
 down). Bookmarks > Add Bookmark... opens the same dialog, also before any
 3D view, when only typed coordinates can be chosen. **New Folder...** makes a folder inside the one
 chosen, to any depth. OK saves the bookmark; Cancel leaves everything as
@@ -539,6 +541,49 @@ as above the ground, which is found when you go to it.
 Bookmarks are kept in `bookmarks.json` in the settings folder, as two
 lists, folders and bookmarks, each naming the folder it is in (0 is the
 top level), so it can be edited by hand while GDEMFetch is closed.
+
+#### Flight paths
+
+Every flight is recorded as a path: where it started, and a point each
+time the heading changed (by a degree or more, once the flight has moved
+on), with the heading and the time; height is not kept. Between points
+the flight went straight on, and while it is still going, where it is
+now ends the last line. A flight starts when Preparing for flight
+finishes (launching at a place, from the search, Show in 3D or a
+bookmark) or when you press R or double-click; changing Detail, Distance,
+Heights or Realistic carries on the same flight. Each path ends one of
+three ways: **Crashed**, **Flight Ended** (a new flight was started) or
+**In Flight** (still going).
+
+Switching from the 3D tab to the Map tab draws the current flight's path
+on the map, as it is at that moment: a cyan line, a green dot where it
+started, and a red dot where the flight is, or a red cross where it
+crashed. While the flight is still going, the map also zooms to show the
+whole path (at least 30 km across, so a short flight is not blown up).
+View > Show Flight Path turns it off (kept in `view.json`).
+
+The speed panel in the 3D view shows how far the current flight has
+gone, such as `12.3 km flown`, measured along its path.
+
+**File > Save Flight Path...** saves the current flight's path, and
+**File > Save All Flight Paths...** every flight's since GDEMFetch
+started, to a `.flt` file (offered in a `Flights` folder beside the
+settings). A flight still going is saved ending where it is now, as In
+Flight. The file is JSON:
+
+| Member | Contents |
+|--------|----------|
+| `format` | 1 |
+| `program`, `saved` | `GDEMFetch`, and when it was saved (ISO 8601, UTC) |
+| `flights` | The paths, oldest first |
+| `flights[].name` | Where it started: the place, bookmark or tile |
+| `flights[].started`, `ended` | When (ISO 8601, UTC); for a flight in flight, when saved |
+| `flights[].endReason` | `Crashed`, `Flight Ended` or `In Flight` |
+| `flights[].distanceKm` | Its length along the ground |
+| `flights[].points[]` | `lat`, `lon`, `heading` (degrees) and `time` of each point; the last is where it ended |
+
+Paths are kept in memory while GDEMFetch runs (a few dozen bytes a
+point) and are lost when it closes unless saved.
 
 **Realistic**, on the 3D toolbar, draws the ground with satellite imagery
 instead of height colours: EOX's
@@ -1001,6 +1046,7 @@ Removable drives are normally mounted under `/media/<user>/` or
 | Markers (`markers.json`) | Same folder as the settings |
 | What the View menu shows, the 3D tab's Detail, Distance, Heights and Realistic, whether its Controls panel is collapsed, and its Labels (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
 | Bookmarks of 3D views (`bookmarks.json`) | Same folder as the settings |
+| Saved flight paths (`*.flt`) | Wherever you save them; offered in `Flights` in the settings folder |
 | Windows' graphics processor choice | Windows only: the registry value named after the program's path in `HKEY_CURRENT_USER\Software\Microsoft\DirectX\UserGpuPreferences`; see [Drawing](#drawing) |
 | Downloaded tiles | The **data folder**, chosen in File > Settings. Default: `ASTGTM` in your documents folder. |
 | The 3D view's imagery cache | `Imagery` in the data folder, a folder for each layer, then level, row and column (`Imagery/s2cloudless-2025/13/1662/8090.jpg`, near Manchester); see [The 3D view](#the-3d-view) |
