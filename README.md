@@ -107,8 +107,8 @@ If you already cloned without submodules, run
    This takes about a dozen requests and needs no token.
 4. Select tiles on the map (a single tile is a left click) and press
    **Fetch selection**.
-5. To see a downloaded tile in 3D, select it and press **Show in 3D**
-   (or find a mountain first, such as Everest); see
+5. To see a downloaded tile and the land round it in 3D, select it and
+   press **Show in 3D** (or find a mountain first, such as Everest); see
    [The 3D view](#the-3d-view).
 
 ### Using the map
@@ -134,7 +134,8 @@ that tile has data, and the country it is in. Progress messages and errors appea
 **Debug** tab (the file-by-file detail of downloads goes to a
 [report file](#how-downloads-work) instead), and serious errors (a failed download or tile index build,
 unreadable settings, a missing world map) are also shown in a dialog. The
-**3D** tab shows the selected tile in 3D; see [The 3D view](#the-3d-view).
+**3D** tab shows the ground round the tile sent with Show in 3D; see
+[The 3D view](#the-3d-view).
 
 ### Menus
 
@@ -331,13 +332,14 @@ the mountains, still read).
 
 ### The 3D view
 
-The **3D** tab shows one downloaded tile as a surface you can turn and
-zoom. Select a single downloaded tile on the map (a left click, or find a
-mountain), then press **Show in 3D** on the Map tab's toolbar: the tile is
-built while the map is showing, and the 3D tab opens once it is ready. The
-3D tab keeps showing that tile, whatever is selected on the map
-afterwards, until Show in 3D sends another. The line at the top says the
-tile's size and heights.
+The **3D** tab shows the ground round a downloaded tile in 3D: the tile
+and its neighbours, about 340 km north to south and as wide east to west,
+fine near the camera and coarser further away. Select a single downloaded
+tile on the map (a left click, or find a mountain), then press **Show in
+3D** on the Map tab's toolbar: the 3D tab opens at once, and the ground
+sharpens over the next moments as its pieces are made. The 3D tab keeps
+showing that place, whatever is selected on the map afterwards, until
+Show in 3D sends another.
 
 With **Click for 3D** switched on (beside Show in 3D), a left click that
 selects a single downloaded tile also shows it in 3D, saving the press of
@@ -348,27 +350,56 @@ switch is remembered in `view.json`.
 | Action | Control |
 |--------|---------|
 | Turn the view | Left-drag: across to swing round, up and down to look from higher or lower |
-| Move the view | Right-drag, middle-drag or Shift + left-drag, as on the map: the ground follows the pointer, up to half a tile beyond the edges |
-| Zoom | Mouse wheel |
+| Move the view | Right-drag, middle-drag or Shift + left-drag, as on the map: the ground follows the pointer. There is no edge: tiles further on are loaded as the view moves |
+| Zoom | Mouse wheel, from 300 m to 600 km away |
 | Back to the starting view (from the south, 35 degrees up, centred on the tile) | Double-click, or Reset View |
-| More or less detail | **Detail**: Coarse (226 samples across), Medium (451, the default), Fine (901), Very fine (1801) or Full (3601, every sample) |
+| Detail near the camera | **Detail**: Coarse (226 samples across a tile), Medium (451), Fine (901), Very fine (1801) or Full (3601, every sample, the default) |
+| Detail further away | **Distance**: Low, Medium (the default) or High |
 | Stretch the heights | **Heights**: 1, 2 (the default), 3, 5 or 10 times true scale |
 
-The detail picks one of the images inside the tile's `_dem.tif` (the full
-3601 x 3601 and its overviews), so a coarse view reads only a small part
-of the file. Very fine is about 3.2 million vertices (built in 0.65 s on
-a laptop with an RTX 5090), and Full, every sample of the tile, about 13
-million in 225 pieces, four times as long; the window waits while it is
-built. The surface is coloured by height, from blue water through greens,
+How it works:
+
+- **Patches.** The ground is drawn as square patches of 75 x 75 cells,
+  whatever their size: a whole tile far away, down to 75 arc-seconds
+  (about 2.3 km) close up, where every sample of the tile is used. A patch
+  is split into finer ones when the camera is nearer than 2 times its size
+  (1.5 at Low distance detail, 3 at High), so each step away halves the
+  detail and the number of triangles stays much the same wherever the
+  camera is: a few hundred patches, a few million triangles, over the
+  whole area, of which the graphics processor draws only those in view.
+  Detail only limits how fine the nearest patches get; far away every
+  setting draws the same.
+- **Reading.** Each patch reads the coarsest image in the tile's
+  `_dem.tif` that is fine enough for it (the file holds the full 3601 x
+  3601 and overviews of 1801, 901, 451 and 226 among others), so a
+  distant tile costs a small read. A tile is read only when a patch of it
+  is wanted.
+- **In the background.** Patches are made on worker threads, one per
+  processor, those in view first, coarse before fine, near before far;
+  the window only turns them into meshes, a few each 15 ms. Until its
+  finer patches are all ready a patch stays on show, so the view never
+  has holes; it just sharpens.
+- **The globe.** Positions are laid out on a sphere, so the ground falls
+  away with distance as the Earth's does (0.8 km one tile away), and tiles
+  of different latitudes fit together. Moving more than 150 km from where
+  the view started measures everything again from there.
+- **Joins.** Each patch has a short skirt hanging from its edges, so no
+  gap shows where a fine patch meets a coarser one.
+- **Around the data.** A tile that exists but is not downloaded is drawn
+  flat and grey; sea, where no tile exists, flat and blue.
+
+The surface is coloured by height, from blue water through greens,
 yellows and browns to grey rock and white above 4,500 m, and shaded as if
 lit from the north-west, so the relief shows at any angle. Voids (-9999)
-are filled from the heights around them. Detail and Heights are remembered
-in `view.json`.
+are filled from the heights around them. Detail, Distance and Heights are
+remembered in `view.json`.
 
-The surface is built in pieces of at most 241 x 241 vertices (Medium is 4,
-Very fine 64), each small enough for 16-bit indices, and drawn by
-Gorilla3D. The Debug tab logs each tile shown: its size, vertices,
-triangles and pieces, and the milliseconds taken to read and to build it.
+When the patches wanted are all made, the Debug tab logs a `3D: settled`
+line: the time taken, the patches on show and their triangles, the
+patches kept, the tiles (and how many have heights), how many patches the
+workers made and how long each took, and how long turning them into
+meshes took. A second later a `3D: memory with ...` line gives the memory
+in use (see [Memory and graphics in the log](#memory-and-graphics-in-the-log)).
 
 ### Finding places
 
@@ -633,9 +664,9 @@ GPU 2: Intel(R) Graphics, 128 MB own memory, 47.4 GB shared; this program may us
 what the program's own code holds; the rest of its memory is code,
 drivers and images held by Skia and the graphics drivers.)
 
-A second after the 3D view shows a tile, a `3D: memory after showing
-...` line gives what is in use then, so the cost of a detail setting (or,
-later, of several tiles) can be read off. What is known depends on the
+A second after the 3D view has made all the patches it wants, a `3D:
+memory with ...` line gives what is in use then, so the cost of a detail
+setting can be read off. What is known depends on the
 system:
 
 - **Windows:** everything. "May use" is the budget Windows gives the
@@ -710,7 +741,7 @@ Removable drives are normally mounted under `/media/<user>/` or
 | Tile index (`tileindex.bin`) | Same folder as the settings |
 | Download reports (`Reports/download-*.log`) | Same folder as the settings |
 | Markers (`markers.json`) | Same folder as the settings |
-| What the View menu shows, the 3D tab's Detail and Heights, and Click for 3D (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
+| What the View menu shows, the 3D tab's Detail, Distance and Heights, and Click for 3D (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
 | Windows' graphics processor choice | Windows only: the registry value named after the program's path in `HKEY_CURRENT_USER\Software\Microsoft\DirectX\UserGpuPreferences`; see [Drawing](#drawing) |
 | Downloaded tiles | The **data folder**, chosen in File > Settings. Default: `ASTGTM` in your documents folder. |
 
@@ -1030,7 +1061,8 @@ it:
 | `GDEMBrowser` | Opens web links in the default browser on each platform |
 | `GDEMGpuPreference` | Reads and sets Windows' graphics processor preference for the program (ported from Sprite3D's `GpuPreference`); does nothing on other platforms |
 | `GDEMMapTiles` | `OpenBuiltInMapTiles`, the tile set linked into the program |
-| `GDEMTerrain` | A tile's heights at a chosen detail (`LoadTerrainGrid`), and the pieces of its 3D surface: positions, normals, shaded colours and triangles (`TerrainChunk`) |
+| `GDEMTerrain` | The pieces of the 3D surface: `TTerrainFrame` (positions on a sphere, from a point), `TTerrainTile` (a tile's heights, each overview read when first needed), `BuildTerrainPatch` (one patch's positions, normals, shaded colours and skirt) and `TerrainPatchIndices` (the triangles every patch shares) |
+| `GDEMTerrainLod` | `TTerrainLod`: the trees of patches for the tiles round the camera, which patches to show from where it is, and making them on worker threads |
 
 **ui/**
 
@@ -1041,7 +1073,7 @@ it:
 | `ProgressForm` | Modal progress dialog shown while data is downloaded or imported |
 | `MarkersForm` | Modal dialog listing the markers, to go to, rename or delete them |
 | `GDEMWorldMap` | `TWorldMapView`, the zoomable map with tile selection, borders and coastlines, the high-resolution map's tiles (`MapTiles`), town and city names, markers, and `ZoomToArea` and `CentreOn` for the search |
-| `GDEMTerrainView` | `TTerrainView`, the 3D tab's Gorilla3D view of a tile, turned and zoomed with the mouse |
+| `GDEMTerrainView` | `TTerrainView`, the 3D tab's Gorilla3D view of the ground round a tile, turned, moved and zoomed with the mouse; turns patches into meshes |
 | `GDEMDrawing` | `ConfigureDrawing`, called from the `.dpr` before `Application.Initialize`, which tells Skia to draw on the GPU or the CPU and applies the Windows graphics processor choice |
 | `GDEMThemes` | The themes, and `ApplyTheme` |
 | `GDEMStyles` | Switches FMX styles at run time (ported from Sprite3D) |
@@ -1083,9 +1115,8 @@ the left and latitude 90 at the top.
 - **Defaults from the hardware:** use the memory and GPU figures to
   choose CPU or GPU drawing (and perhaps the View layers and 3D detail)
   on a first run.
-- **3D view:** several tiles stitched together, the high-resolution map
-  laid over the surface, finer detail near the camera, and the surface
-  built in the background so Full detail does not hold up the window.
+- **3D view:** the high-resolution map laid over the surface; a camera
+  that flies over the ground; fog in the distance.
 - **More mountains:** a checked list of famous peaks Natural Earth leaves
   out, such as Lhotse, Makalu and Annapurna.
 - **Finer borders:** Natural Earth's 1:10m borders and coastlines would

@@ -6,15 +6,37 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 28 October 2026, early morning, before the owner's push
-of the memory and GPU unit (on top of `d25e46b` "Mountains, Pan, Less
-crap UI", which was checked identical to the delivered files).
+Last updated: 28 October 2026, 10:35, at the end of a session, as the
+owner was about to push the level-of-detail 3D view.
+
+## Where to pick up (28 October 2026)
+
+- GitHub `main` was at `19c8563` ("SystemInfo sync"), checked identical
+  to everything delivered before it. The last delivery,
+  `gdem-3d-lod.zip`, holds the **level-of-detail 3D view** (new
+  `lib/GDEMTerrainLod.pas`; rewritten `lib/GDEMTerrain.pas` and
+  `ui/GDEMTerrainView.pas`; `MainForm`, `GDEMViewOptions`, `.dpr`,
+  `.dproj`, README, this file). The owner was about to push it,
+  **unbuilt**: written without a compiler, checked by `pasdoc_check.py`
+  and a Python port of the tree. Fetch GitHub first and check whether the
+  push holds it.
+- **First job of the next session:** the owner's first build of it. Expect
+  compile errors to fix first, then go through "To check first when
+  built" at the end of the "Level of detail" section below, and ask for
+  the `3D: settled` and `3D: memory with` lines from the Debug tab.
+- If the level-of-detail view cannot be made to work, `19c8563` has the
+  working single-tile view (the owner chose this stage as a safe point to
+  return to).
+- Owner's ideas waiting: use the `GDEMSystemInfo` figures to choose CPU
+  or GPU drawing (and View layers, 3D detail) on a first run; the
+  high-resolution map over the 3D surface; a camera that flies over the
+  ground.
 
 ## State at the end of 27 October 2026
 
-The owner is pushing the evening's 3D work on top of `c1096a1` ("Add
-FastMM5"). Everything since was delivered as zips and is in that push;
-before it, the working copy was validated: `pasdoc_check.py` clean
+The owner pushed the evening's 3D work on top of `c1096a1` ("Add
+FastMM5") as `d25e46b`. Everything since was delivered as zips and is in
+that push; before it, the working copy was validated: `pasdoc_check.py` clean
 (including `tools/GeoTiffCheck`); every source ASCII; both `.dproj` files
 keep their BOM and parse; every unit in `lib/` and `ui/` is in both the
 `.dpr` and the `.dproj`, and every path exists; each `RcItem` exists, its
@@ -44,12 +66,128 @@ below):
 
 Then, after that push: `common/GDEMSystemInfo.pas`, the memory and GPU
 figures in the log (see "Memory and graphics processors" below), working
-on Windows.
+on Windows, pushed as `16c109c` and `19c8563`.
+
+Then the 3D view was rebuilt with level of detail over a window of tiles
+(see "Level of detail" below): delivered on 28 October, not yet built.
 
 Items 5 to 8 compiled (the owner's build reported only the hints of item
 8), but have not been reported on in use. macOS and Linux have not run
 any of items 2 to 8. Sections below that say "Not yet built" were written
 before the owner's builds. No known bugs.
+
+### Level of detail (28 October 2026, after `19c8563`)
+
+The owner's idea: load the tiles round the camera (3 x 3 at first),
+split tiles into finer pieces near the camera and coarser further away,
+halving the detail at each doubling of distance, so far fewer triangles
+are drawn and updating the tree is faster than building whole tiles. The
+owner asked for "any steps that will work properly and particularly ones
+that improve speed", with `19c8563` as the point to go back to if it
+fails. Not yet built. What was done:
+
+- **Patches** (`lib/GDEMTerrain`, rewritten; no FMX): 75 x 75 cells
+  whatever their size (`PATCH_CELLS`). A tile's tree: depth 0 the tile,
+  depth 1 its ninths (3 x 3), then quarters, to depth 5 (`NODE_ARCSEC`
+  3600, 1200, 600, 300, 150, 75 arc-seconds; 48, 16, 8, 4, 2, 1 between
+  samples). 75 was chosen because 3,600 = 75 x 48 and every depth gets a
+  whole number of arc-seconds between samples; 64 does not divide 3,600.
+  `TTerrainTile` (ref-counted, `ITerrainTile`) reads the coarsest image
+  of the `_dem.tif` whose spacing is no wider than wanted, under a lock,
+  when first needed, fills voids, and keeps it. `TTerrainLevel.Sample`
+  blends the four nearest samples at the place the image's own
+  pixel-is-area georeference puts them; checked in Python on the IoW tile
+  against box averages of the full image: closer at every overview than
+  index x 2 or point mapping (226: 0.80 m against 1.12 and 1.57).
+  `BuildTerrainPatch` samples a 78 x 78 grid (a ring beyond the edges,
+  from the neighbouring tiles where they have heights, so normals match
+  across tiles), positions on a sphere (`TTerrainFrame`: east, down,
+  north of a point at sea level; `ToGeo` is its exact inverse on the
+  sphere), normals from neighbour differences, shaded height colours,
+  then a skirt (each edge again, `SKIRT_CELLS` 1.6 cells x stretch + 20 m
+  lower; wound both ways). 6,080 vertices, 12,450 triangles; one shared
+  index list (`TerrainPatchIndices`), same winding as the first view.
+  Sea and missing tiles are flat at 0, blue or grey, never split.
+  Removed: `TTerrainGrid`, `LoadTerrainGrid`, `TerrainChunk` and the rest
+  of the single-tile code.
+- **Tree** (`lib/GDEMTerrainLod`, new; no FMX): `TTerrainLod`, main
+  thread only. Window: tiles whose nearest point is within
+  `TERRAIN_WINDOW_KM` (170) of the point looked at, dropped beyond 1.25
+  times that; the owner's 3 x 3 in kilometres rather than tiles, because
+  tiles are only 108 km wide at the equator (67 km at Manchester), so at
+  higher latitudes it takes more tiles east to west. Split when the
+  camera is nearer than `Range` (Low 1.5, Medium 2, High 3) times the
+  patch's size; put back together beyond 1.15 times that
+  (`SPLIT_HYSTERESIS`). A split patch stays on show until all its
+  children are ready; a patch being put back together keeps its children
+  on show until it is ready. Waiting patches go to `TTask.Run`, at most
+  one per processor, ordered in view first, then depth, then distance;
+  results come back through `ITerrainResults` (a locked queue that
+  outlives the tree), matched by node id and generation, so results for
+  freed nodes or an old frame or stretch are dropped. Boxes are
+  estimated from the corners and middle at the parent's height range
+  until made. Rebase: past `TERRAIN_REBASE_KM` (150) from the frame's
+  point, `Start` again at the tile under the point looked at.
+  `SurfaceY` gives the ground under a point from the finest heights read,
+  without waiting.
+- **View** (`ui/GDEMTerrainView`, rewritten): `ShowArea(south, west,
+  reset)`, `TileLookup` (MainForm's `TerrainTileInfo`: land if
+  downloaded, missing if in the tile index (or no index yet), else sea),
+  `MaxDetail` (`TerrainMaxDepth`: 226 to depth 1 ... 3601 to depth 5),
+  `Range`, `Exaggeration` (makes every patch again; tiles' heights are
+  kept), `OnSettled`, `OnLog`. A 15 ms `TTimer` turns made patches into
+  meshes for up to `UPLOAD_BUDGET_MS` (12) a tick, then calls `Update`
+  if anything changed. Each mesh: `TGorillaSingletonMesh`, hidden until
+  shown, vertices copied straight into the FMX buffer at offsets taken
+  from `VerticesPtr[0]`, `NormalsPtr[0]` and a sentinel colour written
+  with `Color0[0]` and found by scanning (falls back to the setters for
+  whatever cannot be found; the settled line says which), indices moved
+  in one go as 16 or 32-bit (found by writing two indices and looking),
+  `IsDefOwner := True` (the property exists; whether it was already the
+  default is unknown), `TMeshDef` static, one shared
+  `TGorillaVertexColorMaterialSource` parented to the viewport.
+  `NearPlane` 0.05 and `FarPlane` 3000 (km; Gorilla3D's defaults are 0.1
+  and 10000). The centre sits on the ground (`SurfaceY`); the camera is
+  kept 30 m above it. Panning has no limit; zoom 0.3 to 600 km.
+  Gorilla3D's own frustum culling (on by default, using the mesh
+  definition's bounds, which the docs say stay available for static
+  meshes) leaves out patches not in view; the tree's own view test only
+  orders the work.
+- **MainForm**: Show in 3D no longer waits with the hourglass: it calls
+  `ShowArea` and opens the tab. A Distance combo (Low, Medium, High) on
+  the 3D toolbar, kept as `TViewOptions.TerrainRange` (default 20);
+  Detail now defaults to Full and changes only how deep the tree goes
+  (nothing is read again); Heights makes every patch again. Logs: `3D:
+  showing ...` when asked, `3D: settled in N ms: ...` when the work is
+  done, then `3D: memory with ...` a second later.
+
+Checked in Python (no Pascal compiler): a port of the tree on simulated
+land and sea tiles with patches finishing in random order, for six camera
+positions including pans that bring new tiles in: shown patches never
+overlap; holes only before a tile's first patch is made. Counts at
+Medium: from 140 km at 35 degrees, 163 patches shown (2.0 M triangles)
+over 19 tiles; close to the ground at 2 to 5 km, 570 to 650 (7 to 8 M),
+of which roughly a third are in view. Compared with one tile at Full
+before: 13 million vertices, 26 M triangles, 2.5 s on the main thread.
+Same-depth patches share edges exactly; the gap between depths on the
+IoW coast at x2 was up to 0.29 km, which the skirt depth covers.
+
+To check first when built, most likely problems first:
+
+1. Compile errors in the new units (written without a compiler).
+2. The settled line's "vertices copied straight" or "through FMX's
+   setters"; if a patch looks scrambled, the straight copy found a wrong
+   offset: make `FillVertices` always use the setters.
+3. Patches missing at the edges of the view while turning: Gorilla3D's
+   frustum culling using wrong bounds; set each mesh's
+   `FrustumCullingCheck` off (the tree could then hide patches out of
+   view itself).
+4. One shared material: if the surface goes black or a patch shows
+   another's colours, go back to one material per mesh.
+5. Leaks with `REPORT_LEAKS`: `TMeshDef`s would mean `IsDefOwner` is not
+   what it seems.
+6. The settled line's times: how long a patch takes on a worker, and to
+   turn into a mesh; memory with all patches made.
 
 ### Memory and graphics processors (27 October 2026, after `d25e46b`)
 
@@ -69,8 +207,9 @@ GPU 2: Intel(R) Graphics, 128 MB own memory, 47.4 GB shared; this program may us
 Both adapters found, the software renderer left out, DXGI 1.4 budgets
 read. FastMM5's 10 MB allocated against 251 MB in RAM: most of the
 working set is code, the Skia and Vulkan drivers and the decoded map
-tiles held by Skia outside the Delphi heap. Not yet reported: the
-`3D: memory after showing ...` line, and macOS and Linux.
+tiles held by Skia outside the Delphi heap. Not yet reported: the 3D
+memory line (since the level-of-detail view, `3D: memory with ...`, a
+second after the `3D: settled` line), and macOS and Linux.
 
 The owner's plan: later, use these figures to choose the CPU or GPU
 drawing default (and perhaps the View layers and 3D detail) on a first
@@ -106,7 +245,9 @@ run, instead of the fixed defaults.
   `LogDisplays` in `RunStartup`; `DescribeMemoryUse` is logged
   `MEMORY_MEASURE_DELAY` (1 s) after each 3D build
   (`TThread.ForceQueue` with a delay), as `3D: memory after showing
-  <tile>: ...`, so the pieces have been drawn and sent to the GPU.
+  <tile>: ...`, so the pieces have been drawn and sent to the GPU. Since
+  the level-of-detail view: `3D: memory with <tile> on show: ...`, 1 s
+  after the `3D: settled` line (`TfrmMain.TerrainSettled`).
 - To check: the start-up lines on macOS (Apple silicon and Intel) and
   Linux; the 3D line at each detail, which gives the memory cost per
   tile for planning several tiles.
@@ -151,8 +292,14 @@ x 1440 at 0, 0, scale 1.50.
    `main`) and its `delphi-neon` and `FastMM5` submodules.
 2. Read `README.md`, then this file.
 3. The owner's working copy is often ahead of GitHub. If the owner
-   attaches or pastes files, build on those, not on GitHub.
-4. Before delivering code, run `python3 tools/pasdoc_check.py` (it
+   attaches or pastes files, build on those, not on GitHub. When the
+   owner says a push is done, fetch it, compare every file delivered
+   since the last push with GitHub's, and reset the working copy to
+   `origin/main` (removing untracked copies of files GitHub now has).
+4. Answer the stop hook's "commit and push" briefly: changes are left
+   uncommitted on purpose; the owner applies the zips and pushes. There
+   is no push access, and none should be asked for.
+5. Before delivering code, run `python3 tools/pasdoc_check.py` (it
    checks `GDEMFetch/`, `TileMaker/` and `common/`) and fix anything it
    reports.
 
@@ -201,7 +348,10 @@ GDEMFetch is the first program, and it is feature-complete for fetching:
 - Themes ported from Sprite3D; Windows icon; deployment checked on all
   desktop platforms.
 
-The 3D tab is empty, waiting for the next stage.
+The 3D tab shows the ground round a tile with Gorilla3D: first one tile
+as a single mesh (working on Windows, `d25e46b`), now patches with level
+of detail over a window of tiles (delivered, unbuilt; see "Level of
+detail").
 
 ### What is on GitHub
 
@@ -437,13 +587,12 @@ GitHub (see the top of this file).
    tab" and later sections below). To check: macOS and Linux; FastMM5's
    leak report after switching tiles (a `TMeshDef` leak would mean the
    singleton mesh does not own its definition); the new controls in use.
-   The memory and GPU figures (`GDEMSystemInfo`) are there to plan
-   several tiles from: the `3D: memory after showing` line at each
-   detail gives the cost of one.
-   Ideas raised: build the pieces on a worker thread so Full does not
-   freeze the window for 2.5 s; several tiles stitched together; the
-   high-resolution map laid over the surface; a checked list of the peaks
-   Natural Earth leaves out (Lhotse, Makalu, Cho Oyu, Annapurna...).
+   Now with level of detail over a window of tiles, made on worker
+   threads (see "Level of detail" above); the `3D: settled` and `3D:
+   memory with` lines measure it.
+   Ideas raised: the high-resolution map laid over the surface; a camera
+   that flies over the ground; fog; a checked list of the peaks Natural
+   Earth leaves out (Lhotse, Makalu, Cho Oyu, Annapurna...).
 6. Smaller ideas offered but not taken up: parallel workers and the
    progress dialog for moving the data folder; a macOS `.icns` and a
    Linux `.desktop` file; a menu item to open the Reports folder.
@@ -1322,3 +1471,19 @@ reasons are here.
 - On macOS, `NSProcessInfo` `beginActivityWithOptions:reason:` with
   `NSActivityUserInitiated` prevents idle sleep and App Nap; the returned
   activity is retained until `endActivity:`.
+- Delphi anonymous methods capture variables, not their values: tasks
+  started in a loop from the same locals would all see the last values.
+  `GDEMTerrainLod.MakeBuildTask` copies its parameters into its own locals
+  and returns the method, so each task gets its own.
+- Gorilla3D facts found for the 3D view (v1.5 docs): the viewport's
+  `NearPlane` and `FarPlane` default to 0.1 and 10000 scene units (FMX's
+  own are 1 and 1000); `FrustumCulling` is on by default; a static mesh's
+  definition keeps its vertex data, so its bounds work after
+  `MeshData.Clear`; desktop index buffers are 32-bit, mobile 16-bit.
+  FMX's `TVertexBuffer` has `Buffer`, `VertexSize`, `VerticesPtr` and
+  `NormalsPtr`, but no pointer for colours.
+- The Python checks (ports of the reader, the terrain and the tree) live
+  only in a session's scratch folder and are lost with it; rewrite them
+  from the Pascal when needed. The real tiles for them are
+  `peardox/volatile`'s `img/iow_dem.tif` and `iow_num.tif`; Pillow reads
+  every overview with `Image.seek`.

@@ -87,7 +87,7 @@ uses
   FMX.Controls.Presentation, FMX.Menus, FMX.TabControl, FMX.ListBox,
   GDEMCancel, GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex,
   GDEMStore, GDEMThemes, GDEMReport, GDEMVectors, GDEMTileCache, GDEMMarkers,
-  GDEMSearch, GDEMViewOptions, GDEMEasterEggs, GDEMTerrainView, ProgressForm;
+  GDEMSearch, GDEMViewOptions, GDEMEasterEggs, GDEMTerrainLod, GDEMTerrainView, ProgressForm;
 
 const
   { Name of the RCDATA resource holding the world map image. }
@@ -115,9 +115,9 @@ const
   { Kilometres shown round a mountain found by the search. }
   PEAK_VIEW_KM = 40;
 
-  { Milliseconds after the 3D view is built before its memory use is
-    logged, so the frames drawn meanwhile have sent it to the graphics
-    processor. }
+  { Milliseconds after the 3D view has made all its patches before its
+    memory use is logged, so the frames drawn meanwhile have sent them to
+    the graphics processor. }
   MEMORY_MEASURE_DELAY = 1000;
 
 type
@@ -484,8 +484,8 @@ type
       tile set was found. Owned by the form. }
     FMapTiles: TTileCache;
 
-    { The 3D view of the selected tile, made the first time the 3D tab
-      shows a tile; @nil before that. Owned by the form. }
+    { The 3D view of the ground round a tile, made the first time a tile
+      is shown in 3D; @nil before that. Owned by the form. }
     FTerrainView: TTerrainView;
 
     { The 3D tab's toolbar, made in @link(Build3DTab). }
@@ -499,14 +499,15 @@ type
       @code(TERRAIN_HEIGHTS). }
     FTerrainHeightsBox: TComboBox;
 
+    { The 3D tab's choice of distance detail, in the order of
+      @code(TERRAIN_RANGES). }
+    FTerrainRangeBox: TComboBox;
+
     { Says what the 3D tab shows, or why it shows nothing. }
     FTerrainInfo: TLabel;
 
-    { The tile the 3D tab shows; empty when none. }
+    { The tile the 3D tab is centred on; empty when none. }
     FTerrainTile: string;
-
-    { The detail the 3D tab's tile was read at. }
-    FTerrainDetail: Integer;
 
     { @true while the program itself sets the 3D tab's choices, so that is
       not taken as the user choosing. }
@@ -631,13 +632,40 @@ type
       The view itself is made when first needed. }
     procedure Build3DTab;
 
-    { Shows a tile on the 3D tab. Reads it again only if it or the detail
-      has changed, or when asked to. The 3D tab keeps showing it until
-      another is sent with Show in 3D, whatever is selected on the map
-      meanwhile.
+    { Shows the ground round a tile on the 3D tab, starting again only if
+      it is a different tile, or when asked to. The 3D tab keeps showing it
+      until another is sent with Show in 3D, whatever is selected on the
+      map meanwhile. The surface sharpens over the next moments, as its
+      patches are made; @link(TerrainSettled) logs when they are done.
       @param(ATile The tile, such as @code(N50W002).)
-      @param(AForce @true to read the tile even if it is already shown.) }
+      @param(AForce @true to start again even if it is already shown.) }
     procedure ShowTerrainTile(const ATile: string; AForce: Boolean);
+
+    { What a tile holds, for the 3D view: land if downloaded (with its
+      file), missing if it exists but is not downloaded, sea otherwise.
+      @param(ASouth Latitude of its south edge.)
+      @param(AWest Longitude of its west edge.)
+      @returns(Its kind and file.) }
+    function TerrainTileInfo(ASouth, AWest: Integer): TTerrainTileInfo;
+
+    { Logs what the 3D view did once its patches are all made, says it on
+      the 3D tab, and logs the memory in use a moment later.
+      @param(Sender The view.)
+      @param(AText The report.) }
+    procedure TerrainSettled(Sender: TObject; const AText: string);
+
+    { Logs the 3D view's problems.
+      @param(Sender The view.)
+      @param(AText The line.) }
+    procedure TerrainLog(Sender: TObject; const AText: string);
+
+    { The distance detail chosen on the 3D tab.
+      @returns(Tenths, from @code(TERRAIN_RANGES).) }
+    function ChosenTerrainRange: Integer;
+
+    { Applies the new distance detail, and remembers the choice.
+      @param(Sender The combo box.) }
+    procedure TerrainRangeChange(Sender: TObject);
 
     { The detail chosen on the 3D tab.
       @returns(The most samples across, from @code(TERRAIN_DETAILS).) }
@@ -654,12 +682,12 @@ type
       @param(AName The selection's name, such as a mountain's.) }
     procedure SelectTileAt(ALat, ALon: Double; const AName: string);
 
-    { Reads the tile again at the new detail, and remembers the choice.
+    { Applies the new detail, and remembers the choice.
       @param(Sender The combo box.) }
     procedure TerrainDetailChange(Sender: TObject);
 
-    { Rebuilds the surface at the new height stretch, and remembers the
-      choice.
+    { Makes the surface again at the new height stretch, and remembers
+      the choice.
       @param(Sender The combo box.) }
     procedure TerrainHeightsChange(Sender: TObject);
 
@@ -1610,6 +1638,17 @@ begin
     FTerrainHeightsBox.OnChange := TerrainHeightsChange;
     AddToBar(FTerrainHeightsBox, 70, 16);
 
+    AddToBar(BarLabel('Distance'), 60, 6);
+    FTerrainRangeBox := TComboBox.Create(Self);
+    for I := 0 to High(TERRAIN_RANGES) do
+      FTerrainRangeBox.Items.Add(TERRAIN_RANGE_NAMES[I]);
+    FTerrainRangeBox.ItemIndex := 1;
+    for I := 0 to High(TERRAIN_RANGES) do
+      if TERRAIN_RANGES[I] = FViewOptions.TerrainRange then
+        FTerrainRangeBox.ItemIndex := I;
+    FTerrainRangeBox.OnChange := TerrainRangeChange;
+    AddToBar(FTerrainRangeBox, 90, 16);
+
     LButton := TButton.Create(Self);
     LButton.Text := 'Reset View';
     LButton.OnClick := TerrainResetClick;
@@ -1642,71 +1681,107 @@ end;
 
 procedure TfrmMain.ShowTerrainTile(const ATile: string; AForce: Boolean);
 var
-  LTile, LDem, LNum: string;
-  LSouth, LWest, LDetail: Integer;
-  LGrid: TTerrainGrid;
-  LWatch: TStopwatch;
-  LReadMs: Int64;
-  LText: string;
+  LSouth, LWest: Integer;
 begin
-  LTile := ATile;
-  LDetail := ChosenTerrainDetail;
   if not AForce and (FTerrainView <> nil) and FTerrainView.HasTerrain and
-     (LTile = FTerrainTile) and (LDetail = FTerrainDetail) then
+     (ATile = FTerrainTile) then
     Exit;
-  if not FStore.IsAvailable or not TryParseTileName(LTile, LSouth, LWest) then
+  if not FStore.IsAvailable or not TryParseTileName(ATile, LSouth, LWest) then
   begin
     FTerrainInfo.Text := 'The data folder is not available.';
     Exit;
   end;
-  FStore.TileFiles(LSouth, LWest, LDem, LNum);
-  if not TFile.Exists(LDem) then
-  begin
-    FTerrainInfo.Text := LTile + ' is not in the data folder.';
-    Exit;
-  end;
-
   try
-    LWatch := TStopwatch.StartNew;
-    LGrid := LoadTerrainGrid(LDem, LTile, LDetail);
-    LReadMs := LWatch.ElapsedMilliseconds;
     if FTerrainView = nil then
     begin
       FTerrainView := TTerrainView.Create(Self);
       FTerrainView.Parent := tab3D;
       FTerrainView.Align := TAlignLayout.Client;
+      FTerrainView.TileLookup := TerrainTileInfo;
+      FTerrainView.OnSettled := TerrainSettled;
+      FTerrainView.OnLog := TerrainLog;
     end;
-    LWatch := TStopwatch.StartNew;
-    // A new tile starts from the starting view; a new detail keeps the view
-    FTerrainView.ShowTerrain(LGrid, ChosenTerrainHeights, LTile <> FTerrainTile);
-    FTerrainTile := LTile;
-    FTerrainDetail := LDetail;
-    LText := Format('%s: %d x %d samples, %.0f to %.0f m', [LTile, LGrid.Columns, LGrid.Rows,
-      LGrid.MinHeight, LGrid.MaxHeight]);
-    if LGrid.Voids > 0 then
-      LText := LText + Format(', %d voids filled', [LGrid.Voids]);
-    FTerrainInfo.Text := LText + '. Drag to turn, wheel to zoom, double-click to reset.';
-    AddLog(Format('3D: %s, image %d of %d, %s vertices and %s triangles in %d piece(s), ' +
-      'heights %.0f to %.0f m x %d; read in %d ms, built in %d ms',
-      [LText, LGrid.ImageIndex, LGrid.ImageCount, FormatFloat('#,##0', FTerrainView.VertexCount),
-       FormatFloat('#,##0', FTerrainView.TriangleCount), FTerrainView.PieceCount,
-       LGrid.MinHeight, LGrid.MaxHeight, ChosenTerrainHeights, LReadMs,
-       LWatch.ElapsedMilliseconds]));
-    // Measured a second later, once the pieces have been drawn and so sent
-    // to the graphics processor
-    TThread.ForceQueue(nil,
-      procedure
-      begin
-        AddLog('3D: memory after showing ' + LTile + ': ' + DescribeMemoryUse);
-      end, MEMORY_MEASURE_DELAY);
+    FTerrainView.MaxDetail := ChosenTerrainDetail;
+    FTerrainView.Range := ChosenTerrainRange;
+    FTerrainView.Exaggeration := ChosenTerrainHeights;
+    // A new tile starts from the starting view; the same one again keeps it
+    FTerrainView.ShowArea(LSouth, LWest, ATile <> FTerrainTile);
+    FTerrainTile := ATile;
+    FTerrainInfo.Text := ATile + ' and the tiles round it: loading...';
+    AddLog(Format('3D: showing %s and the tiles round it; detail %d, distance detail %s, ' +
+      'heights x %d', [ATile, ChosenTerrainDetail,
+       TERRAIN_RANGE_NAMES[Max(FTerrainRangeBox.ItemIndex, 0)], ChosenTerrainHeights]));
   except
     on E: Exception do
     begin
-      FTerrainInfo.Text := 'Could not show ' + LTile + ': ' + E.Message;
-      AddLog('WARNING: could not show ' + LTile + ' in 3D (' + E.ClassName + ': ' +
+      FTerrainInfo.Text := 'Could not show ' + ATile + ': ' + E.Message;
+      AddLog('WARNING: could not show ' + ATile + ' in 3D (' + E.ClassName + ': ' +
         E.Message.TrimRight(['.']) + ')');
     end;
   end;
+end;
+
+function TfrmMain.TerrainTileInfo(ASouth, AWest: Integer): TTerrainTileInfo;
+var
+  LDem, LNum: string;
+begin
+  Result.DemFile := '';
+  if FStore.IsAvailable and FDownloaded.Has(ASouth, AWest) then
+  begin
+    FStore.TileFiles(ASouth, AWest, LDem, LNum);
+    if TFile.Exists(LDem) then
+    begin
+      Result.Kind := tkLand;
+      Result.DemFile := LDem;
+      Exit;
+    end;
+  end;
+  // With no tile index yet, any tile might exist
+  if FTileIndex.Has(ASouth, AWest) or FTileIndex.IsEmpty then
+    Result.Kind := tkMissing
+  else
+    Result.Kind := tkSea;
+end;
+
+procedure TfrmMain.TerrainSettled(Sender: TObject; const AText: string);
+var
+  LTile: string;
+begin
+  AddLog(AText);
+  LTile := FTerrainTile;
+  FTerrainInfo.Text := Format('%s and the tiles round it: %d patches. Drag to turn, ' +
+    'right-drag to move, wheel to zoom, double-click to reset.',
+    [LTile, FTerrainView.ShownPatches]);
+  // Measured a moment later, once the meshes have been drawn and so sent
+  // to the graphics processor
+  TThread.ForceQueue(nil,
+    procedure
+    begin
+      AddLog('3D: memory with ' + LTile + ' on show: ' + DescribeMemoryUse);
+    end, MEMORY_MEASURE_DELAY);
+end;
+
+procedure TfrmMain.TerrainLog(Sender: TObject; const AText: string);
+begin
+  AddLog(AText);
+end;
+
+function TfrmMain.ChosenTerrainRange: Integer;
+begin
+  if InRange(FTerrainRangeBox.ItemIndex, 0, High(TERRAIN_RANGES)) then
+    Result := TERRAIN_RANGES[FTerrainRangeBox.ItemIndex]
+  else
+    Result := DEFAULT_TERRAIN_RANGE;
+end;
+
+procedure TfrmMain.TerrainRangeChange(Sender: TObject);
+begin
+  if FTerrainUpdating then
+    Exit;
+  FViewOptions.TerrainRange := ChosenTerrainRange;
+  SaveViewOptions;
+  if FTerrainView <> nil then
+    FTerrainView.Range := ChosenTerrainRange;
 end;
 
 procedure TfrmMain.SelectTileAt(ALat, ALon: Double; const AName: string);
@@ -1725,26 +1800,15 @@ end;
 
 procedure TfrmMain.btnShow3DClick(Sender: TObject);
 var
-  LCursors: IFMXCursorService;
   LNames: TArray<string>;
 begin
   // Only this sends a tile to the 3D tab: selecting on the map only
-  // selects, so a click is never taken as asking for 3D
+  // selects, so a click is never taken as asking for 3D. The 3D tab opens
+  // at once and sharpens as its patches are made
   LNames := SelectedTileNames(FDownloaded);
   if Length(LNames) <> 1 then
     Exit;
-  // Built while the map is showing, which can take a few seconds at Full
-  // detail, with the hourglass up; the 3D tab opens once it is ready
-  if not TPlatformServices.Current.SupportsPlatformService(IFMXCursorService, LCursors) then
-    LCursors := nil;
-  if LCursors <> nil then
-    LCursors.SetCursor(crHourGlass);
-  try
-    ShowTerrainTile(LNames[0], False);
-  finally
-    if LCursors <> nil then
-      LCursors.SetCursor(crDefault);
-  end;
+  ShowTerrainTile(LNames[0], False);
   tabMain.ActiveTab := tab3D;
 end;
 
@@ -1762,30 +1826,23 @@ begin
     Exit;
   FViewOptions.TerrainDetail := ChosenTerrainDetail;
   SaveViewOptions;
-  // The tile on show, at the new detail
-  if FTerrainTile <> '' then
-    ShowTerrainTile(FTerrainTile, False);
+  // Finer or coarser near the camera from the next look; nothing is read
+  // again
+  if FTerrainView <> nil then
+    FTerrainView.MaxDetail := ChosenTerrainDetail;
 end;
 
 procedure TfrmMain.TerrainHeightsChange(Sender: TObject);
-var
-  LWatch: TStopwatch;
 begin
   if FTerrainUpdating then
     Exit;
   FViewOptions.TerrainHeights := ChosenTerrainHeights;
   SaveViewOptions;
-  if (FTerrainView = nil) or not FTerrainView.HasTerrain then
+  if FTerrainView = nil then
     Exit;
-  try
-    LWatch := TStopwatch.StartNew;
-    FTerrainView.Exaggeration := ChosenTerrainHeights;
-    AddLog(Format('3D: heights x %d, rebuilt in %d ms',
-      [ChosenTerrainHeights, LWatch.ElapsedMilliseconds]));
-  except
-    on E: Exception do
-      AddLog('WARNING: could not rebuild the 3D view (' + E.Message.TrimRight(['.']) + ')');
-  end;
+  // Every patch is made again; TerrainSettled logs when it is done
+  FTerrainView.Exaggeration := ChosenTerrainHeights;
+  AddLog(Format('3D: heights x %d', [ChosenTerrainHeights]));
 end;
 
 procedure TfrmMain.TerrainResetClick(Sender: TObject);
