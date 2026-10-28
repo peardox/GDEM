@@ -6,29 +6,18 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 28 October 2026, 16:00, at the end of a session, as the
-owner was about to start a new conversation.
+Last updated: 28 October 2026, 16:05, after the owner pushed `44dc3a5`
+"Handover" and before a new conversation.
 
 ## Where to pick up (28 October 2026, 16:00)
 
 **GitHub.** The work is on branch `flighttest`, merged into `main` by
-pull request #1 (`b9597e2`); both hold `9e34ba7` "Photorealistic?" as
-the latest work. Clone `flighttest` (the owner works there).
-
-**Delivered since `9e34ba7`, not yet pushed** (the owner applies the zips
-and pushes; build on the newest zip, not GitHub, until a push says
-otherwise). Everything from "Bookmarks, pause, controls panel" to the
-end of the dated sections below. The last zips, each cumulative over
-the one before, were `gdem-3d-egg.zip`, `gdem-3d-ahead.zip`,
-`gdem-3d-ahead2.zip`, `gdem-3d-search.zip`, `gdem-3d-search2.zip`, then
-`gdem-readme-token.zip` (README and this file only) and
-`gdem-since-9e34ba7.zip` (every file changed since the push, as a
-safety net). Files changed since `9e34ba7`: README.md, CLAUDE.md;
-GDEMFetch.dpr, GDEMFetch.dproj; lib: GDEMBookmarks (new), GDEMFlight,
-GDEMImagery, GDEMSettings, GDEMTerrainLod, GDEMViewOptions; ui:
-BookmarkForm (new), GDEMTerrainHud, GDEMTerrainView, MainForm (.pas and
-.fmx), SettingsForm (.pas and .fmx). When the push comes, compare each of
-these with GitHub.
+pull request #2 (`ac1e9f8`); both hold `44dc3a5` "Handover", which has
+everything delivered up to the end of 28 October 2026 (checked file by
+file against the working copy at 16:05: identical, and every check
+passes). Clone `flighttest` (the owner works there). Nothing is waiting
+to be pushed. Everything from "Bookmarks, pause, controls panel" to the
+end of the dated sections below is in that push but **not yet built**.
 
 **Built and tested by the owner so far:** the level-of-detail view, the
 flight, the instruments, the imagery (with pacing), bookmarks, Preparing
