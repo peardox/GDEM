@@ -118,6 +118,8 @@ type
     FTerrainLabels: Boolean;
     { Backing field for @link(TerrainAutopilot). }
     FTerrainAutopilot: Boolean;
+    { Backing field for @link(TerrainGroundHug). }
+    FTerrainGroundHug: Boolean;
   public
     { Sets the defaults: tile tints and markers on, the other layers
       off. }
@@ -198,6 +200,10 @@ type
     { The 3D tab's Autopilot box: @true to keep the flight clear of the
       ground. @false by default. }
     property TerrainAutopilot: Boolean read FTerrainAutopilot write FTerrainAutopilot;
+
+    { The 3D tab's Hug ground box: with the autopilot on, @true to keep
+      25 to 75 m above the ground. @false by default. }
+    property TerrainGroundHug: Boolean read FTerrainGroundHug write FTerrainGroundHug;
   end;
 
 { The layers to turn on the first time the user chooses how GDEMFetch

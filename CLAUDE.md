@@ -2080,6 +2080,35 @@ up over several seconds. Not yet built.
 - Next asked for: Ground Hugging Mode, keeping 50 m above the ground
   both ways (descending too), probably a choice beside Autopilot.
 
+### Ground hugging (28 October 2026)
+
+The owner: "That's working well" (the autopilot and Mach 1 built and
+tried). Then ground hugging: stay 50 m above the ground with +/- 25 m in
+which the altitude does not change, so always 25 to 75 m from the ground
+and the altitude adjusted less often. Not yet built.
+
+- `TFlight.GroundHug` (only with `Autopilot`; `Hugging`), `HugGround`
+  in `Step` instead of `KeepClear`: samples (`AUTOPILOT_SAMPLES`) out to
+  max(speed x `HUG_LOOK_SECONDS` 3, `HUG_MIN_LOOK` 300 m); any place that
+  would take the flight below its floor (ground + 25) is climbed for, at
+  the rate to be at ground + 50 over it on arrival; otherwise inside the
+  band nothing changes, and once outside (`FHugReturning`) it moves to
+  max(ground + 50, the floor over the places ahead) at max(10 m/s,
+  difference / `HUG_SETTLE_SECONDS` 1); below `HUG_SNAP` (5 m) it jumps
+  to ground + 25. `AutopilotDescending`. Height keys and `Climb` (wheel)
+  do nothing while hugging.
+- Simulated in Python with the same logic: gentle ground (30 m and 10 m
+  waves) 27 to 75 m at 30 to 300 m/s, the altitude still 88 to 99% of
+  the time (holds of 14 to 126 s); steep rolling test hills 26 to 75 m at
+  30 m/s, 42 to 79 m at 100 m/s, but up to 164 m at 300 m/s and 435 m at
+  1,000 m/s (descent held by the floor ahead); never below 25 m except
+  26.3 at 30 m/s; no snaps.
+- View: `GroundHug` property; speed panel `Hugging` / `Hug climb` / `Hug
+  descend`. `TViewOptions.TerrainGroundHug` (`terrainGroundHug`);
+  `FTerrainHugBox` "Hug ground" after Autopilot; `TerrainHugChange`
+  ticks Autopilot too; `TerrainAutopilotChange` unticks Hug when the
+  autopilot goes off. The 3D toolbar is now about 1,300 pixels wide.
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection

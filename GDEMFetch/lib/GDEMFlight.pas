@@ -58,6 +58,33 @@ const
     clear of the ground ahead before it gets there. }
   AUTOPILOT_CLIMB_MARGIN = 1.5;
 
+  { The height ground hugging keeps above the ground, metres. }
+  HUG_HEIGHT = 50;
+
+  { How far from @link(HUG_HEIGHT) ground hugging lets the height above
+    the ground wander before it changes the altitude, metres: it stays
+    between 25 and 75 m, and the altitude is left alone inside that. }
+  HUG_BAND = 25;
+
+  { How far ahead ground hugging looks for rising ground: the distance
+    flown in this many seconds, at least @link(HUG_MIN_LOOK). }
+  HUG_LOOK_SECONDS = 3;
+
+  { The least distance ground hugging looks ahead, metres. }
+  HUG_MIN_LOOK = 300;
+
+  { About how long ground hugging takes to come back to
+    @link(HUG_HEIGHT) once it has left the band, seconds. }
+  HUG_SETTLE_SECONDS = 1;
+
+  { The least rate ground hugging climbs or descends at while it comes
+    back, metres a second. }
+  HUG_MIN_RATE = 10;
+
+  { Closer to the ground than this, metres, ground hugging lifts the
+    flight at once to the bottom of the band. }
+  HUG_SNAP = 5;
+
   { The farthest a start looking at a place is from it, metres, however
     high and however shallow the tilt. }
   MAX_FLIGHT_START_BACK = 30000;
@@ -198,6 +225,13 @@ type
     FAutopilot: Boolean;
     { Backing field for @link(AutopilotClimbing). }
     FAutopilotClimbing: Boolean;
+    { Backing field for @link(AutopilotDescending). }
+    FAutopilotDescending: Boolean;
+    { Backing field for @link(GroundHug). }
+    FGroundHug: Boolean;
+    { @true while ground hugging is coming back to @link(HUG_HEIGHT),
+      having left the band. }
+    FHugReturning: Boolean;
 
     { The height above the ground now, metres, for the climb rate; the
       altitude if the ground is not known.
@@ -215,6 +249,20 @@ type
       @param(ASeconds The time of this step.)
       @returns(@true if it climbed.) }
     function KeepClear(ASeconds: Double): Boolean;
+
+    { Ground hugging: leaves the altitude alone while the height above the
+      ground is within @link(HUG_BAND) of @link(HUG_HEIGHT); once it
+      leaves the band, comes back to @link(HUG_HEIGHT) in about
+      @link(HUG_SETTLE_SECONDS); climbs ahead of time for ground rising
+      on the way that would take it below the band; never descends below
+      the band's floor over the ground of the next few seconds.
+      @param(ASeconds The time of this step.)
+      @returns(@true if the altitude changed.) }
+    function HugGround(ASeconds: Double): Boolean;
+
+    { @true while the flight hugs the ground (@link(Autopilot) and
+      @link(GroundHug) both on). }
+    function Hugging: Boolean;
   public
     { Makes a flight hovering at 0, 0; call @link(Start).
       @param(AGround Gives the ground's height; required for the start
@@ -346,6 +394,15 @@ type
 
     { @true if the autopilot climbed in the last step. }
     property AutopilotClimbing: Boolean read FAutopilotClimbing;
+
+    { @true if the autopilot descended in the last step (ground hugging
+      only). }
+    property AutopilotDescending: Boolean read FAutopilotDescending;
+
+    { With @link(Autopilot) on, @true to hug the ground: 25 to 75 m above
+      it, aiming at 50 m (@link(HugGround)). The height keys and the
+      wheel do nothing meanwhile. }
+    property GroundHug: Boolean read FGroundHug write FGroundHug;
 
     { How far above the ground the flight starts, metres. }
     property StartHeight: Double read FStartHeight write FStartHeight;
@@ -493,6 +550,85 @@ begin
   end;
 end;
 
+function TFlight.Hugging: Boolean;
+begin
+  Result := FAutopilot and FGroundHug;
+end;
+
+function TFlight.HugGround(ASeconds: Double): Boolean;
+var
+  LGround, LAbove, LLook, LDistance, LLatitude, LLongitude, LAhead, LNeeded, LFloor,
+    LTarget, LDiff, LStep, LBefore: Double;
+  I: Integer;
+begin
+  Result := False;
+  if not Assigned(FGround) or not FGround(FLatitude, FLongitude, LGround) then
+    Exit;
+  LBefore := FAltitude;
+  // Ahead: ground that would take the flight below the band at this
+  // height is climbed for, to be at the hugging height over it on
+  // arrival; and the band's floor over the next few seconds, which a
+  // descent must not go below
+  LNeeded := 0;
+  LFloor := LGround + HUG_HEIGHT - HUG_BAND;
+  if FSpeed > 0 then
+  begin
+    LLook := Max(FSpeed * HUG_LOOK_SECONDS, HUG_MIN_LOOK);
+    for I := 1 to AUTOPILOT_SAMPLES do
+    begin
+      LDistance := LLook * I / AUTOPILOT_SAMPLES;
+      DestinationPoint(FLatitude, FLongitude, FHeading, LDistance, LLatitude, LLongitude);
+      if not FGround(LLatitude, LLongitude, LAhead) then
+        Continue;
+      LFloor := Max(LFloor, LAhead + HUG_HEIGHT - HUG_BAND);
+      if FAltitude < LAhead + HUG_HEIGHT - HUG_BAND then
+        LNeeded := Max(LNeeded, (LAhead + HUG_HEIGHT - FAltitude) / (LDistance / FSpeed));
+    end;
+  end;
+  if LNeeded > 0 then
+  begin
+    FAltitude := FAltitude + LNeeded * ASeconds;
+    FHugReturning := True;
+  end
+  else
+  begin
+    // Inside the band the altitude is left alone; outside it, back to the
+    // hugging height
+    LAbove := FAltitude - LGround;
+    if Abs(LAbove - HUG_HEIGHT) > HUG_BAND then
+      FHugReturning := True;
+    if FHugReturning then
+    begin
+      LTarget := Max(LGround + HUG_HEIGHT, LFloor);
+      LDiff := LTarget - FAltitude;
+      LStep := Max(HUG_MIN_RATE, Abs(LDiff) / HUG_SETTLE_SECONDS) * ASeconds;
+      if LStep >= Abs(LDiff) then
+      begin
+        FAltitude := LTarget;
+        FHugReturning := False;
+      end
+      else if LDiff > 0 then
+        FAltitude := FAltitude + LStep
+      else
+        FAltitude := FAltitude - LStep;
+    end;
+  end;
+  // Never this close: straight up to the band's floor
+  if FAltitude - LGround < HUG_SNAP then
+    FAltitude := LGround + HUG_HEIGHT - HUG_BAND;
+  FAltitude := Min(FAltitude, MAX_FLIGHT_ALTITUDE);
+  if FAltitude > LBefore then
+  begin
+    FAutopilotClimbing := True;
+    Result := True;
+  end
+  else if FAltitude < LBefore then
+  begin
+    FAutopilotDescending := True;
+    Result := True;
+  end;
+end;
+
 procedure TFlight.SetSpeed(AValue: Double);
 begin
   FSpeed := EnsureRange(AValue, 0, MAX_FLIGHT_SPEED);
@@ -618,6 +754,9 @@ begin
   // Height: a share of the height above the ground, so it is quick high
   // up and gentle low down, but never so gentle the ground cannot be hit
   LRate := Max(FLIGHT_CLIMB_MIN, FLIGHT_CLIMB_SHARE * HeightAboveGround) * ASeconds;
+  // Ground hugging decides the height
+  if Hugging then
+    LRate := 0;
   if fcClimb in AControls then
     FAltitude := FAltitude + LRate;
   if fcDescend in AControls then
@@ -635,7 +774,13 @@ begin
 
   // The autopilot before the crash test, so it never lets one happen
   FAutopilotClimbing := False;
-  if FAutopilot and not FStartPending and KeepClear(ASeconds) then
+  FAutopilotDescending := False;
+  if Hugging and not FStartPending then
+  begin
+    if HugGround(ASeconds) then
+      Result := True;
+  end
+  else if FAutopilot and not FStartPending and KeepClear(ASeconds) then
   begin
     FAutopilotClimbing := True;
     Result := True;
@@ -654,7 +799,8 @@ end;
 
 procedure TFlight.Climb(ANotches: Double);
 begin
-  if FCrashed then
+  // Ground hugging decides the height
+  if FCrashed or Hugging then
     Exit;
   FStartPending := False;
   // A tenth of the height above the ground a notch, at least 20 m

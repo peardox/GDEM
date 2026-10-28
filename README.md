@@ -416,6 +416,7 @@ clicks count: finding a place selects its tile but stays on the map.
 | Stop to a hover | H |
 | Mach 1 | M: speeds up (or slows down) smoothly to the speed of sound, 1,225 km/h, over about five seconds; Up, Down or H take over. From Mach 0.8 the speed panel shows the Mach number |
 | Keep clear of the ground | **Autopilot** on the 3D toolbar |
+| Hug the ground | **Hug ground** on the 3D toolbar (turns the autopilot on too) |
 | Pause, and carry on | Space. While paused the flight stays still and a banner says so; looking round with the mouse still works |
 | Bookmark the view | B; see [Bookmarks](#bookmarks) |
 | Flags (place names) on or off | L, or **Flags** on the 3D toolbar |
@@ -437,8 +438,20 @@ the ground along the way ahead (as far as 20 seconds of flight, at least
 of time, fast enough to be 50 m above each place before reaching it; if
 you are already lower than that, as after Page Down or the wheel, it
 lifts you straight to 50 m. It never descends for you. The speed panel
-says `Autopilot`, or `Auto climb` while it is climbing. A ground-hugging
-mode (keeping 50 m above the ground, down as well as up) is planned.
+says `Autopilot`, or `Auto climb` while it is climbing.
+
+**Hug ground** (with the autopilot; ticking it ticks **Autopilot**, and
+unticking **Autopilot** unticks it) keeps you 25 to 75 m above the
+ground, aiming at 50 m. Inside that band the altitude is left alone, so
+it changes only now and then over gentle ground; once you leave the
+band it brings you back to 50 m in about a second (at least 10 m a
+second). It looks about 3 seconds ahead (at least 300 m) and climbs early
+for ground rising there, and never descends below the band over the
+ground just ahead. Page Up, Page Down and the wheel do nothing while it
+hugs. The speed panel says `Hugging`, `Hug climb` or `Hug descend`. Fast
+over steep ground it cannot follow every dip: going down is held back by
+the ground just ahead, so at a few hundred metres a second over hills it
+can be well above 75 m for a while.
 
 Going below the ground is a **crash**: the flight stops where it hit, a
 banner says so (and the Debug tab where), and nothing moves until it

@@ -551,6 +551,10 @@ type
     { The 3D tab's Autopilot box: keeps the flight clear of the ground. }
     FTerrainAutopilotBox: TCheckBox;
 
+    { The 3D tab's Hug ground box: the autopilot keeps 25 to 75 m above
+      the ground; ticking it ticks @link(FTerrainAutopilotBox) too. }
+    FTerrainHugBox: TCheckBox;
+
     { @true while @link(FFlightTargetLatitude) and
       @link(FFlightTargetLongitude) hold the place last chosen on the map,
       by a search or a click: Show in 3D starts the flight looking at it
@@ -937,6 +941,11 @@ type
       and remembers it.
       @param(Sender The check box.) }
     procedure TerrainAutopilotChange(Sender: TObject);
+
+    { Turns ground hugging on or off as the Hug ground box says (on turns
+      the autopilot on too), and remembers it.
+      @param(Sender The check box.) }
+    procedure TerrainHugChange(Sender: TObject);
 
     { The 3D view's L key turned the place names on or off: ticks the box
       to match and remembers it.
@@ -2019,7 +2028,14 @@ begin
     FTerrainAutopilotBox.Hint := 'Keeps you at least 50 m above the ground ahead';
     FTerrainAutopilotBox.IsChecked := FViewOptions.TerrainAutopilot;
     FTerrainAutopilotBox.OnChange := TerrainAutopilotChange;
-    AddToBar(FTerrainAutopilotBox, 84, 16);
+    AddToBar(FTerrainAutopilotBox, 84, 4);
+
+    FTerrainHugBox := TCheckBox.Create(Self);
+    FTerrainHugBox.Text := 'Hug ground';
+    FTerrainHugBox.Hint := 'Keeps you 25 to 75 m above the ground, aiming at 50 m';
+    FTerrainHugBox.IsChecked := FViewOptions.TerrainGroundHug and FViewOptions.TerrainAutopilot;
+    FTerrainHugBox.OnChange := TerrainHugChange;
+    AddToBar(FTerrainHugBox, 96, 16);
 
     // A copy of the Map tab's search, whose matches are flown to
     AddToBar(BarLabel('Search'), 52, 6);
@@ -2087,6 +2103,7 @@ begin
       FTerrainView.OnMouseDown := TerrainMouseDown;
       FTerrainView.ShowLabels := FViewOptions.TerrainLabels;
       FTerrainView.Autopilot := FViewOptions.TerrainAutopilot;
+      FTerrainView.GroundHug := FViewOptions.TerrainGroundHug;
       UpdateTerrainLabels;
     end;
     FTerrainView.MaxDetail := ChosenTerrainDetail;
@@ -2517,11 +2534,52 @@ begin
   if FTerrainUpdating then
     Exit;
   FViewOptions.TerrainAutopilot := FTerrainAutopilotBox.IsChecked;
+  // No hugging without the autopilot
+  if not FTerrainAutopilotBox.IsChecked and FTerrainHugBox.IsChecked then
+  begin
+    FTerrainUpdating := True;
+    try
+      FTerrainHugBox.IsChecked := False;
+    finally
+      FTerrainUpdating := False;
+    end;
+    FViewOptions.TerrainGroundHug := False;
+  end;
   SaveViewOptions;
   if FTerrainView <> nil then
+  begin
     FTerrainView.Autopilot := FTerrainAutopilotBox.IsChecked;
+    FTerrainView.GroundHug := FTerrainHugBox.IsChecked;
+  end;
   AddLog(IfThen(FTerrainAutopilotBox.IsChecked, '3D: autopilot on, keeping 50 m clear of ' +
     'the ground', '3D: autopilot off'));
+  FocusTerrainView;
+end;
+
+procedure TfrmMain.TerrainHugChange(Sender: TObject);
+begin
+  if FTerrainUpdating then
+    Exit;
+  FViewOptions.TerrainGroundHug := FTerrainHugBox.IsChecked;
+  // Hugging is the autopilot's
+  if FTerrainHugBox.IsChecked and not FTerrainAutopilotBox.IsChecked then
+  begin
+    FTerrainUpdating := True;
+    try
+      FTerrainAutopilotBox.IsChecked := True;
+    finally
+      FTerrainUpdating := False;
+    end;
+    FViewOptions.TerrainAutopilot := True;
+  end;
+  SaveViewOptions;
+  if FTerrainView <> nil then
+  begin
+    FTerrainView.Autopilot := FTerrainAutopilotBox.IsChecked;
+    FTerrainView.GroundHug := FTerrainHugBox.IsChecked;
+  end;
+  AddLog(IfThen(FTerrainHugBox.IsChecked, '3D: hugging the ground, 25 to 75 m above it',
+    '3D: no longer hugging the ground'));
   FocusTerrainView;
 end;
 

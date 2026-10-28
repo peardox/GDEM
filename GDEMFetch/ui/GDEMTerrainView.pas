@@ -514,6 +514,13 @@ type
     { Shows on the speed panel whether the autopilot is on, and climbing. }
     procedure UpdateAutopilotText;
 
+    { Reader for @link(GroundHug). @returns(@true if on.) }
+    function GetGroundHug: Boolean;
+
+    { Writer for @link(GroundHug).
+      @param(AValue @true to hug the ground.) }
+    procedure SetGroundHug(AValue: Boolean);
+
     { Reader for @link(Autopilot). @returns(@true if on.) }
     function GetAutopilot: Boolean;
 
@@ -752,6 +759,10 @@ type
       @code(AUTOPILOT_CLEARANCE) (50 m) above it, climbing ahead of time
       for higher ground on the way. }
     property Autopilot: Boolean read GetAutopilot write SetAutopilot;
+
+    { With @link(Autopilot) on, @true to hug the ground: 25 to 75 m above
+      it, aiming at 50 m; the height keys and the wheel then do nothing. }
+    property GroundHug: Boolean read GetGroundHug write SetGroundHug;
 
     { Told when L turns the place names on or off, to remember it. }
     property OnLabelsToggle: TNotifyEvent read FOnLabelsToggle write FOnLabelsToggle;
@@ -2161,10 +2172,30 @@ begin
     Exit;
   if not FFlight.Autopilot then
     FSpeedPanel.AutopilotText := ''
+  else if FFlight.GroundHug then
+  begin
+    if FFlight.AutopilotClimbing then
+      FSpeedPanel.AutopilotText := 'Hug climb'
+    else if FFlight.AutopilotDescending then
+      FSpeedPanel.AutopilotText := 'Hug descend'
+    else
+      FSpeedPanel.AutopilotText := 'Hugging';
+  end
   else if FFlight.AutopilotClimbing then
     FSpeedPanel.AutopilotText := 'Auto climb'
   else
     FSpeedPanel.AutopilotText := 'Autopilot';
+end;
+
+function TTerrainView.GetGroundHug: Boolean;
+begin
+  Result := FFlight.GroundHug;
+end;
+
+procedure TTerrainView.SetGroundHug(AValue: Boolean);
+begin
+  FFlight.GroundHug := AValue;
+  UpdateAutopilotText;
 end;
 
 function TTerrainView.GetAutopilot: Boolean;
