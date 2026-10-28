@@ -6,8 +6,8 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 28 October 2026, 16:55, after the fix for launching with no
-data folder yet (on top of `3f947dc` "Handover").
+Last updated: 28 October 2026, 16:05, after the owner pushed `44dc3a5`
+"Handover" and before a new conversation.
 
 ## Where to pick up (28 October 2026, 16:00)
 
@@ -27,10 +27,6 @@ handled in the sections below.
 
 **Not yet built (newest first), and what to check:**
 
-0. First flight from scratch (see "Launching with no data folder yet"
-   below): the log line `3D: preparing for flight: opening the data
-   folder ...`, then `3D: preparing for flight at ...: N tile(s) to
-   download` with N > 0, and the dialog downloading them.
 1. Cover with a picture (`TTerrainView.PictureOfView`): the log line
    `3D: covered with a picture of the view` or `... no picture`; if the
    picture shows only the dark background, `MakeScreenshot` does not
@@ -2042,34 +2038,6 @@ start at 7,070 m, below the 8,848 m summit (1000 m above the ground
   `Max(ground at the start, ground at the target) + height`, so the tilt
   works out from 1000 m above a summit.
 
-### Launching with no data folder yet (28 October 2026)
-
-The owner deleted `settings.json` and the rest, started from scratch,
-searched for Squid Game island and pressed the arrow: "The data folder is
-not available, so there is no ground to fly over." A launch is meant to
-download the tiles round the place itself; nothing need be downloaded
-first. Cause: the default data folder (`Documents/ASTGTM`) is made only
-by `WithStore` (`EnsureCreated`), which Fetch selection and imports go
-through, but `PrepareFlight` only tested `FStore.IsAvailable`, which is
-false until the folder exists. Not yet built.
-
-- `PrepareFlight`: if the store is not available or not open
-  (`FStoreOpen`), it logs `3D: preparing for flight: opening the data
-  folder ...` and calls `WithStore`: a folder never used is made, its
-  bitmap loaded or, being new, made by a Rescan job; a used folder on a
-  missing drive gets the Retry dialog. The action queues
-  (`ForceQueue`) `PrepareFlight` again with the same arguments, after
-  `CloseImagery` (a service made before the folder existed would have no
-  disk cache), or reports an error if the folder still is not open. Queued
-  because the Rescan job calls its done procedure from its own queued
-  clean-up, and `PrepareFlight` shows a blocking modal dialog.
-- With no tile index (its download failed), every window tile not
-  downloaded is asked for; CMR's lookup drops sea tiles. Fetching ahead
-  in flight still needs the index, so it does not ask for sea tiles every
-  3 seconds.
-- Fetching ahead in flight was already there (`FetchTilesAhead`, see
-  "Fetching ahead" above); it needed only the folder.
-
 ### README: token note (28 October 2026)
 
 At the owner's request, a GitHub `[!IMPORTANT]` note opens the README:
@@ -2077,6 +2045,40 @@ a free NASA Earthdata Login account and bearer token are needed
 (<https://urs.earthdata.nasa.gov>, Generate Token, File > Settings);
 NASA's requirement, not ours; run by NASA's ESDIS for the research
 community, not a company collecting data; free; tokens last 60 days.
+
+### Autopilot and Mach 1 (28 October 2026, after `44dc3a5`)
+
+The owner: an Autopilot check box that for now only makes sure the
+flight does not crash into a mountain, by watching the height of the
+patches ahead and keeping at least 50 m above them; Ground Hugging Mode
+(keep 50 m from the ground) to come later. Then: M for Mach 1, speeding
+up over several seconds. Not yet built.
+
+- `TFlight.Autopilot`, `AutopilotClimbing`, private `KeepClear` (in
+  `Step` after moving, before the crash test, not while the start is
+  pending): ground + `AUTOPILOT_CLEARANCE` (50) at once if below; then
+  `AUTOPILOT_SAMPLES` (32) places along the heading out to
+  max(speed x `AUTOPILOT_LOOK_SECONDS` (20), `AUTOPILOT_MIN_LOOK`
+  (1000 m)) (`DestinationPoint`), the climb rate each needs to be 50 m
+  above it on arrival, the largest times `AUTOPILOT_CLIMB_MARGIN` (1.5).
+  Never descends. Heights come from `FGround` (the finest heights read,
+  as drawn), so an unread finer level can hide a few tens of metres.
+  Simulated in Python over a 4,000 m hill and a 3,000 m spike 300 m wide
+  at 50 to 3,000 m/s: never below 50 m; the last-moment lifts were at
+  most 1 m at 300 m/s, 9 m at 1,000 and 67 m at 3,000 (the spike).
+- `TFlight.SpeedTo(target, seconds)` (`FSpeedTarget`, `FSpeedChange` =
+  target / seconds), cancelled by Up, Down or `Stop`; `MACH_1_SPEED`
+  340.3 m/s, `MACH_1_SECONDS` 5. View: M key; `Autopilot` property;
+  `UpdateAutopilotText` each tick. HUD: speed panel `AutopilotText`
+  (`Autopilot` / `Auto climb`, accent colour, right of the camera line)
+  and `Mach 0.85` in place of the word "speed" from `MACH_SHOWN_FROM`
+  (272 m/s); controls panel line M (13 lines).
+- `TViewOptions.TerrainAutopilot` (`terrainAutopilot`, default off);
+  `FTerrainAutopilotBox` after Flags; `TerrainAutopilotChange` logs and
+  applies; the view gets it when made. The 3D toolbar is now about
+  1,200 pixels wide.
+- Next asked for: Ground Hugging Mode, keeping 50 m above the ground
+  both ways (descending too), probably a choice beside Autopilot.
 
 ## NASA: what was found by testing
 

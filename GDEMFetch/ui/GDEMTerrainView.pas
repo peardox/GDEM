@@ -511,6 +511,16 @@ type
         had, or it came out empty.) }
     function PictureOfView: TBitmap;
 
+    { Shows on the speed panel whether the autopilot is on, and climbing. }
+    procedure UpdateAutopilotText;
+
+    { Reader for @link(Autopilot). @returns(@true if on.) }
+    function GetAutopilot: Boolean;
+
+    { Writer for @link(Autopilot).
+      @param(AValue @true to turn it on.) }
+    procedure SetAutopilot(AValue: Boolean);
+
     { Writer for @link(FlightSpeed).
       @param(AValue Metres a second.) }
     procedure SetFlightSpeed(AValue: Double);
@@ -737,6 +747,11 @@ type
 
     { @true to label the places near the flight. }
     property ShowLabels: Boolean read FShowLabels write SetShowLabels;
+
+    { @true to keep the flight clear of the ground: at least
+      @code(AUTOPILOT_CLEARANCE) (50 m) above it, climbing ahead of time
+      for higher ground on the way. }
+    property Autopilot: Boolean read GetAutopilot write SetAutopilot;
 
     { Told when L turns the place names on or off, to remember it. }
     property OnLabelsToggle: TNotifyEvent read FOnLabelsToggle write FOnLabelsToggle;
@@ -1018,6 +1033,7 @@ begin
   FCompass.Known := True;
   FSpeedPanel.Speed := FFlight.Speed;
   FSpeedPanel.Tilt := FFlight.Tilt;
+  UpdateAutopilotText;
   if Assigned(FOnFlightMoved) then
     FOnFlightMoved(Self);
 end;
@@ -1244,6 +1260,8 @@ begin
     LSpeed := FFlight.Speed;
     if not FPaused and FFlight.Step(FHeld, LSeconds) then
       PlaceCamera;
+    // Also when hovering, when the camera does not move
+    UpdateAutopilotText;
     if FFlight.Crashed and not LWasCrashed then
       ReportCrash(LSpeed);
 
@@ -1989,6 +2007,12 @@ begin
     FFlight.Stop;
     UpdateInstruments;
   end
+  else if (Key = vkM) or ((Key = 0) and (UpCase(KeyChar) = 'M')) then
+  begin
+    // Up to the speed of sound over a few seconds; Up, Down or H take over
+    if not FFlight.Crashed and not FPaused then
+      FFlight.SpeedTo(MACH_1_SPEED, MACH_1_SECONDS);
+  end
   else if (Key = vkR) or ((Key = 0) and (UpCase(KeyChar) = 'R')) then
     ResetView
   else
@@ -2129,6 +2153,29 @@ begin
         'ready', [Result.Width, Result.Height]))
     else
       FOnLog(Self, '3D: covered while it is got ready (no picture of the view could be had)');
+end;
+
+procedure TTerrainView.UpdateAutopilotText;
+begin
+  if FSpeedPanel = nil then
+    Exit;
+  if not FFlight.Autopilot then
+    FSpeedPanel.AutopilotText := ''
+  else if FFlight.AutopilotClimbing then
+    FSpeedPanel.AutopilotText := 'Auto climb'
+  else
+    FSpeedPanel.AutopilotText := 'Autopilot';
+end;
+
+function TTerrainView.GetAutopilot: Boolean;
+begin
+  Result := FFlight.Autopilot;
+end;
+
+procedure TTerrainView.SetAutopilot(AValue: Boolean);
+begin
+  FFlight.Autopilot := AValue;
+  UpdateInstruments;
 end;
 
 procedure TTerrainView.SetFlightSpeed(AValue: Double);

@@ -116,6 +116,8 @@ type
     FTerrainControlsCollapsed: Boolean;
     { Backing field for @link(TerrainLabels). }
     FTerrainLabels: Boolean;
+    { Backing field for @link(TerrainAutopilot). }
+    FTerrainAutopilot: Boolean;
   public
     { Sets the defaults: tile tints and markers on, the other layers
       off. }
@@ -192,6 +194,10 @@ type
     { The 3D tab's Labels switch: @true to show the names of places on
       poles over the ground. @true by default. }
     property TerrainLabels: Boolean read FTerrainLabels write FTerrainLabels;
+
+    { The 3D tab's Autopilot box: @true to keep the flight clear of the
+      ground. @false by default. }
+    property TerrainAutopilot: Boolean read FTerrainAutopilot write FTerrainAutopilot;
   end;
 
 { The layers to turn on the first time the user chooses how GDEMFetch

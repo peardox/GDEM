@@ -548,6 +548,9 @@ type
     { The 3D tab's Flags box: place names on poles. }
     FTerrainLabelsBox: TCheckBox;
 
+    { The 3D tab's Autopilot box: keeps the flight clear of the ground. }
+    FTerrainAutopilotBox: TCheckBox;
+
     { @true while @link(FFlightTargetLatitude) and
       @link(FFlightTargetLongitude) hold the place last chosen on the map,
       by a search or a click: Show in 3D starts the flight looking at it
@@ -929,6 +932,11 @@ type
       and remembers it.
       @param(Sender The check box.) }
     procedure TerrainLabelsChange(Sender: TObject);
+
+    { Turns the 3D view's autopilot on or off as the Autopilot box says,
+      and remembers it.
+      @param(Sender The check box.) }
+    procedure TerrainAutopilotChange(Sender: TObject);
 
     { The 3D view's L key turned the place names on or off: ticks the box
       to match and remembers it.
@@ -2006,6 +2014,13 @@ begin
     FTerrainLabelsBox.OnChange := TerrainLabelsChange;
     AddToBar(FTerrainLabelsBox, 70, 16);
 
+    FTerrainAutopilotBox := TCheckBox.Create(Self);
+    FTerrainAutopilotBox.Text := 'Autopilot';
+    FTerrainAutopilotBox.Hint := 'Keeps you at least 50 m above the ground ahead';
+    FTerrainAutopilotBox.IsChecked := FViewOptions.TerrainAutopilot;
+    FTerrainAutopilotBox.OnChange := TerrainAutopilotChange;
+    AddToBar(FTerrainAutopilotBox, 84, 16);
+
     // A copy of the Map tab's search, whose matches are flown to
     AddToBar(BarLabel('Search'), 52, 6);
     FTerrainSearch := TEdit.Create(Self);
@@ -2071,6 +2086,7 @@ begin
       FTerrainView.OnFlightMoved := TerrainFlightMoved;
       FTerrainView.OnMouseDown := TerrainMouseDown;
       FTerrainView.ShowLabels := FViewOptions.TerrainLabels;
+      FTerrainView.Autopilot := FViewOptions.TerrainAutopilot;
       UpdateTerrainLabels;
     end;
     FTerrainView.MaxDetail := ChosenTerrainDetail;
@@ -2252,52 +2268,21 @@ begin
     ReportError('Please wait for the current job to finish, or cancel it, first.');
     Exit;
   end;
-  if not FStore.IsAvailable or not FStoreOpen then
+  if not FStore.IsAvailable then
   begin
-    // A data folder not made yet (a first run: nothing downloaded) is
-    // made here, and its downloaded-tiles bitmap set up; a drive that was
-    // used before and is missing is asked for, with Retry. Then this runs
-    // again, queued, so its own modal dialog does not open inside the
-    // finishing job's clean-up.
-    LTileArg := ATile;
-    LLatitude := ALatitude;
-    LLongitude := ALongitude;
-    LPlaceArg := APlace;
-    LFinishArg := AFinish;
-    AddLog('3D: preparing for flight: opening the data folder ' + FStore.Root + ' first');
-    WithStore(
-      procedure
-      begin
-        TThread.ForceQueue(nil,
-          procedure
-          begin
-            if not FStore.IsAvailable or not FStoreOpen then
-            begin
-              ReportError('The data folder ' + FStore.Root + ' could not be opened, so ' +
-                'the tiles to fly over cannot be downloaded. Choose another folder in ' +
-                'File > Settings.');
-              Exit;
-            end;
-            // Imagery asked for before the folder was there would not be
-            // kept on disk; made again on first need, with the cache
-            CloseImagery;
-            PrepareFlight(LTileArg, LLatitude, LLongitude, LPlaceArg, LFinishArg);
-          end);
-      end);
+    ReportError('The data folder is not available, so there is no ground to fly over.');
     Exit;
   end;
   LTileName := ATile;
   LPlace := APlace;
 
   // The tiles the view will load round the place that exist but are not
-  // here yet. With no tile index (its download failed, say) every tile in
-  // the window is asked for: CMR's lookup leaves out those with no data,
-  // which the summary counts as having none
+  // here yet
   LMissing := nil;
-  for LTile in TerrainWindowTiles(ALatitude, ALongitude) do
-    if (FTileIndex.IsEmpty or FTileIndex.Has(LTile.Y, LTile.X)) and
-       not FDownloaded.Has(LTile.Y, LTile.X) then
-      LMissing := LMissing + [TileName(LTile.Y, LTile.X)];
+  if not FTileIndex.IsEmpty then
+    for LTile in TerrainWindowTiles(ALatitude, ALongitude) do
+      if FTileIndex.Has(LTile.Y, LTile.X) and not FDownloaded.Has(LTile.Y, LTile.X) then
+        LMissing := LMissing + [TileName(LTile.Y, LTile.X)];
   LDownload := Length(LMissing) > 0;
   if LDownload and (FSettings.BearerToken = '') then
   begin
@@ -2525,6 +2510,19 @@ begin
     end;
   end;
   FTerrainView.PlaceLabels := LLabels;
+end;
+
+procedure TfrmMain.TerrainAutopilotChange(Sender: TObject);
+begin
+  if FTerrainUpdating then
+    Exit;
+  FViewOptions.TerrainAutopilot := FTerrainAutopilotBox.IsChecked;
+  SaveViewOptions;
+  if FTerrainView <> nil then
+    FTerrainView.Autopilot := FTerrainAutopilotBox.IsChecked;
+  AddLog(IfThen(FTerrainAutopilotBox.IsChecked, '3D: autopilot on, keeping 50 m clear of ' +
+    'the ground', '3D: autopilot off'));
+  FocusTerrainView;
 end;
 
 procedure TfrmMain.TerrainLabelsChange(Sender: TObject);

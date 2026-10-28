@@ -359,13 +359,8 @@ with an **Abort** button:
 
 1. The tiles the view will load round the place (the 170 km window: about
    20 tiles in Britain) that exist but are not downloaded yet are
-   downloaded, as Fetch selection would. Nothing needs downloading
-   beforehand: on a first run the data folder is made at this point, and
-   every tile round the place comes down now. With no bearer token they
-   are left out and drawn flat. If the tile index could not be had, every
-   tile in the window is asked for, and CMR's lookup leaves out those over
-   open sea. If the data folder is on a drive that is not connected, you
-   are asked to connect it (Retry) first.
+   downloaded, as Fetch selection would. With no bearer token they are
+   left out and drawn flat.
 2. The ground is made, and with Realistic on its imagery is fetched, the
    bar counting the pieces made and still to come.
 3. The dialog closes and the 3D tab opens, ready to fly.
@@ -419,6 +414,8 @@ clicks count: finding a place selects its tile but stays on the map.
 | Climb or descend | Page Up and Page Down, faster the higher you are above the ground (half that height a second, at least 50 m a second); or the mouse wheel, a tenth of the height a notch |
 | Tilt the camera up or down | Q and A, 30 degrees a second, from 30 degrees above the level to straight down; or left-drag up and down |
 | Stop to a hover | H |
+| Mach 1 | M: speeds up (or slows down) smoothly to the speed of sound, 1,225 km/h, over about five seconds; Up, Down or H take over. From Mach 0.8 the speed panel shows the Mach number |
+| Keep clear of the ground | **Autopilot** on the 3D toolbar |
 | Pause, and carry on | Space. While paused the flight stays still and a banner says so; looking round with the mouse still works |
 | Bookmark the view | B; see [Bookmarks](#bookmarks) |
 | Flags (place names) on or off | L, or **Flags** on the 3D toolbar |
@@ -432,6 +429,16 @@ Changing **Detail**, **Distance**, **Heights** or **Realistic** makes the
 view again where you are, behind the Preparing for flight dialog, and
 puts you back exactly as you were: hovering while it works, then off
 again at your speed once the dialog closes.
+
+**Autopilot.** With **Autopilot** ticked (kept in `view.json`, off at
+first) the flight never goes below 50 m above the ground. It looks at
+the ground along the way ahead (as far as 20 seconds of flight, at least
+1 km), as finely as the patches loaded there show it, and climbs ahead
+of time, fast enough to be 50 m above each place before reaching it; if
+you are already lower than that, as after Page Down or the wheel, it
+lifts you straight to 50 m. It never descends for you. The speed panel
+says `Autopilot`, or `Auto climb` while it is climbing. A ground-hugging
+mode (keeping 50 m above the ground, down as well as up) is planned.
 
 Going below the ground is a **crash**: the flight stops where it hit, a
 banner says so (and the Debug tab where), and nothing moves until it

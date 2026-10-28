@@ -33,6 +33,31 @@ const
     it, metres. }
   MIN_FLIGHT_START_BACK = 200;
 
+  { The speed of sound in air at sea level at 15 degrees C, metres a
+    second: Mach 1, the speed M goes to. }
+  MACH_1_SPEED = 340.3;
+
+  { Seconds M takes to reach Mach 1 from a hover; less from nearer it. }
+  MACH_1_SECONDS = 5;
+
+  { The least height the autopilot keeps above the ground, now and ahead,
+    metres. }
+  AUTOPILOT_CLEARANCE = 50;
+
+  { How far ahead the autopilot looks: the distance flown in this many
+    seconds at the speed now, at least @link(AUTOPILOT_MIN_LOOK). }
+  AUTOPILOT_LOOK_SECONDS = 20;
+
+  { The least distance the autopilot looks ahead, metres. }
+  AUTOPILOT_MIN_LOOK = 1000;
+
+  { Places along the way ahead whose ground the autopilot looks at. }
+  AUTOPILOT_SAMPLES = 32;
+
+  { How much faster than just enough the autopilot climbs, so it is
+    clear of the ground ahead before it gets there. }
+  AUTOPILOT_CLIMB_MARGIN = 1.5;
+
   { The farthest a start looking at a place is from it, metres, however
     high and however shallow the tilt. }
   MAX_FLIGHT_START_BACK = 30000;
@@ -163,6 +188,16 @@ type
     FStartBack: Double;
     { Backing field for @link(LookStretch). }
     FLookStretch: Double;
+    { The speed being gone to by @link(SpeedTo), metres a second; less than
+      0 when none. }
+    FSpeedTarget: Double;
+    { How fast the speed changes on the way to @link(FSpeedTarget), metres
+      a second each second. }
+    FSpeedChange: Double;
+    { Backing field for @link(Autopilot). }
+    FAutopilot: Boolean;
+    { Backing field for @link(AutopilotClimbing). }
+    FAutopilotClimbing: Boolean;
 
     { The height above the ground now, metres, for the climb rate; the
       altitude if the ground is not known.
@@ -172,6 +207,14 @@ type
     { Moves along a great circle, turning the heading as the circle does.
       @param(AMetres How far, along the ground.) }
     procedure MoveOn(AMetres: Double);
+
+    { The autopilot: keeps at least @link(AUTOPILOT_CLEARANCE) above the
+      ground below at once, and climbs ahead of time for higher ground
+      along the way ahead, fast enough to be that far above each place
+      looked at before reaching it. It never descends.
+      @param(ASeconds The time of this step.)
+      @returns(@true if it climbed.) }
+    function KeepClear(ASeconds: Double): Boolean;
   public
     { Makes a flight hovering at 0, 0; call @link(Start).
       @param(AGround Gives the ground's height; required for the start
@@ -237,6 +280,13 @@ type
     { Stops at once, to a hover. }
     procedure Stop;
 
+    { Changes the speed smoothly to a target over a time, as M does for
+      Mach 1; Up, Down or a hover take over from it.
+      @param(ATarget The speed, metres a second.)
+      @param(ASeconds How long a change from a hover would take; nearer the
+        target it takes as much less.) }
+    procedure SpeedTo(ATarget, ASeconds: Double);
+
     { Sets the speed at once.
       @param(AValue Metres a second, 0 to @link(MAX_FLIGHT_SPEED).) }
     procedure SetSpeed(AValue: Double);
@@ -288,6 +338,14 @@ type
     { @true once the flight has gone below the ground; it then stays where
       it hit, on the ground, and does nothing until @link(Start). }
     property Crashed: Boolean read FCrashed;
+
+    { @true to keep clear of the ground: at least
+      @link(AUTOPILOT_CLEARANCE) above it, climbing ahead of time for
+      higher ground on the way. }
+    property Autopilot: Boolean read FAutopilot write FAutopilot;
+
+    { @true if the autopilot climbed in the last step. }
+    property AutopilotClimbing: Boolean read FAutopilotClimbing;
 
     { How far above the ground the flight starts, metres. }
     property StartHeight: Double read FStartHeight write FStartHeight;
@@ -346,6 +404,7 @@ begin
   FStartHeight := DEFAULT_FLIGHT_START_HEIGHT;
   FTilt := DEFAULT_FLIGHT_TILT;
   FLookStretch := 1;
+  FSpeedTarget := -1;
 end;
 
 procedure TFlight.Start(ALatitude, ALongitude: Double);
@@ -394,6 +453,44 @@ begin
   FTargetLatitude := ATargetLatitude;
   FTargetLongitude := ATargetLongitude;
   FTargetSet := True;
+end;
+
+function TFlight.KeepClear(ASeconds: Double): Boolean;
+var
+  LGround, LLook, LDistance, LLatitude, LLongitude, LRate, LNeeded: Double;
+  I: Integer;
+begin
+  Result := False;
+  if not Assigned(FGround) then
+    Exit;
+  // Below the clearance now: straight up to it
+  if FGround(FLatitude, FLongitude, LGround) and
+     (FAltitude < LGround + AUTOPILOT_CLEARANCE) then
+  begin
+    FAltitude := LGround + AUTOPILOT_CLEARANCE;
+    Result := True;
+  end;
+  if (FSpeed <= 0) or (ASeconds <= 0) then
+    Exit;
+  // Ahead: the steepest climb any place on the way needs, to be clear of
+  // it on arrival
+  LLook := Max(FSpeed * AUTOPILOT_LOOK_SECONDS, AUTOPILOT_MIN_LOOK);
+  LNeeded := 0;
+  for I := 1 to AUTOPILOT_SAMPLES do
+  begin
+    LDistance := LLook * I / AUTOPILOT_SAMPLES;
+    DestinationPoint(FLatitude, FLongitude, FHeading, LDistance, LLatitude, LLongitude);
+    if not FGround(LLatitude, LLongitude, LGround) then
+      Continue;
+    LRate := (LGround + AUTOPILOT_CLEARANCE - FAltitude) / (LDistance / FSpeed);
+    LNeeded := Max(LNeeded, LRate);
+  end;
+  if LNeeded > 0 then
+  begin
+    FAltitude := Min(FAltitude + LNeeded * AUTOPILOT_CLIMB_MARGIN * ASeconds,
+      MAX_FLIGHT_ALTITUDE);
+    Result := True;
+  end;
 end;
 
 procedure TFlight.SetSpeed(AValue: Double);
@@ -483,10 +580,25 @@ begin
   // Speed: faster the faster already, never backwards
   LBefore := FSpeed;
   LRate := Max(FLIGHT_ACCEL_MIN, FLIGHT_ACCEL_SHARE * FSpeed) * ASeconds;
+  // The speed keys take over from a change to a target speed
+  if AControls * [fcFaster, fcSlower] <> [] then
+    FSpeedTarget := -1;
   if fcFaster in AControls then
     FSpeed := FSpeed + LRate;
   if fcSlower in AControls then
     FSpeed := FSpeed - LRate;
+  if FSpeedTarget >= 0 then
+  begin
+    if Abs(FSpeedTarget - FSpeed) <= FSpeedChange * ASeconds then
+    begin
+      FSpeed := FSpeedTarget;
+      FSpeedTarget := -1;
+    end
+    else if FSpeedTarget > FSpeed then
+      FSpeed := FSpeed + FSpeedChange * ASeconds
+    else
+      FSpeed := FSpeed - FSpeedChange * ASeconds;
+  end;
   FSpeed := EnsureRange(FSpeed, 0, MAX_FLIGHT_SPEED);
   if FSpeed <> LBefore then
     Result := True;
@@ -518,6 +630,14 @@ begin
   if FSpeed > 0 then
   begin
     MoveOn(FSpeed * ASeconds);
+    Result := True;
+  end;
+
+  // The autopilot before the crash test, so it never lets one happen
+  FAutopilotClimbing := False;
+  if FAutopilot and not FStartPending and KeepClear(ASeconds) then
+  begin
+    FAutopilotClimbing := True;
     Result := True;
   end;
 
@@ -553,6 +673,15 @@ end;
 procedure TFlight.Stop;
 begin
   FSpeed := 0;
+  FSpeedTarget := -1;
+end;
+
+procedure TFlight.SpeedTo(ATarget, ASeconds: Double);
+begin
+  if FCrashed then
+    Exit;
+  FSpeedTarget := EnsureRange(ATarget, 0, MAX_FLIGHT_SPEED);
+  FSpeedChange := Max(FSpeedTarget, 1) / Max(ASeconds, 0.1);
 end;
 
 procedure TFlight.SetState(ALatitude, ALongitude, AAltitude, AHeading, ASpeed, ATilt: Double);

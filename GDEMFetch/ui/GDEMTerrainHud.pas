@@ -217,6 +217,12 @@ type
     FSpeed: Double;
     { Backing field for @link(Tilt). }
     FTilt: Double;
+    { Backing field for @link(AutopilotText). }
+    FAutopilotText: string;
+
+    { Writer for @link(AutopilotText).
+      @param(AValue The text.) }
+    procedure SetAutopilotText(const AValue: string);
 
     { Writer for @link(Speed).
       @param(AValue Metres a second.) }
@@ -240,6 +246,10 @@ type
 
     { The camera's tilt below the level, degrees; negative looks up. }
     property Tilt: Double read FTilt write SetTilt;
+
+    { What the autopilot is doing, shown at the right of the camera line:
+      empty when it is off. }
+    property AutopilotText: string read FAutopilotText write SetAutopilotText;
   end;
 
   { @abstract(A banner across the middle of the view, for news such as a
@@ -477,12 +487,13 @@ const
   LABEL_BOOKMARK = $FF8AD4FF;
 
   { The lines of the controls panel. }
-  CONTROL_LINES: array[0..11] of TControlLine = (
+  CONTROL_LINES: array[0..12] of TControlLine = (
     (Key: 'Up / Down'; Action: 'faster / slower'),
     (Key: 'Left / Right'; Action: 'turn'),
     (Key: 'PgUp / PgDn'; Action: 'climb / descend'),
     (Key: 'Q / A'; Action: 'camera up / down'),
     (Key: 'H'; Action: 'hover (stop)'),
+    (Key: 'M'; Action: 'Mach 1'),
     (Key: 'Space'; Action: 'pause / carry on'),
     (Key: 'B'; Action: 'bookmark this view'),
     (Key: 'L'; Action: 'flags on / off'),
@@ -490,6 +501,11 @@ const
     (Key: 'Left-drag'; Action: 'look round'),
     (Key: 'Wheel'; Action: 'climb / descend'),
     (Key: 'Double-click'; Action: 'start again'));
+  { The speed of sound used for the Mach number shown, metres a second
+    (as @code(MACH_1_SPEED) in @code(GDEMFlight)). }
+  MACH_SPEED = 340.3;
+  { The Mach number is shown from this speed, metres a second (Mach 0.8). }
+  MACH_SHOWN_FROM = 272;
   { The least a height must change to be drawn again, metres. }
   HEIGHT_STEP = 0.5;
   { Heights from this many metres up are written in kilometres. }
@@ -850,6 +866,14 @@ begin
   Repaint;
 end;
 
+procedure TTerrainSpeedPanel.SetAutopilotText(const AValue: string);
+begin
+  if AValue = FAutopilotText then
+    Exit;
+  FAutopilotText := AValue;
+  Repaint;
+end;
+
 procedure TTerrainSpeedPanel.SetTilt(AValue: Double);
 begin
   if Abs(AValue - FTilt) < TILT_STEP then
@@ -884,7 +908,12 @@ begin
   Canvas.Fill.Color := HUD_ACCENT;
   Canvas.Font.Size := 11;
   Canvas.Font.Style := [];
-  Canvas.FillText(LLine, 'speed', False, 1, [], TTextAlign.Trailing, TTextAlign.Center);
+  // Near and past the speed of sound, the Mach number in place of the word
+  if FSpeed >= MACH_SHOWN_FROM then
+    Canvas.FillText(LLine, Format('Mach %.2f', [FSpeed / MACH_SPEED]), False, 1, [],
+      TTextAlign.Trailing, TTextAlign.Center)
+  else
+    Canvas.FillText(LLine, 'speed', False, 1, [], TTextAlign.Trailing, TTextAlign.Center);
 
   if Round(FTilt) > 0 then
     LTiltText := Format('Camera %d%s down', [Round(FTilt), DEGREE_SIGN])
@@ -895,6 +924,12 @@ begin
   Canvas.Fill.Color := HUD_DIM;
   Canvas.FillText(RectF(10, 32, Width - 10, Height - 4), LTiltText, False, 1, [],
     TTextAlign.Leading, TTextAlign.Center);
+  if FAutopilotText <> '' then
+  begin
+    Canvas.Fill.Color := HUD_ACCENT;
+    Canvas.FillText(RectF(10, 32, Width - 10, Height - 4), FAutopilotText, False, 1, [],
+      TTextAlign.Trailing, TTextAlign.Center);
+  end;
 end;
 
 { TTerrainBanner }
