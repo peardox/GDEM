@@ -6,8 +6,8 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 28 October 2026, 16:05, after the owner pushed `44dc3a5`
-"Handover" and before a new conversation.
+Last updated: 28 October 2026, 16:55, after the fix for launching with no
+data folder yet (on top of `3f947dc` "Handover").
 
 ## Where to pick up (28 October 2026, 16:00)
 
@@ -27,6 +27,10 @@ handled in the sections below.
 
 **Not yet built (newest first), and what to check:**
 
+0. First flight from scratch (see "Launching with no data folder yet"
+   below): the log line `3D: preparing for flight: opening the data
+   folder ...`, then `3D: preparing for flight at ...: N tile(s) to
+   download` with N > 0, and the dialog downloading them.
 1. Cover with a picture (`TTerrainView.PictureOfView`): the log line
    `3D: covered with a picture of the view` or `... no picture`; if the
    picture shows only the dark background, `MakeScreenshot` does not
@@ -2037,6 +2041,34 @@ start at 7,070 m, below the 8,848 m summit (1000 m above the ground
 - `TFlight.Step`: a pending look-at start above the ground goes to
   `Max(ground at the start, ground at the target) + height`, so the tilt
   works out from 1000 m above a summit.
+
+### Launching with no data folder yet (28 October 2026)
+
+The owner deleted `settings.json` and the rest, started from scratch,
+searched for Squid Game island and pressed the arrow: "The data folder is
+not available, so there is no ground to fly over." A launch is meant to
+download the tiles round the place itself; nothing need be downloaded
+first. Cause: the default data folder (`Documents/ASTGTM`) is made only
+by `WithStore` (`EnsureCreated`), which Fetch selection and imports go
+through, but `PrepareFlight` only tested `FStore.IsAvailable`, which is
+false until the folder exists. Not yet built.
+
+- `PrepareFlight`: if the store is not available or not open
+  (`FStoreOpen`), it logs `3D: preparing for flight: opening the data
+  folder ...` and calls `WithStore`: a folder never used is made, its
+  bitmap loaded or, being new, made by a Rescan job; a used folder on a
+  missing drive gets the Retry dialog. The action queues
+  (`ForceQueue`) `PrepareFlight` again with the same arguments, after
+  `CloseImagery` (a service made before the folder existed would have no
+  disk cache), or reports an error if the folder still is not open. Queued
+  because the Rescan job calls its done procedure from its own queued
+  clean-up, and `PrepareFlight` shows a blocking modal dialog.
+- With no tile index (its download failed), every window tile not
+  downloaded is asked for; CMR's lookup drops sea tiles. Fetching ahead
+  in flight still needs the index, so it does not ask for sea tiles every
+  3 seconds.
+- Fetching ahead in flight was already there (`FetchTilesAhead`, see
+  "Fetching ahead" above); it needed only the folder.
 
 ### README: token note (28 October 2026)
 
