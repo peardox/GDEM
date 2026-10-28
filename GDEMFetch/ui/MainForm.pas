@@ -628,7 +628,7 @@ type
     procedure SaveViewOptions;
 
     { Makes the 3D tab's toolbar: Detail and Heights choices, set from
-      @link(FViewOptions), a Reset View button and a line of information.
+      @link(FViewOptions), a Start Again button and a line of information.
       The view itself is made when first needed. }
     procedure Build3DTab;
 
@@ -691,9 +691,13 @@ type
       @param(Sender The combo box.) }
     procedure TerrainHeightsChange(Sender: TObject);
 
-    { Puts the 3D view back to its starting view.
+    { Starts the 3D view's flight again, over the tile shown.
       @param(Sender The button.) }
     procedure TerrainResetClick(Sender: TObject);
+
+    { Gives the 3D view the keyboard, for flying, after a control on the
+      3D toolbar has taken it. }
+    procedure FocusTerrainView;
 
     { The View menu item that shows a layer.
       @param(ALayer The layer.)
@@ -1650,7 +1654,7 @@ begin
     AddToBar(FTerrainRangeBox, 90, 16);
 
     LButton := TButton.Create(Self);
-    LButton.Text := 'Reset View';
+    LButton.Text := 'Start Again';
     LButton.OnClick := TerrainResetClick;
     AddToBar(LButton, 96, 16);
 
@@ -1704,13 +1708,15 @@ begin
     FTerrainView.MaxDetail := ChosenTerrainDetail;
     FTerrainView.Range := ChosenTerrainRange;
     FTerrainView.Exaggeration := ChosenTerrainHeights;
-    // A new tile starts from the starting view; the same one again keeps it
+    FTerrainView.StartHeight := FSettings.FlightStartHeight;
+    // A new tile starts the flight again; the same one again keeps it
     FTerrainView.ShowArea(LSouth, LWest, ATile <> FTerrainTile);
     FTerrainTile := ATile;
     FTerrainInfo.Text := ATile + ' and the tiles round it: loading...';
     AddLog(Format('3D: showing %s and the tiles round it; detail %d, distance detail %s, ' +
-      'heights x %d', [ATile, ChosenTerrainDetail,
-       TERRAIN_RANGE_NAMES[Max(FTerrainRangeBox.ItemIndex, 0)], ChosenTerrainHeights]));
+      'heights x %d; the flight starts %d m above the ground', [ATile, ChosenTerrainDetail,
+       TERRAIN_RANGE_NAMES[Max(FTerrainRangeBox.ItemIndex, 0)], ChosenTerrainHeights,
+       FTerrainView.StartHeight]));
   except
     on E: Exception do
     begin
@@ -1749,8 +1755,8 @@ var
 begin
   AddLog(AText);
   LTile := FTerrainTile;
-  FTerrainInfo.Text := Format('%s and the tiles round it: %d patches. Drag to turn, ' +
-    'right-drag to move, wheel to zoom, double-click to reset.',
+  FTerrainInfo.Text := Format('%s: %d patches. Up/Down speed, Left/Right turn, ' +
+    'PgUp/PgDn height, Q/A camera, Space hover, R start again; drag to look, wheel for height.',
     [LTile, FTerrainView.ShownPatches]);
   // Measured a moment later, once the meshes have been drawn and so sent
   // to the graphics processor
@@ -1782,6 +1788,7 @@ begin
   SaveViewOptions;
   if FTerrainView <> nil then
     FTerrainView.Range := ChosenTerrainRange;
+  FocusTerrainView;
 end;
 
 procedure TfrmMain.SelectTileAt(ALat, ALon: Double; const AName: string);
@@ -1810,6 +1817,13 @@ begin
     Exit;
   ShowTerrainTile(LNames[0], False);
   tabMain.ActiveTab := tab3D;
+  FocusTerrainView;
+end;
+
+procedure TfrmMain.FocusTerrainView;
+begin
+  if (FTerrainView <> nil) and (tabMain.ActiveTab = tab3D) then
+    FTerrainView.SetFocus;
 end;
 
 procedure TfrmMain.swClick3DSwitch(Sender: TObject);
@@ -1830,6 +1844,7 @@ begin
   // again
   if FTerrainView <> nil then
     FTerrainView.MaxDetail := ChosenTerrainDetail;
+  FocusTerrainView;
 end;
 
 procedure TfrmMain.TerrainHeightsChange(Sender: TObject);
@@ -1838,6 +1853,7 @@ begin
     Exit;
   FViewOptions.TerrainHeights := ChosenTerrainHeights;
   SaveViewOptions;
+  FocusTerrainView;
   if FTerrainView = nil then
     Exit;
   // Every patch is made again; TerrainSettled logs when it is done
@@ -1849,6 +1865,7 @@ procedure TfrmMain.TerrainResetClick(Sender: TObject);
 begin
   if FTerrainView <> nil then
     FTerrainView.ResetView;
+  FocusTerrainView;
 end;
 
 { Markers and search }

@@ -49,6 +49,12 @@ const
     which suits every kind of drive. }
   DEFAULT_IMPORT_WORKERS = 1;
 
+  { Default for @link(TGDEMSettings.FlightStartHeight): metres above the
+    ground the 3D view's flight starts at. The same as
+    @code(DEFAULT_FLIGHT_START_HEIGHT) in @code(GDEMFlight), written out so
+    settings do not depend on the 3D units. }
+  DEFAULT_FLIGHT_START_METRES = 10000;
+
   { Most files downloaded at once at any speed. NASA does not publish a
     limit, but cuts off or refuses downloads when it has had enough; the
     downloads then back off by themselves (see @code(TDownloadThrottle)). }
@@ -153,6 +159,8 @@ type
     FDrawing: string;
     { Backing field for @link(GpuPreference). }
     FGpuPreference: string;
+    { Backing field for @link(FlightStartHeight). }
+    FFlightStartHeight: Integer;
 
     { Writer for @link(DataFolder); trims spaces and any trailing path
       separator. It has no other side effects, because Neon may set
@@ -274,6 +282,12 @@ type
       text so that a value this version does not know can never stop the
       settings loading. Defaults to @code(Automatic). }
     property GpuPreference: string read FGpuPreference write FGpuPreference;
+
+    { How far above the ground the 3D view's flight starts, metres, over
+      the middle of the tile shown. Not in the Settings dialog yet: change
+      it in @code(settings.json) (@code(flightStartHeight)), which is
+      read at start-up. Defaults to @link(DEFAULT_FLIGHT_START_METRES). }
+    property FlightStartHeight: Integer read FFlightStartHeight write FFlightStartHeight;
   end;
 
 implementation
@@ -401,6 +415,7 @@ begin
   // GDEMDrawing's default, written out so this unit needs no FMX
   FDrawing := 'GPU';
   FGpuPreference := 'Automatic';
+  FFlightStartHeight := DEFAULT_FLIGHT_START_METRES;
 end;
 
 class function TGDEMSettings.DefaultDataFolder: string;

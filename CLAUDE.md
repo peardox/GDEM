@@ -29,8 +29,8 @@ owner was about to push the level-of-detail 3D view.
   return to).
 - Owner's ideas waiting: use the `GDEMSystemInfo` figures to choose CPU
   or GPU drawing (and View layers, 3D detail) on a first run; the
-  high-resolution map over the 3D surface; a camera that flies over the
-  ground.
+  high-resolution map over the 3D surface. The flying camera has been
+  delivered (see "Flying" below), unbuilt.
 
 ## State at the end of 27 October 2026
 
@@ -1333,6 +1333,180 @@ set it first). The overlap tests there became a nested `IsClear`, with
 `LFound` set only when a side is found, so no value is unused and none
 can be left unset (W1036, see Lessons learned).
 
+### Instruments over the 3D view (28 October 2026)
+
+Asked for by the owner while the level-of-detail view was still unbuilt
+(after the first compile fixes): height above the ground (the
+heightmap), a compass turning with the heading, both over the viewport;
+then altitude, then frames a second. Not yet built.
+
+- `ui/GDEMTerrainHud` (new; in the `.dpr` and `.dproj`):
+  `TTerrainAltimeter` (above ground large, altitude, then the ground's
+  height above sea level and `(heights xN)` when stretched),
+  `TTerrainFrameRate`, `TTerrainCompass` (card turns, fixed orange mark at
+  the top, N in orange, letters kept upright, heading as `045` plus the
+  degree sign in the middle). Painted with FMX's canvas (not speed
+  critical), fixed colours on a dark see-through panel, `HitTest` off.
+  Each repaints only when its value changes by a step (0.05 degrees,
+  0.5 m, 0.05 fps).
+- `GDEMTerrain`: `TTerrainFrame.ToGeoHeight` (exact inverse of `ToLocal`,
+  height included) and `Directions` (east and north at a place, as local
+  unit vectors; private `FromGlobe` is `ToLocal`'s rotation). Checked in
+  Python: round trip within 1e-12; directions match finite differences;
+  heading 0 at azimuth 0, 270.5 at azimuth 90 at the frame's point (the
+  camera 50 km off sits where north has turned), 2.6 degrees at azimuth 0
+  with the centre 140 km east (the frame's Z is that far off true north
+  there, which is why heading is not just 360 - azimuth).
+- `GDEMTerrainLod`: `GroundHeight(lat, lon, metres)` (true metres, sea and
+  missing tiles 0, as drawn), which `SurfaceY` now uses; behaviour of
+  `SurfaceY` unchanged.
+- `TTerrainView`: the three controls are made after the viewport (so drawn
+  over it), placed by `PlaceInstruments` from an overridden `Resize`;
+  `UpdateInstruments` at the end of `PlaceCamera` and after each
+  `FLod.Update` in `TimerTick` (finer ground changes the height above
+  it). Altitude = the camera's sphere height / exaggeration; above
+  ground = altitude - ground, shown as 0 if below (the camera is kept
+  30 m of scene above `SurfaceY`, which samples a slightly different
+  place). Frame rate: `FViewport.FPS` every 250 ms in `TimerTick`; the
+  Gorilla3D docs (v1.1 viewport page) say that with `UseFixedFrameRate`
+  it is the current frames a second, otherwise an estimate; the type is
+  not documented (`%n` in their example), so it is assigned to a Single.
+
+To check when built: the controls show over the viewport (if Gorilla3D
+draws its viewport above FMX's other controls, they would be hidden; then
+put them on a layout over the view instead); the compass reads 0 from the
+starting view and 90 looking east; the heights look right over the sea
+(ground 0) and over a known peak; the frame rate is not stuck at the
+fixed 60 when the view is slow.
+
+### Flying (28 October 2026)
+
+Asked for by the owner right after the instruments, still before the
+level-of-detail view had been run: the frame rate to follow the display's
+refresh rate (as Sprite3D does); Up/Down speed (0 = hover, never
+negative), Left/Right heading, PgUp/PgDn height with a crash below the
+ground, the camera looking down a little ahead, Q/A to tilt it, and a
+start at the starting position + 10000 m, set in `settings.json`. Not
+yet built. The orbit camera (azimuth, elevation, distance, pan) is gone.
+
+- `lib/GDEMFlight` (new): `TFlight` keeps latitude, longitude, true
+  altitude (m), true heading, speed (m/s), tilt (degrees down), crashed.
+  `Step(controls held, seconds)` (seconds kept to 0.1): speed +- max(20,
+  0.6 x speed) a second, 0 to 3000 m/s; turn 45/s; tilt 30/s, -30 to 89;
+  height +- max(50, 0.5 x height above ground) a second; then moves along a
+  great circle (`MoveOn`, the heading turned to the arrival bearing, at
+  radius R + altitude); then below `GroundHeight` = crash (altitude to the
+  ground, speed 0, nothing moves until `Start`). `Start` puts it
+  `StartHeight` above sea level and marks the start pending: the first
+  `Step` that knows the ground there lifts it to ground + `StartHeight`
+  (a height key or the wheel first cancels that). `Climb(notches)` (the
+  wheel: a tenth of the height above ground, at least 20 m), `Look`
+  (drag), `Stop` (Space). Checked in Python: 66,666 steps of 15 ms at
+  3000 m/s end 0.13 m from one 3000 km jump, same heading; north and east
+  on the equator and across the date line right; holding PgDn from
+  10,000 m crashes in 11.2 s, from 300 m in 4.2 s; Up reaches 500 km/h in
+  4.1 s, the most in 9.2 s.
+- `ui/GDEMDisplays` (new): `DisplayOfForm(form, read rate)`, a cut-down
+  port of Sprite3D's `DisplayData` (`TPeardoxDisplays.IndexOfForm` /
+  `RefreshRateFor`): Windows `MonitorFromWindow` device name, then
+  `EnumDisplaySettings` current `dmDisplayFrequency` (0 and 1 = unknown);
+  macOS `Screen.DisplayFromForm`, CoreGraphics rate (main for primary,
+  others in `CGGetActiveDisplayList` order, as Sprite3D matches them);
+  Linux 0. Naming is cheap; the rate is read only when the name changes.
+- `GDEMSettings`: `FlightStartHeight` (`flightStartHeight`, default
+  `DEFAULT_FLIGHT_START_METRES` 10000). Not in the Settings dialog; the
+  owner asked for `settings.json` for now. Written to the file the next
+  time Settings is closed with OK.
+- `GDEMTerrainView` (rewritten round the flight; mesh code unchanged):
+  `PlaceCamera` puts the camera at `Frame.ToLocal(lat, lon, altitude x
+  exaggeration / 1000)`, and the target 1 km along heading and tilt using
+  `Directions` (up = east x north). The flight is drawn stretched with the
+  heights, so it is the same height above the drawn ground; the
+  instruments show true heights. `NearPlane` follows the flight down: a
+  quarter of the height above ground, 5 to 50 m (changed only when it
+  moves by 10%); unconfirmed that Gorilla3D takes a new `NearPlane` while
+  running. `TimerTick`: every 250 ms `CheckFrameRate` (reads `FPS`; if
+  the window's display changed, `FixedFrameRate` := its rate, 60 if
+  unknown or under 24, logged); then `FFlight.Step(FHeld, seconds since
+  last tick)`; a crash shows `TTerrainBanner` and logs; rebase when the
+  camera is past `TERRAIN_REBASE_KM`, at the tile under the flight.
+  Keys: `KeyDown`/`KeyUp` keep `FHeld` (`KeyControl` maps `vkUp` ...
+  `vkNext`, `vkQ`/`vkA`, and the characters Q and A for systems that send
+  letters only as characters); R = `ResetView`, Space = `Stop`; `DoExit`
+  clears `FHeld`, as the key's release would go elsewhere. `CanFocus`
+  on; `MouseDown` takes the focus. Left-drag = look (right turns right,
+  down tilts down), wheel = height, double-click = start again. Right
+  and middle drag do nothing now.
+- `GDEMTerrainHud`: `TTerrainSpeedPanel` (km/h or Hovering; Camera N
+  degrees down/up), `TTerrainBanner` (crash, dark red, hidden until
+  shown), `TTerrainFrameRate.Limit` (`frames a second, of 144`).
+- `MainForm`: `StartHeight` from settings in `ShowTerrainTile` (logged in
+  the `3D: showing` line); `FocusTerrainView` after Show in 3D, Start
+  Again (was Reset View) and the three combo boxes, which take the
+  keyboard when used; the help line lists the keys.
+- README: the 3D section's table and instruments rewritten; units table.
+
+To check when built, most likely first: the view gets the keys (click
+it; if FMX's form or a toolbar control keeps them, the keys do nothing);
+letters Q, A, R on each platform (both the key code and the character are
+tried); the start lifts to ground + 10,000 m once the tile is read; the
+compass and Left/Right agree (Right turns the card anticlockwise, the
+heading number up); a crash on PgDn; the frame rate panel shows "of N"
+matching each display, and the log line on dragging the window across;
+patches still split ahead of the flight (the tree's window centres on the
+target, 1 km ahead).
+
+### Licence and credits (28 October 2026)
+
+The owner asked for a licence file and a list of credits, first naming
+MIT, then asking for the least restrictive non-commercial licence, then
+for the licence allowing the best imagery, and settling on "the least
+restrictive that [is compatible] with other licenses". That is MIT:
+Neon (MIT), Skia (BSD 3-clause) and Skia4Delphi (MIT) allow anything;
+the owner holds a Gorilla3D licence, and its commercial runtime may be
+compiled into an MIT program (not into a GPL one); the EOX imagery's
+non-commercial terms bind whoever uses the imagery, not the code.
+PolyForm Noncommercial 1.0.0 was written in briefly and replaced.
+
+- `LICENSE`: MIT, "Copyright (c) 2026 peardox" (the owner's name was not
+  known; offer to put it in), plus a line pointing to `CREDITS.md`.
+- `CREDITS.md`: a table (ASTER GDEM V3 with its citation and DOI
+  10.5067/ASTER/ASTGTM.003, NASA Earthdata, Natural Earth, the two world
+  map images, Sentinel-2 cloudless (planned), Neon, FastMM5, Gorilla3D,
+  Skia and Skia4Delphi, RAD Studio and its styles, Sprite3D) and notes.
+- **FastMM5** is GPL v3 or commercial. Under the GPL, GDEMFetch's Windows
+  builds cannot be given out at all (the GPL cannot cover the Gorilla3D
+  runtime in them). The owner will buy the commercial licence, "just not
+  today"; then update `CREDITS.md` note 2 and the README's Licence
+  section. Offered meanwhile: link FastMM5 only when `REPORT_LEAKS` is
+  defined.
+- **The high-resolution map's image**, `8081_earthmap10k`, is Planet Pixel
+  Emporium's (James Hastings-Trew). Its terms (read 28 October 2026)
+  allow it as a resource for rendering, a simulator or game included, but
+  not redistributing it as is, nor including it in a distributed program
+  without permission; `maps/tiles/` and the `MAPTILES` resource are it,
+  resampled. Permission to be confirmed by the owner, or the image
+  replaced (NASA Blue Marble is unrestricted). Where
+  `maps/world_1080x540.jpg` came from is not recorded: ask.
+- The RAD Studio styles in `styles/` are `Redist` files; shipping them in
+  a program is allowed, keeping them in the public repository is less
+  clear, and `buildstyles.cmd` fetches missing ones anyway.
+- Imagery for the Realistic option, discussed and not yet built: the
+  owner wants the best images; Sentinel-2 cloudless (EOX, 10 m,
+  cloud-free) recent years are CC BY-NC-SA 4.0 (non-commercial, credit
+  shown in the map); 2016 is CC BY 4.0; NASA GIBS Blue Marble (500 m) and
+  MODIS/VIIRS (250 m, daily, cloudy) need only an acknowledgement; HLS
+  (30 m) is per-pass with gaps and clouds; Esri, Google and Bing ruled
+  out by their terms. Proposed and awaiting the owner: per-patch 256 x 256
+  textures (about 9 m a pixel at the finest depth), a disk cache with a
+  size limit (least recently used suggested over the owner's FIFO; 2 GB
+  in the data folder suggested), background downloads as an agreed
+  exception to the progress dialog rule, plain imagery without hillshade,
+  the credit drawn in a corner. Whether EOX's public tile service allows
+  caching by a desktop program was not found; check before building.
+- README: Licence section, layout rows, and a Notes for Claude rule to
+  add anything new to `CREDITS.md`.
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection
@@ -1487,3 +1661,19 @@ reasons are here.
   from the Pascal when needed. The real tiles for them are
   `peardox/volatile`'s `img/iow_dem.tif` and `iow_num.tif`; Pillow reads
   every overview with `Image.seek`.
+- First build of the level-of-detail view (28 October 2026): in
+  `GDEMTerrainView`, `TMaterialSource` was not declared by the units in
+  its uses, so the field is now `TGorillaVertexColorMaterialSource`
+  (`Gorilla.Material.VertexColor` moved to the interface uses); and
+  `Move(...)` gave E2034 "Too many actual parameters", most likely because
+  a unit used after `System` (probably `Gorilla.DefTypes`, as with
+  `Default`) declares something called `Move`. Write `System.Move` in any
+  unit that uses Gorilla3D.
+- FMX canvas in Delphi 13 (first build of `GDEMTerrainHud`, 28 October
+  2026): `TPolygon` is declared in `System.Math.Vectors`, not in
+  `FMX.Graphics`; `TCanvas.StrokeThickness` is gone, use
+  `Canvas.Stroke.Thickness`.
+- `TTerrainView` could not have a property called `Flight` (E2004
+  "Identifier redeclared", 28 October 2026): something already in scope
+  has the name, not found without the compiler. The property was not
+  needed and was removed; choose another name if one is wanted.

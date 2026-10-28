@@ -416,6 +416,16 @@ type
       @returns(@false if the tile there has none read yet.) }
     function SurfaceY(AX, AZ: Double; out AY: Single): Boolean;
 
+    { The ground's true height at a place (not stretched), from the finest
+      heights read so far, without reading any. Sea and tiles not
+      downloaded are 0, as they are drawn.
+      @param(ALatitude Latitude, degrees.)
+      @param(ALongitude Longitude, degrees.)
+      @param(AMetres The height above sea level, metres.)
+      @returns(@false if the tile there is not in the window yet, or has
+        no heights read yet.) }
+    function GroundHeight(ALatitude, ALongitude: Double; out AMetres: Double): Boolean;
+
     { @true if a point is far enough from the frame's point to start
       again from it (see @link(TERRAIN_REBASE_KM)).
       @param(AX Kilometres east.)
@@ -1136,24 +1146,36 @@ end;
 function TTerrainLod.SurfaceY(AX, AZ: Double; out AY: Single): Boolean;
 var
   LLatitude, LLongitude, LHeight: Double;
-  LRoot: TTerrainRoot;
-  LLevel: TTerrainLevel;
 begin
   AY := 0;
   Result := False;
   if not FStarted then
     Exit;
   FFrame.ToGeo(AX, AZ, LLatitude, LLongitude);
-  if not FRoots.TryGetValue(TileKey(Floor(LLatitude), Floor(LLongitude)), LRoot) then
-    Exit;
-  if LRoot.Tile.Kind <> tkLand then
-    LHeight := 0
-  else if LRoot.Tile.TryFinestHeights(LLevel) then
-    LHeight := LLevel.Sample((LLongitude - Floor(LLongitude)) * TILE_ARCSEC,
-      (Floor(LLatitude) + 1 - LLatitude) * TILE_ARCSEC)
-  else
+  if not GroundHeight(LLatitude, LLongitude, LHeight) then
     Exit;
   AY := FFrame.ToLocal(LLatitude, LLongitude, LHeight * FExaggeration / 1000).Y;
+  Result := True;
+end;
+
+function TTerrainLod.GroundHeight(ALatitude, ALongitude: Double; out AMetres: Double): Boolean;
+var
+  LRoot: TTerrainRoot;
+  LLevel: TTerrainLevel;
+begin
+  AMetres := 0;
+  Result := False;
+  if not FStarted then
+    Exit;
+  if not FRoots.TryGetValue(TileKey(Floor(ALatitude), Floor(ALongitude)), LRoot) then
+    Exit;
+  if LRoot.Tile.Kind <> tkLand then
+    AMetres := 0
+  else if LRoot.Tile.TryFinestHeights(LLevel) then
+    AMetres := LLevel.Sample((ALongitude - Floor(ALongitude)) * TILE_ARCSEC,
+      (Floor(ALatitude) + 1 - ALatitude) * TILE_ARCSEC)
+  else
+    Exit;
   Result := True;
 end;
 

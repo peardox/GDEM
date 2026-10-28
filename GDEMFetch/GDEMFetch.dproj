@@ -275,6 +275,9 @@ $(PreBuildEvent)]]></PreBuildEvent>
         <DCCReference Include="lib\GDEMEasterEggs.pas"/>
         <DCCReference Include="lib\GDEMTerrain.pas"/>
         <DCCReference Include="lib\GDEMTerrainLod.pas"/>
+        <DCCReference Include="lib\GDEMFlight.pas"/>
+        <DCCReference Include="ui\GDEMDisplays.pas"/>
+        <DCCReference Include="ui\GDEMTerrainHud.pas"/>
         <DCCReference Include="ui\GDEMTerrainView.pas"/>
         <None Include="..\styles\GDEMThemes.rc"/>
         <None Include="..\styles\buildstyles.cmd"/>

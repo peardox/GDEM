@@ -153,6 +153,14 @@ type
     FOriginY: Double;
     { The same, towards the north pole. }
     FOriginZ: Double;
+
+    { Turns a direction measured from the Earth's centre into one measured
+      in the frame.
+      @param(AX Towards latitude 0, longitude 0.)
+      @param(AY Towards latitude 0, longitude 90 east.)
+      @param(AZ Towards the north pole.)
+      @returns(The same direction east (X), down (Y) and north (Z).) }
+    function FromGlobe(AX, AY, AZ: Double): TPoint3D;
   public
     { A frame at a point.
       @param(ALatitude Latitude, degrees.)
@@ -174,6 +182,24 @@ type
       @param(ALatitude Its latitude, degrees.)
       @param(ALongitude Its longitude, degrees, -180 to 180.) }
     procedure ToGeo(AX, AZ: Double; out ALatitude, ALongitude: Double);
+
+    { Where a local position is on the globe, height included: the exact
+      inverse of @link(ToLocal).
+      @param(APoint Kilometres east (X), down (Y) and north (Z).)
+      @param(ALatitude Its latitude, degrees.)
+      @param(ALongitude Its longitude, degrees, -180 to 180.)
+      @param(AHeightKm Its height above sea level, kilometres (stretched,
+        if heights are stretched).) }
+    procedure ToGeoHeight(const APoint: TPoint3D; out ALatitude, ALongitude, AHeightKm: Double);
+
+    { The ways east and north along the ground at a place, as local
+      directions. Away from the frame's point they turn from the frame's
+      own X and Z, as the meridians close together towards the poles.
+      @param(ALatitude Latitude, degrees.)
+      @param(ALongitude Longitude, degrees.)
+      @param(AEast The way east, one unit long.)
+      @param(ANorth The way north, one unit long.) }
+    procedure Directions(ALatitude, ALongitude: Double; out AEast, ANorth: TPoint3D);
 
     { The point's latitude, degrees. }
     property Latitude: Double read FLatitude;
@@ -521,6 +547,39 @@ begin
   LZ := FOriginZ + FCosLat * AZ + FSinLat * LUp;
   ALatitude := RadToDeg(ArcTan2(LZ, Sqrt(Sqr(LX) + Sqr(LY))));
   ALongitude := RadToDeg(ArcTan2(LY, LX));
+end;
+
+procedure TTerrainFrame.ToGeoHeight(const APoint: TPoint3D; out ALatitude, ALongitude,
+  AHeightKm: Double);
+var
+  LUp, LX, LY, LZ: Double;
+begin
+  // As ToGeo, but with the point's own height: up is -Y
+  LUp := -APoint.Y;
+  LX := FOriginX - FSinLon * APoint.X - FSinLat * FCosLon * APoint.Z + FCosLat * FCosLon * LUp;
+  LY := FOriginY + FCosLon * APoint.X - FSinLat * FSinLon * APoint.Z + FCosLat * FSinLon * LUp;
+  LZ := FOriginZ + FCosLat * APoint.Z + FSinLat * LUp;
+  ALatitude := RadToDeg(ArcTan2(LZ, Sqrt(Sqr(LX) + Sqr(LY))));
+  ALongitude := RadToDeg(ArcTan2(LY, LX));
+  AHeightKm := Sqrt(Sqr(LX) + Sqr(LY) + Sqr(LZ)) - EARTH_RADIUS_KM;
+end;
+
+function TTerrainFrame.FromGlobe(AX, AY, AZ: Double): TPoint3D;
+begin
+  // The rotation of ToLocal, without the move to the frame's point
+  Result.X := -FSinLon * AX + FCosLon * AY;
+  Result.Y := -(FCosLat * FCosLon * AX + FCosLat * FSinLon * AY + FSinLat * AZ);
+  Result.Z := -FSinLat * FCosLon * AX - FSinLat * FSinLon * AY + FCosLat * AZ;
+end;
+
+procedure TTerrainFrame.Directions(ALatitude, ALongitude: Double; out AEast, ANorth: TPoint3D);
+var
+  LSinLat, LCosLat, LSinLon, LCosLon: Double;
+begin
+  SinCos(DegToRad(ALatitude), LSinLat, LCosLat);
+  SinCos(DegToRad(ALongitude), LSinLon, LCosLon);
+  AEast := FromGlobe(-LSinLon, LCosLon, 0);
+  ANorth := FromGlobe(-LSinLat * LCosLon, -LSinLat * LSinLon, LCosLat);
 end;
 
 { TTerrainLevel }

@@ -347,15 +347,58 @@ the button; off, as it starts, a click only selects. Only your own clicks
 count: finding a mountain selects its tile but stays on the map. The
 switch is remembered in `view.json`.
 
+The camera flies. It starts hovering over the middle of the tile, facing
+north, 10,000 m above the ground there (set by `flightStartHeight` in
+`settings.json`, see below), looking ahead and 20 degrees down. Click the
+view, or press Show in 3D, so it has the keyboard; the keys act for as
+long as they are held.
+
 | Action | Control |
 |--------|---------|
-| Turn the view | Left-drag: across to swing round, up and down to look from higher or lower |
-| Move the view | Right-drag, middle-drag or Shift + left-drag, as on the map: the ground follows the pointer. There is no edge: tiles further on are loaded as the view moves |
-| Zoom | Mouse wheel, from 300 m to 600 km away |
-| Back to the starting view (from the south, 35 degrees up, centred on the tile) | Double-click, or Reset View |
+| Go faster, or slower down to a hover (never backwards) | Up and Down. The speed changes faster the faster you already go: from a hover to about 10,800 km/h, the most, in under ten seconds |
+| Turn left or right | Left and Right, 45 degrees a second; or left-drag across |
+| Climb or descend | Page Up and Page Down, faster the higher you are above the ground (half that height a second, at least 50 m a second); or the mouse wheel, a tenth of the height a notch |
+| Tilt the camera up or down | Q and A, 30 degrees a second, from 30 degrees above the level to straight down; or left-drag up and down |
+| Stop to a hover | Space |
+| Start again over the tile | R, double-click, or Start Again |
 | Detail near the camera | **Detail**: Coarse (226 samples across a tile), Medium (451), Fine (901), Very fine (1801) or Full (3601, every sample, the default) |
 | Detail further away | **Distance**: Low, Medium (the default) or High |
 | Stretch the heights | **Heights**: 1, 2 (the default), 3, 5 or 10 times true scale |
+
+Going below the ground is a **crash**: the flight stops where it hit, a
+banner says so (and the Debug tab where), and nothing moves until it
+starts again. The flight goes straight on over the globe (a great
+circle), and there is no edge: tiles further on are loaded as it goes.
+
+`flightStartHeight` (metres above the ground, default 10000) is not in
+the Settings dialog yet. Add or change it in `settings.json` (see
+[Where files are kept](#where-files-are-kept)), for example
+`"flightStartHeight": 2000`, while GDEMFetch is closed; it is read at
+start-up, and written back whenever Settings is closed with OK.
+
+The view draws no more **frames a second** than the display the window
+is on refreshes at, and follows the window to another display within a
+quarter of a second (Windows and macOS ask the system; Linux does not
+say, so 60 is used). The Debug tab says which display and rate.
+
+Instruments over the view:
+
+- **Top left**, the flight's height **above ground** (the ground drawn
+  under it), its **altitude** (height above sea level), and the ground's
+  own height there. Heights below 10 km are in metres, above in
+  kilometres. They are true heights: with heights stretched, the flight
+  is drawn as much higher too, so height above ground plus the ground's
+  height is always the altitude, and the panel says how much heights are
+  stretched. Dashes mean the ground there has not been read yet.
+- Under it, the **speed** in km/h (or Hovering) and the camera's tilt,
+  then the **frames drawn a second**, from Gorilla3D's own count, and the
+  most the display allows.
+- **Top right**, a **compass**: the heading is always at the top, under
+  the orange mark, and the card turns beneath it, so N points to true
+  north on the ground; the heading in degrees is in the middle.
+
+The instruments let the mouse through, so dragging and the wheel work
+over them too.
 
 How it works:
 
@@ -1022,6 +1065,8 @@ and run it with tile files as arguments.
 | `tools/pack_tiles.py` | Packs `maps/tiles` into `maps/tiles.zip`; see [The high-resolution map](#the-high-resolution-map) |
 | `tools/GeoTiffCheck/` | A console program that decodes GeoTIFF files with `GDEMGeoTiff` and prints each image's size, range, voids and a checksum, to check the reader; see [Reading the tiles](#reading-the-tiles) |
 | `additions.md` | How to add places the search finds: markers, easter eggs, towns and countries |
+| `LICENSE` | GDEM's licence: MIT, for its own source code |
+| `CREDITS.md` | The libraries, data and images GDEM uses, with their licences and what each asks |
 | `CLAUDE.md` | Handover notes: the project's current state, test results and lessons learned, for picking the work up in a new conversation |
 | `docs/` | Ignored for development |
 | `models/` | Ignored for development |
@@ -1061,8 +1106,9 @@ it:
 | `GDEMBrowser` | Opens web links in the default browser on each platform |
 | `GDEMGpuPreference` | Reads and sets Windows' graphics processor preference for the program (ported from Sprite3D's `GpuPreference`); does nothing on other platforms |
 | `GDEMMapTiles` | `OpenBuiltInMapTiles`, the tile set linked into the program |
-| `GDEMTerrain` | The pieces of the 3D surface: `TTerrainFrame` (positions on a sphere, from a point), `TTerrainTile` (a tile's heights, each overview read when first needed), `BuildTerrainPatch` (one patch's positions, normals, shaded colours and skirt) and `TerrainPatchIndices` (the triangles every patch shares) |
+| `GDEMTerrain` | The pieces of the 3D surface: `TTerrainFrame` (positions on a sphere, from a point, and back to latitude, longitude and height; east and north at any place), `TTerrainTile` (a tile's heights, each overview read when first needed), `BuildTerrainPatch` (one patch's positions, normals, shaded colours and skirt) and `TerrainPatchIndices` (the triangles every patch shares) |
 | `GDEMTerrainLod` | `TTerrainLod`: the trees of patches for the tiles round the camera, which patches to show from where it is, and making them on worker threads |
+| `GDEMFlight` | `TFlight`: the 3D view's flight (latitude, longitude, true altitude, heading, speed, camera tilt), moved along a great circle by the controls held, and the crash test |
 
 **ui/**
 
@@ -1073,7 +1119,9 @@ it:
 | `ProgressForm` | Modal progress dialog shown while data is downloaded or imported |
 | `MarkersForm` | Modal dialog listing the markers, to go to, rename or delete them |
 | `GDEMWorldMap` | `TWorldMapView`, the zoomable map with tile selection, borders and coastlines, the high-resolution map's tiles (`MapTiles`), town and city names, markers, and `ZoomToArea` and `CentreOn` for the search |
-| `GDEMTerrainView` | `TTerrainView`, the 3D tab's Gorilla3D view of the ground round a tile, turned, moved and zoomed with the mouse; turns patches into meshes |
+| `GDEMTerrainHud` | The instruments over the 3D view: `TTerrainAltimeter` (height above ground, altitude, the ground's height), `TTerrainSpeedPanel`, `TTerrainFrameRate`, `TTerrainCompass` and `TTerrainBanner` (a crash), painted controls that let the mouse through |
+| `GDEMDisplays` | Which display a form is on and its refresh rate (from Sprite3D's `DisplayData`), so the 3D view draws no faster than the display shows |
+| `GDEMTerrainView` | `TTerrainView`, the 3D tab's Gorilla3D view of the ground round a tile, flown over with the keyboard and mouse; turns patches into meshes |
 | `GDEMDrawing` | `ConfigureDrawing`, called from the `.dpr` before `Application.Initialize`, which tells Skia to draw on the GPU or the CPU and applies the Windows graphics processor choice |
 | `GDEMThemes` | The themes, and `ApplyTheme` |
 | `GDEMStyles` | Switches FMX styles at run time (ported from Sprite3D) |
@@ -1123,6 +1171,16 @@ the left and latitude 90 at the top.
   suit the [high-resolution map](#the-high-resolution-map) when zoomed in;
   they can be added as more layers in `tools/build_vectors.py`.
 
+## Licence
+
+GDEM's own source code is under the [MIT licence](LICENSE). The
+libraries, data and images it uses keep their own licences, listed with
+what each asks in [CREDITS.md](CREDITS.md). Two of them matter when giving
+a build to anyone else: FastMM5 is used under the GPL v3 until its
+commercial licence is bought, so Windows builds of GDEMFetch should not be
+given out until then; and permission for the world map image behind the
+high-resolution map is still to be confirmed.
+
 ## Notes for Claude
 
 These are the working rules for this project. Read this whole README
@@ -1142,6 +1200,9 @@ got to, what has been tested and what was learned along the way.
   the files most recently supplied in the conversation.
 - Update this README when features or requirements change, and include it
   in the zip when it does.
+- When adding a library, data set or image, add it to `CREDITS.md` with its
+  licence and what it asks, and check it can sit with GDEM's MIT licence
+  and the others there.
 
 ### Repository
 

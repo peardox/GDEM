@@ -1,18 +1,21 @@
 { @abstract(The 3D view: a Gorilla3D viewport showing the ground round a
-  tile, fine near the camera and coarser further away, which the mouse
-  turns, moves and zooms.)
+  tile, fine near the camera and coarser further away, flown over with
+  the keyboard and the mouse.)
 
   @link(TTerrainView) is a layout that fills the 3D tab. It holds:
 
   @preformatted(
-TTerrainView                  takes the mouse
+TTerrainView                  takes the mouse and the keys
 `-- TGorillaViewport          HitTest off, so the mouse reaches the layout
-    |-- centre (TDummy)       what the camera looks at, on the ground
+    |-- target (TDummy)       the point the camera looks at
     |-- terrain (TDummy)      holds the patches' meshes
     |   `-- TGorillaSingletonMesh, one per patch, all sharing one
     |       TGorillaVertexColorMaterialSource
-    `-- TGorillaCamera        Target is the centre
+    `-- TGorillaCamera        where the flight is; Target is the target
         `-- TGorillaLight     a point light where the camera is
+TTerrainAltimeter, TTerrainFrameRate, TTerrainSpeedPanel (top left),
+TTerrainCompass (top right) and TTerrainBanner (middle, for a crash), over
+the viewport, letting the mouse through
   )
 
   Which patches to draw is decided by @code(TTerrainLod) (in
@@ -23,16 +26,29 @@ TTerrainView                  takes the mouse
   into FMX's vertex buffer where its layout can be found, and the one list
   of triangles every patch shares is copied in a single move.
 
-  The camera sits @link(TTerrainView.Distance) kilometres from the centre,
-  at an @link(TTerrainView.Azimuth) round it (0 from the south, 90 from
-  the east) and an @link(TTerrainView.Elevation) above the level (5 to 89
-  degrees); the centre is on the ground, at the height of the surface
-  below it. Left-drag turns the view; right-drag, middle-drag or Shift +
-  left-drag moves it, as on the map, the ground following the pointer; the
-  wheel zooms; a double click puts the starting view back. Moving far
-  enough from where the view started measures everything again from there
-  (@code(TERRAIN_REBASE_KM)), so the view can travel as far as there are
-  tiles. }
+  The camera is a flight (@code(TFlight), in @code(GDEMFlight)): it starts
+  hovering, facing north, @link(TTerrainView.StartHeight) metres above the
+  middle of the tile asked for, and looks ahead and a little down. Keys,
+  held: Up and Down change the speed (never below a hover), Left and Right
+  turn, Page Up and Page Down climb and descend, Q and A tilt the camera
+  up and down; Space stops to a hover; R starts again. Going below the
+  ground is a crash, which stops the flight until R. Left-drag looks round
+  (turns and tilts), the wheel climbs and descends, a double click starts
+  again. Each tick moves the flight by the time gone, so its speed does not
+  depend on the frame rate. Flying far from where positions are measured
+  from measures everything again from there (@code(TERRAIN_REBASE_KM)), so
+  the flight can go as far as there are tiles.
+
+  The view draws no more frames a second than the display the window is
+  on refreshes at (@code(GDEMDisplays)), and checks four times a second
+  whether the window has moved to another display.
+
+  The instruments (@code(GDEMTerrainHud)) show the flight's height above
+  the ground under it and above sea level, the ground's height there, its
+  heading against true north, its speed and the camera's tilt, and the
+  frames drawn a second. Heights are true heights: when heights are
+  stretched for drawing, the flight is drawn that much higher too, so it
+  stays the same height above the ground as drawn. }
 unit GDEMTerrainView;
 
 interface
@@ -41,8 +57,8 @@ uses
   System.SysUtils, System.Classes, System.Types, System.UITypes, System.Math.Vectors,
   System.Diagnostics,
   FMX.Types, FMX.Controls, FMX.Layouts, FMX.Types3D, FMX.Controls3D, FMX.Objects3D,
-  Gorilla.Viewport, Gorilla.Camera, Gorilla.Light,
-  GDEMTerrain, GDEMTerrainLod;
+  Gorilla.Viewport, Gorilla.Camera, Gorilla.Light, Gorilla.Material.VertexColor,
+  GDEMTerrain, GDEMTerrainLod, GDEMTerrainHud, GDEMFlight;
 
 const
   { The most milliseconds a timer tick spends turning patches into meshes;
@@ -55,7 +71,7 @@ type
     @param(AText The line.) }
   TTerrainReportEvent = procedure(Sender: TObject; const AText: string) of object;
 
-  { @abstract(A Gorilla3D view of the ground round a tile.) }
+  { @abstract(A Gorilla3D view of the ground round a tile, flown over.) }
   TTerrainView = class(TLayout)
   private
     { The Gorilla3D viewport, filling the layout. }
@@ -69,10 +85,11 @@ type
     { Holds the patches' meshes. }
     FTerrain: TDummy;
     { The material every patch is drawn with: its vertex colours. }
-    FMaterial: TMaterialSource;
+    FMaterial: TGorillaVertexColorMaterialSource;
     { Decides which patches to draw; made by the first @link(ShowArea). }
     FLod: TTerrainLod;
-    { Turns patches into meshes and looks again, every 15 ms. }
+    { Turns patches into meshes, moves the flight, and looks again, every
+      15 ms. }
     FTimer: TTimer;
     { Backing field for @link(TileLookup). }
     FTileLookup: TTerrainTileLookup;
@@ -94,32 +111,16 @@ type
     FMaxDetail: Integer;
     { Backing field for @link(Range). }
     FRange: Integer;
-    { Backing field for @link(Azimuth). }
-    FAzimuth: Single;
-    { Backing field for @link(Elevation). }
-    FElevation: Single;
-    { Backing field for @link(Distance). }
-    FDistance: Single;
-    { Where the centre is, kilometres east of the frame's point. }
-    FPanX: Single;
-    { Where the centre is, kilometres north of the frame's point. }
-    FPanZ: Single;
-    { The centre's Y: the surface's height there. }
-    FTargetY: Single;
-    { @true while the left button is held down on the view, turning it. }
+    { The flight: where the camera is and where it is going. }
+    FFlight: TFlight;
+    { The flight's controls held down on the keyboard. }
+    FHeld: TFlightControls;
+    { Times the gap between moves of the flight. }
+    FFlightWatch: TStopwatch;
+    { @true while the left button is held down on the view, looking round. }
     FDragging: Boolean;
-    { @true while a button is held down on the view, moving it. }
-    FPanning: Boolean;
-    { @link(FPanX) when the move started. }
-    FDragPanX: Single;
-    { @link(FPanZ) when the move started. }
-    FDragPanZ: Single;
-    { Where the drag started. }
-    FDragStart: TPointF;
-    { @link(Azimuth) when the drag started. }
-    FDragAzimuth: Single;
-    { @link(Elevation) when the drag started. }
-    FDragElevation: Single;
+    { Where the pointer was at the last move of the drag. }
+    FDragLast: TPointF;
     { @true when the camera has moved since the tree last looked. }
     FCameraMoved: Boolean;
     { @true while patches were being made at the last tick. }
@@ -134,24 +135,69 @@ type
     { @true if the last patch's vertices were copied straight into the
       buffer; @false if FMX's setters had to be used for some. }
     FDirectCopy: Boolean;
+    { The nearest the view draws, kilometres, as last set: it follows the
+      flight down, so the ground is not cut away when flying low. }
+    FNearPlane: Single;
+    { The camera's heights, over the top left of the viewport. }
+    FAltimeter: TTerrainAltimeter;
+    { The frames drawn a second, under @link(FAltimeter). }
+    FFrameRate: TTerrainFrameRate;
+    { The speed and the camera's tilt, under @link(FFrameRate). }
+    FSpeedPanel: TTerrainSpeedPanel;
+    { The compass, over the top right of the viewport. }
+    FCompass: TTerrainCompass;
+    { News across the middle of the view: a crash. }
+    FBanner: TTerrainBanner;
+    { Times the gap between readings of the frame rate and checks of the
+      display. }
+    FRateWatch: TStopwatch;
+    { The display the window was on at the last check; empty before the
+      first. }
+    FDisplayName: string;
+    { Backing field for @link(StartHeight). }
+    FStartHeight: Integer;
     { Backing field for @link(OnSettled). }
     FOnSettled: TTerrainReportEvent;
     { Backing field for @link(OnLog). }
     FOnLog: TTerrainReportEvent;
 
-    { Moves the centre to @link(FPanX), @link(FPanZ) at the surface's
-      height, and the camera to @link(Distance), @link(Azimuth) and
-      @link(Elevation) from it, never below the ground. }
+    { Puts the camera where the flight is, looking along its heading and
+      down by its tilt, and has the instruments show it. }
     procedure PlaceCamera;
 
     { The camera, for the tree.
       @returns(Its position, directions and view.) }
     function MakeEye: TTerrainEye;
 
-    { Turns made patches into meshes, measures again from a new point if
-      the view has travelled far, and has the tree look again.
+    { The ground's true height at a place, for the flight: from the tree's
+      heights, once there is a tree.
+      @param(ALatitude Latitude, degrees.)
+      @param(ALongitude Longitude, degrees.)
+      @param(AMetres The height above sea level, metres.)
+      @returns(@false if the ground there is not known yet.) }
+    function FlightGround(ALatitude, ALongitude: Double; out AMetres: Double): Boolean;
+
+    { Moves the flight on by the time since the last tick, turns made
+      patches into meshes, measures again from a new point if the flight
+      has gone far, and has the tree look again.
       @param(Sender The timer.) }
     procedure TimerTick(Sender: TObject);
+
+    { Shows the crash banner and logs where it happened.
+      @param(ASpeed The speed just before, metres a second.) }
+    procedure ReportCrash(ASpeed: Double);
+
+    { Gives the instruments the flight's heights, heading, speed and tilt;
+      dashes while there is nothing to measure from. }
+    procedure UpdateInstruments;
+
+    { Puts the instruments in the corners of the view, and the banner in
+      the middle. }
+    procedure PlaceInstruments;
+
+    { Reads the frame rate for its panel, and if the window has moved to
+      another display, draws no faster than that display refreshes. }
+    procedure CheckFrameRate;
 
     { Makes a patch's mesh, hidden.
       @param(APatch The patch.)
@@ -187,11 +233,11 @@ type
     { Starts timing a round of work. }
     procedure BeginWork;
 
-    { Measures everything again from the tile under the centre. }
+    { Measures everything again from the tile under the flight. }
     procedure Rebase;
 
-    { Writer for @link(Exaggeration): every patch is made again, keeping
-      the view.
+    { Writer for @link(Exaggeration): every patch is made again, and the
+      flight drawn as much higher.
       @param(AValue Times to stretch heights; at least 0.1.) }
     procedure SetExaggeration(AValue: Single);
 
@@ -203,57 +249,79 @@ type
       @param(AValue Tenths, from @code(TERRAIN_RANGES).) }
     procedure SetRange(AValue: Integer);
 
+    { Writer for @link(StartHeight).
+      @param(AValue Metres; less than 0 is taken as 0.) }
+    procedure SetStartHeight(AValue: Integer);
+
     { Reader for @link(ShownPatches). @returns(Patches on show.) }
     function GetShownPatches: Integer;
   protected
-    { Starts turning the view with the left button, or moving it with the
-      right or middle button or Shift + left.
+    { Keeps the instruments in place when the view changes size. }
+    procedure Resize; override;
+
+    { Takes the keyboard and starts looking round with the left button.
       @param(Button The button.)
       @param(Shift The keys held.)
       @param(X Horizontal position.)
       @param(Y Vertical position.) }
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Single); override;
 
-    { Turns or moves the view while dragging.
+    { Turns and tilts while dragging: across turns, up and down tilts.
       @param(Shift The keys and buttons held.)
       @param(X Horizontal position.)
       @param(Y Vertical position.) }
     procedure MouseMove(Shift: TShiftState; X, Y: Single); override;
 
-    { Stops turning or moving the view.
+    { Stops looking round.
       @param(Button The button.)
       @param(Shift The keys held.)
       @param(X Horizontal position.)
       @param(Y Vertical position.) }
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Single); override;
 
-    { Zooms: rolling away brings the camera nearer.
+    { Climbs (rolling away) or descends.
       @param(Shift The keys held.)
       @param(WheelDelta 120 a notch.)
       @param(Handled Set to @true.) }
     procedure MouseWheel(Shift: TShiftState; WheelDelta: Integer; var Handled: Boolean); override;
 
-    { Puts the starting view back. }
+    { Starts the flight again. }
     procedure DblClick; override;
+
+    { Holds a flight control down, or stops (Space) or starts again (R).
+      @param(Key The key's code; set to 0 when used.)
+      @param(KeyChar The character typed; set to #0 when used.)
+      @param(Shift The keys held.) }
+    procedure KeyDown(var Key: Word; var KeyChar: WideChar; Shift: TShiftState); override;
+
+    { Lets a flight control go.
+      @param(Key The key's code; set to 0 when used.)
+      @param(KeyChar The character typed; set to #0 when used.)
+      @param(Shift The keys held.) }
+    procedure KeyUp(var Key: Word; var KeyChar: WideChar; Shift: TShiftState); override;
+
+    { Lets every flight control go when the keyboard goes elsewhere, since
+      the keys' release would not arrive here. }
+    procedure DoExit; override;
   public
-    { Makes the viewport, camera, light and material; nothing is shown
-      yet.
+    { Makes the viewport, camera, light, material, flight and
+      instruments; nothing is shown yet.
       @param(AOwner The owner.) }
     constructor Create(AOwner: TComponent); override;
 
-    { Stops the timer and frees every mesh. }
+    { Stops the timer and frees every mesh and the flight. }
     destructor Destroy; override;
 
     { Shows the ground round a tile.
       @param(ASouth The latitude of the tile's south edge.)
       @param(AWest The longitude of its west edge.)
-      @param(AResetView @true to start from the starting view; @false to
-        keep the camera's angle and distance.)
+      @param(AResetView @true to start the flight again over the tile;
+        @false to keep flying where it is.)
       @raises(ETerrainError if @link(TileLookup) is not set.) }
     procedure ShowArea(ASouth, AWest: Integer; AResetView: Boolean);
 
-    { The starting view: from the south, 35 degrees up, far enough back
-      to see the tile asked for and its neighbours, centred on it. }
+    { Starts the flight again: hovering, facing north,
+      @link(StartHeight) above the middle of the tile asked for. }
     procedure ResetView;
 
     { Says what each tile holds; set before @link(ShowArea). Called on the
@@ -271,15 +339,9 @@ type
     { The distance detail, in tenths, from @code(TERRAIN_RANGES). }
     property Range: Integer read FRange write SetRange;
 
-    { The camera's direction from the centre, in degrees: 0 from the
-      south, 90 from the east. }
-    property Azimuth: Single read FAzimuth;
-
-    { The camera's height above the level, in degrees, 5 to 89. }
-    property Elevation: Single read FElevation;
-
-    { The camera's distance from the centre, in kilometres. }
-    property Distance: Single read FDistance;
+    { How far above the ground the flight starts, metres; used from the
+      next start. }
+    property StartHeight: Integer read FStartHeight write SetStartHeight;
 
     { @true once a tile has been shown. }
     property HasTerrain: Boolean read FHasArea;
@@ -291,7 +353,7 @@ type
       made: patches, triangles, tiles and times. }
     property OnSettled: TTerrainReportEvent read FOnSettled write FOnSettled;
 
-    { Reports problems and changes of frame. }
+    { Reports problems, changes of frame, of display and crashes. }
     property OnLog: TTerrainReportEvent read FOnLog write FOnLog;
   end;
 
@@ -301,45 +363,50 @@ uses
   // Gorilla.DefTypes declares enumeration values with common names (such as
   // Default), so it comes before System.Math, whose names then win; and
   // Default() is not used in this unit
-  Gorilla.Mesh, Gorilla.DefTypes, Gorilla.Material.VertexColor,
+  Gorilla.Mesh, Gorilla.DefTypes,
   // For FMX's vertex and index buffer setters to be expanded inline
   System.RTLConsts,
-  System.Math;
+  System.Math, FMX.Forms, GDEMDisplays;
 
 const
   { The viewport's background, a dark blue-grey that reads as sky. }
   TERRAIN_BACKGROUND = $FF1B2230;
   { The camera's field of view, in degrees. }
   TERRAIN_FOV = 45;
-  { The nearest the view draws, kilometres: 50 m. }
+  { The nearest the view draws, kilometres: 50 m, when high up. }
   NEAR_PLANE_KM = 0.05;
+  { The nearest the view draws when low down, kilometres: 5 m. }
+  MIN_NEAR_PLANE_KM = 0.005;
+  { The nearest the view draws is this share of the height above the
+    ground, between @link(MIN_NEAR_PLANE_KM) and @link(NEAR_PLANE_KM), so
+    the ground below is not cut away when flying low. }
+  NEAR_PLANE_SHARE = 0.25;
   { The farthest the view draws, kilometres. }
   FAR_PLANE_KM = 3000;
-  { The starting elevation, in degrees. }
-  START_ELEVATION = 35;
-  { The starting distance, kilometres: a tile and a quarter. }
-  START_DISTANCE = 140;
-  { The lowest and highest elevations the mouse can reach, in degrees. }
-  MIN_ELEVATION = 5;
-  { See @link(MIN_ELEVATION). }
-  MAX_ELEVATION = 89;
-  { The nearest the camera comes to the centre, kilometres. }
-  MIN_DISTANCE = 0.3;
-  { The farthest the camera goes, kilometres. }
-  MAX_DISTANCE = 600;
-  { The least the camera keeps above the ground, kilometres. }
-  MIN_CLEARANCE = 0.03;
+  { How far ahead of the camera the point it looks at is, kilometres;
+    typed, as @code(TPoint3D) multiplies by Single. }
+  LOOK_AHEAD_KM: Single = 1;
   { Degrees turned for each pixel dragged across. }
-  DRAG_AZIMUTH = 0.4;
+  DRAG_TURN = 0.25;
   { Degrees tilted for each pixel dragged up or down. }
-  DRAG_ELEVATION = 0.3;
-  { Distance kept for each wheel notch rolled away. }
-  WHEEL_ZOOM = 0.88;
+  DRAG_TILT = 0.2;
   { The view is treated as this much wider and taller than it is when
     deciding what is in view, so nothing at its edges is missed. }
   VIEW_MARGIN = 1.1;
   { Ticks of the timer, milliseconds. }
   TICK_MS = 15;
+  { The instruments' distance from the view's edges, pixels. }
+  HUD_MARGIN = 12;
+  { The gap between instruments, pixels. }
+  HUD_GAP = 6;
+  { How often the frame rate is read and the display checked,
+    milliseconds. }
+  FPS_REFRESH_MS = 250;
+  { The frames a second drawn when the display does not say how fast it
+    refreshes, as on Linux. }
+  DEFAULT_FRAME_RATE = 60;
+  { Refresh rates below this are not believed. }
+  MIN_FRAME_RATE = 24;
 
 { TTerrainView }
 
@@ -348,23 +415,28 @@ var
   I: Integer;
 begin
   inherited Create(AOwner);
-  // The layout takes the mouse; the viewport lets it through
+  // The layout takes the mouse and the keys; the viewport lets them through
   HitTest := True;
+  CanFocus := True;
   FExaggeration := DEFAULT_TERRAIN_HEIGHTS;
   FMaxDetail := DEFAULT_TERRAIN_DETAIL;
   FRange := DEFAULT_TERRAIN_RANGE;
+  FStartHeight := DEFAULT_FLIGHT_START_HEIGHT;
+  FFlight := TFlight.Create(FlightGround);
+  FFlight.StartHeight := FStartHeight;
 
   FViewport := TGorillaViewport.Create(Self);
   FViewport.Parent := Self;
   FViewport.Align := TAlignLayout.Client;
   FViewport.HitTest := False;
   FViewport.UseFixedFrameRate := True;
-  FViewport.FixedFrameRate := 60;
+  FViewport.FixedFrameRate := DEFAULT_FRAME_RATE;
   FViewport.VSync := False;
   FViewport.Color := TERRAIN_BACKGROUND;
   FViewport.UsingDesignCamera := False;
   // The scene is in kilometres: from 50 m to beyond the farthest tile
-  FViewport.NearPlane := NEAR_PLANE_KM;
+  FNearPlane := NEAR_PLANE_KM;
+  FViewport.NearPlane := FNearPlane;
   FViewport.FarPlane := FAR_PLANE_KM;
 
   FCentre := TDummy.Create(Self);
@@ -399,12 +471,25 @@ begin
     FIndices32[I] := FIndices[I];
   end;
 
+  // The instruments, made after the viewport so they are drawn over it
+  FAltimeter := TTerrainAltimeter.Create(Self);
+  FAltimeter.Parent := Self;
+  FFrameRate := TTerrainFrameRate.Create(Self);
+  FFrameRate.Parent := Self;
+  FSpeedPanel := TTerrainSpeedPanel.Create(Self);
+  FSpeedPanel.Parent := Self;
+  FCompass := TTerrainCompass.Create(Self);
+  FCompass.Parent := Self;
+  FBanner := TTerrainBanner.Create(Self);
+  FBanner.Parent := Self;
+  PlaceInstruments;
+  FRateWatch := TStopwatch.StartNew;
+  FFlightWatch := TStopwatch.StartNew;
+
   FTimer := TTimer.Create(Self);
   FTimer.Interval := TICK_MS;
   FTimer.Enabled := False;
   FTimer.OnTimer := TimerTick;
-
-  ResetView;
 end;
 
 destructor TTerrainView.Destroy;
@@ -413,29 +498,155 @@ begin
     FTimer.Enabled := False;
   // The meshes go with the tree, before the material they use
   FreeAndNil(FLod);
+  FreeAndNil(FFlight);
   inherited;
+end;
+
+function TTerrainView.FlightGround(ALatitude, ALongitude: Double; out AMetres: Double): Boolean;
+begin
+  AMetres := 0;
+  Result := (FLod <> nil) and FLod.GroundHeight(ALatitude, ALongitude, AMetres);
 end;
 
 procedure TTerrainView.PlaceCamera;
 var
-  LAzimuth, LElevation: Double;
-  LPosition: TPoint3D;
-  LGround: Single;
+  LPosition, LEast, LNorth, LUp, LAhead, LLook: TPoint3D;
+  LSinHeading, LCosHeading, LSinTilt, LCosTilt, LGround: Double;
+  LNear, LSH, LCH, LST, LCT: Single;
 begin
-  FCentre.Position.Point := Point3D(FPanX, FTargetY, FPanZ);
-  LAzimuth := DegToRad(FAzimuth);
-  LElevation := DegToRad(FElevation);
-  // At azimuth 0 the camera is to the south (-Z) looking north; up is -Y
-  LPosition := Point3D(
-    FPanX + FDistance * Sin(LAzimuth) * Cos(LElevation),
-    FTargetY - FDistance * Sin(LElevation),
-    FPanZ - FDistance * Cos(LAzimuth) * Cos(LElevation));
-  // Never in the ground
-  if (FLod <> nil) and FLod.SurfaceY(LPosition.X, LPosition.Z, LGround) and
-     (LPosition.Y > LGround - MIN_CLEARANCE) then
-    LPosition.Y := LGround - MIN_CLEARANCE;
+  if (FLod = nil) or not FLod.Started then
+  begin
+    UpdateInstruments;
+    Exit;
+  end;
+  // Heights are drawn stretched, so the flight is too, keeping its height
+  // above the ground as drawn
+  LPosition := FLod.Frame.ToLocal(FFlight.Latitude, FFlight.Longitude,
+    FFlight.Altitude * FExaggeration / 1000);
+  // Its own east, north and up, which turn from the frame's away from the
+  // frame's point; east x north is up (-Y at the frame's point)
+  FLod.Frame.Directions(FFlight.Latitude, FFlight.Longitude, LEast, LNorth);
+  LUp := LEast.CrossProduct(LNorth);
+  SinCos(DegToRad(FFlight.Heading), LSinHeading, LCosHeading);
+  SinCos(DegToRad(FFlight.Tilt), LSinTilt, LCosTilt);
+  // TPoint3D multiplies by Single
+  LSH := LSinHeading;
+  LCH := LCosHeading;
+  LST := LSinTilt;
+  LCT := LCosTilt;
+  LAhead := LEast * LSH + LNorth * LCH;
+  LLook := LAhead * LCT - LUp * LST;
   FCamera.Position.Point := LPosition;
+  FCentre.Position.Point := LPosition + LLook * LOOK_AHEAD_KM;
+
+  // The nearest the view draws follows the flight down, so low over the
+  // ground it is not cut away; high up it stays at 50 m
+  if FLod.GroundHeight(FFlight.Latitude, FFlight.Longitude, LGround) then
+    LNear := EnsureRange(NEAR_PLANE_SHARE * (FFlight.Altitude - LGround) * FExaggeration / 1000,
+      MIN_NEAR_PLANE_KM, NEAR_PLANE_KM)
+  else
+    LNear := NEAR_PLANE_KM;
+  if Abs(LNear - FNearPlane) > 0.1 * FNearPlane then
+  begin
+    FNearPlane := LNear;
+    FViewport.NearPlane := FNearPlane;
+  end;
+
   FCameraMoved := True;
+  UpdateInstruments;
+end;
+
+procedure TTerrainView.UpdateInstruments;
+var
+  LGround: Double;
+begin
+  if (FAltimeter = nil) or (FFrameRate = nil) or (FSpeedPanel = nil) or (FCompass = nil) then
+    Exit;
+  if (FLod = nil) or not FLod.Started then
+  begin
+    FAltimeter.AltitudeKnown := False;
+    FAltimeter.Known := False;
+    FCompass.Known := False;
+    Exit;
+  end;
+  FAltimeter.Exaggeration := FExaggeration;
+  FAltimeter.Altitude := FFlight.Altitude;
+  FAltimeter.AltitudeKnown := True;
+  if FLod.GroundHeight(FFlight.Latitude, FFlight.Longitude, LGround) then
+  begin
+    FAltimeter.Ground := LGround;
+    FAltimeter.AboveGround := FFlight.Altitude - LGround;
+    FAltimeter.Known := True;
+  end
+  else
+    FAltimeter.Known := False;
+  FCompass.Heading := FFlight.Heading;
+  FCompass.Known := True;
+  FSpeedPanel.Speed := FFlight.Speed;
+  FSpeedPanel.Tilt := FFlight.Tilt;
+end;
+
+procedure TTerrainView.PlaceInstruments;
+var
+  LTop: Single;
+begin
+  if (FAltimeter = nil) or (FFrameRate = nil) or (FSpeedPanel = nil) or (FCompass = nil) or
+     (FBanner = nil) then
+    Exit;
+  LTop := HUD_MARGIN;
+  FAltimeter.Position.Point := PointF(HUD_MARGIN, LTop);
+  LTop := LTop + ALTIMETER_HEIGHT + HUD_GAP;
+  FSpeedPanel.Position.Point := PointF(HUD_MARGIN, LTop);
+  LTop := LTop + SPEED_PANEL_HEIGHT + HUD_GAP;
+  FFrameRate.Position.Point := PointF(HUD_MARGIN, LTop);
+  FCompass.Position.Point := PointF(Max(Width - HUD_MARGIN - COMPASS_SIZE,
+    HUD_MARGIN + ALTIMETER_WIDTH + HUD_GAP), HUD_MARGIN);
+  FBanner.Position.Point := PointF(Max((Width - BANNER_WIDTH) / 2, 0),
+    Max(Height * 0.35 - BANNER_HEIGHT / 2, 0));
+end;
+
+procedure TTerrainView.Resize;
+begin
+  inherited;
+  PlaceInstruments;
+end;
+
+procedure TTerrainView.CheckFrameRate;
+var
+  LForm: TCommonCustomForm;
+  LDisplay: TFormDisplay;
+  LRate: Integer;
+begin
+  // Gorilla3D's own count: with a fixed frame rate, the frames drawn in
+  // the last second
+  FFrameRate.FramesPerSecond := FViewport.FPS;
+  FFrameRate.Known := True;
+
+  // Which display the window is on: naming it is quick, its refresh rate
+  // is read only when it changes
+  if (Root = nil) or not (Root.GetObject is TCommonCustomForm) then
+    Exit;
+  LForm := TCommonCustomForm(Root.GetObject);
+  LDisplay := DisplayOfForm(LForm, False);
+  if (LDisplay.Name = '') or (LDisplay.Name = FDisplayName) then
+    Exit;
+  FDisplayName := LDisplay.Name;
+  LDisplay := DisplayOfForm(LForm, True);
+  LRate := LDisplay.RefreshRate;
+  if LRate >= MIN_FRAME_RATE then
+    FViewport.FixedFrameRate := LRate
+  else
+    FViewport.FixedFrameRate := DEFAULT_FRAME_RATE;
+  FFrameRate.Limit := Round(FViewport.FixedFrameRate);
+  if Assigned(FOnLog) then
+  begin
+    if LRate >= MIN_FRAME_RATE then
+      FOnLog(Self, Format('3D: the window is on %s, which refreshes at %d Hz, so the view is ' +
+        'drawn at up to %d frames a second', [FDisplayName, LRate, LRate]))
+    else
+      FOnLog(Self, Format('3D: the window is on %s, which does not say how fast it refreshes, ' +
+        'so the view is drawn at up to %d frames a second', [FDisplayName, DEFAULT_FRAME_RATE]));
+  end;
 end;
 
 function TTerrainView.MakeEye: TTerrainEye;
@@ -455,21 +666,23 @@ end;
 
 procedure TTerrainView.ResetView;
 var
-  LPoint: TPoint3D;
+  LStart: TPoint3D;
 begin
-  FAzimuth := 0;
-  FElevation := START_ELEVATION;
-  FDistance := START_DISTANCE;
-  if FHasArea and (FLod <> nil) then
+  FBanner.Visible := False;
+  FHeld := [];
+  if not FHasArea then
+    Exit;
+  FFlight.StartHeight := FStartHeight;
+  FFlight.Start(FAreaSouth + 0.5, FAreaWest + 0.5);
+  // Measured again from the tile asked for if the flight had gone far
+  if FLod <> nil then
   begin
-    LPoint := FLod.Frame.ToLocal(FAreaSouth + 0.5, FAreaWest + 0.5, 0);
-    FPanX := LPoint.X;
-    FPanZ := LPoint.Z;
-  end
-  else
-  begin
-    FPanX := 0;
-    FPanZ := 0;
+    LStart := FLod.Frame.ToLocal(FFlight.Latitude, FFlight.Longitude, 0);
+    if FLod.NeedsRebase(LStart.X, LStart.Z) then
+    begin
+      FLod.Start(FAreaSouth, FAreaWest);
+      BeginWork;
+    end;
   end;
   PlaceCamera;
 end;
@@ -498,47 +711,52 @@ begin
   FLod.MaxDepth := TerrainMaxDepth(FMaxDetail);
   FLod.Range := FRange / 10;
   FLod.Exaggeration := FExaggeration;
-  FLod.Start(ASouth, AWest);
   FAreaSouth := ASouth;
   FAreaWest := AWest;
-  FHasArea := True;
-  FTargetY := 0;
-  if AResetView then
-    ResetView
-  else
+  if AResetView or not FHasArea then
   begin
-    // The tile's middle is the frame's point
-    FPanX := 0;
-    FPanZ := 0;
-    PlaceCamera;
-  end;
+    FLod.Start(ASouth, AWest);
+    FHasArea := True;
+    FFlight.StartHeight := FStartHeight;
+    FFlight.Start(ASouth + 0.5, AWest + 0.5);
+    FBanner.Visible := False;
+  end
+  else
+    // Flying on from where it is, measured from the tile under it
+    FLod.Start(Floor(FFlight.Latitude), Floor(FFlight.Longitude));
+  FHeld := [];
+  PlaceCamera;
   BeginWork;
   FLod.Update(MakeEye);
   FCameraMoved := False;
+  FFlightWatch := TStopwatch.StartNew;
   FTimer.Enabled := True;
 end;
 
 procedure TTerrainView.Rebase;
-var
-  LLatitude, LLongitude: Double;
-  LPoint: TPoint3D;
-  LShiftX, LShiftZ: Single;
 begin
-  FLod.Frame.ToGeo(FPanX, FPanZ, LLatitude, LLongitude);
-  FLod.Start(Floor(LLatitude), Floor(LLongitude));
-  LPoint := FLod.Frame.ToLocal(LLatitude, LLongitude, 0);
-  // A move under way carries on from the same place
-  LShiftX := LPoint.X - FPanX;
-  LShiftZ := LPoint.Z - FPanZ;
-  FPanX := LPoint.X;
-  FPanZ := LPoint.Z;
-  FDragPanX := FDragPanX + LShiftX;
-  FDragPanZ := FDragPanZ + LShiftZ;
+  FLod.Start(Floor(FFlight.Latitude), Floor(FFlight.Longitude));
   if Assigned(FOnLog) then
-    FOnLog(Self, Format('3D: the view moved more than %d km, so it is measured again from ' +
-      '%.4f, %.4f', [TERRAIN_REBASE_KM, LLatitude, LLongitude]));
+    FOnLog(Self, Format('3D: the flight went more than %d km, so the view is measured again ' +
+      'from %.4f, %.4f', [TERRAIN_REBASE_KM, FFlight.Latitude, FFlight.Longitude]));
   BeginWork;
   PlaceCamera;
+end;
+
+procedure TTerrainView.ReportCrash(ASpeed: Double);
+var
+  LWhere: string;
+begin
+  FHeld := [];
+  LWhere := Format('%.4f, %.4f', [FFlight.Latitude, FFlight.Longitude]);
+  FBanner.ShowText('Crashed',
+    Format('Into the ground at %s, %s km/h. Press R to start again.',
+      [FormatHudHeight(FFlight.Altitude), FormatFloat('#,##0', ASpeed * 3.6)]));
+  PlaceInstruments;
+  if Assigned(FOnLog) then
+    FOnLog(Self, Format('3D: crashed into the ground at %s (ground %s), heading %.0f, ' +
+      '%s km/h', [LWhere, FormatHudHeight(FFlight.Altitude), FFlight.Heading,
+       FormatFloat('#,##0', ASpeed * 3.6)]));
 end;
 
 procedure TTerrainView.TimerTick(Sender: TObject);
@@ -547,14 +765,30 @@ var
   LNode: TTerrainNode;
   LPatch: TTerrainPatch;
   LMesh: TObject;
-  LChanged, LBusy: Boolean;
-  LY: Single;
+  LChanged, LBusy, LWasCrashed: Boolean;
+  LSeconds, LSpeed: Double;
   LReport, LCopy: string;
 begin
   if (FLod = nil) or not FLod.Started then
     Exit;
   try
-    if FLod.NeedsRebase(FPanX, FPanZ) then
+    if FRateWatch.ElapsedMilliseconds >= FPS_REFRESH_MS then
+    begin
+      FRateWatch := TStopwatch.StartNew;
+      CheckFrameRate;
+    end;
+
+    // The flight moves on by the time gone, whatever the frame rate
+    LSeconds := FFlightWatch.Elapsed.TotalSeconds;
+    FFlightWatch := TStopwatch.StartNew;
+    LWasCrashed := FFlight.Crashed;
+    LSpeed := FFlight.Speed;
+    if FFlight.Step(FHeld, LSeconds) then
+      PlaceCamera;
+    if FFlight.Crashed and not LWasCrashed then
+      ReportCrash(LSpeed);
+
+    if FLod.NeedsRebase(FCamera.Position.X, FCamera.Position.Z) then
       Rebase;
 
     LChanged := FCameraMoved;
@@ -574,18 +808,12 @@ begin
     if LChanged then
       FUploadMs := FUploadMs + LWatch.Elapsed.TotalMilliseconds;
 
-    // The centre on the ground, as finer heights arrive
-    if FLod.SurfaceY(FPanX, FPanZ, LY) and (Abs(LY - FTargetY) > 0.002) then
-    begin
-      FTargetY := LY;
-      PlaceCamera;
-      LChanged := True;
-    end;
-
     if LChanged then
     begin
       FCameraMoved := False;
       FLod.Update(MakeEye);
+      // Finer heights under the flight change its height above them
+      UpdateInstruments;
     end;
 
     LBusy := FLod.Busy;
@@ -698,9 +926,9 @@ begin
   ABuffer.Indices[1] := 2;
   LBase := PByte(ABuffer.Buffer);
   if (LBase <> nil) and (PWord(LBase + 2)^ = 2) then
-    Move(FIndices16[0], LBase^, LCount * SizeOf(Word))
+    System.Move(FIndices16[0], LBase^, LCount * SizeOf(Word))
   else if (LBase <> nil) and (PCardinal(LBase + 4)^ = 2) then
-    Move(FIndices32[0], LBase^, LCount * SizeOf(Cardinal))
+    System.Move(FIndices32[0], LBase^, LCount * SizeOf(Cardinal))
   else
     for I := 0 to LCount - 1 do
       ABuffer.Indices[I] := FIndices[I];
@@ -765,8 +993,13 @@ begin
   begin
     FLod.Exaggeration := AValue;
     BeginWork;
-    FCameraMoved := True;
+    PlaceCamera;
   end;
+end;
+
+procedure TTerrainView.SetStartHeight(AValue: Integer);
+begin
+  FStartHeight := Max(AValue, 0);
 end;
 
 procedure TTerrainView.SetMaxDetail(AValue: Integer);
@@ -800,62 +1033,24 @@ end;
 procedure TTerrainView.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Single);
 begin
   inherited;
-  FDragStart := PointF(X, Y);
-  // As on the map: right, middle or Shift + left moves; left turns
-  if (Button in [TMouseButton.mbRight, TMouseButton.mbMiddle]) or
-     ((Button = TMouseButton.mbLeft) and (ssShift in Shift)) then
-  begin
-    FPanning := True;
-    FDragPanX := FPanX;
-    FDragPanZ := FPanZ;
-  end
-  else if Button = TMouseButton.mbLeft then
+  // A click on the view gives it the keyboard, for flying
+  SetFocus;
+  if Button = TMouseButton.mbLeft then
   begin
     FDragging := True;
-    FDragAzimuth := FAzimuth;
-    FDragElevation := FElevation;
+    FDragLast := PointF(X, Y);
   end;
 end;
 
 procedure TTerrainView.MouseMove(Shift: TShiftState; X, Y: Single);
-var
-  LScale, LAzimuth, LRightX, LRightZ, LAheadX, LAheadZ, LDX, LDY: Double;
-  LHeight: Single;
 begin
   inherited;
-  if FPanning then
-  begin
-    // Kilometres of ground for a pixel at the centre: the view's height
-    // there is 2 tan(FOV / 2) times the distance; looking down at a slant,
-    // a pixel up the screen covers more ground, by 1 / sin(elevation)
-    LHeight := Height;
-    if LHeight < 1 then
-      LHeight := 1;
-    LScale := 2 * Tan(DegToRad(TERRAIN_FOV / 2)) * FDistance / LHeight;
-    LAzimuth := DegToRad(FAzimuth);
-    // The camera's right and its way ahead, along the ground (X east,
-    // Z north); at azimuth 0 it looks north, with east to its right
-    LRightX := Cos(LAzimuth);
-    LRightZ := Sin(LAzimuth);
-    LAheadX := -Sin(LAzimuth);
-    LAheadZ := Cos(LAzimuth);
-    LDX := (X - FDragStart.X) * LScale;
-    LDY := (Y - FDragStart.Y) * LScale / Max(Sin(DegToRad(FElevation)), 0.2);
-    // The ground follows the pointer, so the centre moves the other way
-    // across, and ahead as the pointer comes down
-    FPanX := FDragPanX - LDX * LRightX + LDY * LAheadX;
-    FPanZ := FDragPanZ - LDX * LRightZ + LDY * LAheadZ;
-    PlaceCamera;
-    Exit;
-  end;
   if not FDragging then
     Exit;
-  // The surface turns with the drag, as if held: dragging right swings the
-  // camera round to the west, dragging down lifts it to look more from
-  // above
-  FAzimuth := FDragAzimuth - (X - FDragStart.X) * DRAG_AZIMUTH;
-  FElevation := EnsureRange(FDragElevation + (Y - FDragStart.Y) * DRAG_ELEVATION,
-    MIN_ELEVATION, MAX_ELEVATION);
+  // As looking round with the head: dragging right turns right, dragging
+  // down looks further down
+  FFlight.Look((X - FDragLast.X) * DRAG_TURN, (Y - FDragLast.Y) * DRAG_TILT);
+  FDragLast := PointF(X, Y);
   PlaceCamera;
 end;
 
@@ -863,15 +1058,13 @@ procedure TTerrainView.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: S
 begin
   inherited;
   FDragging := False;
-  FPanning := False;
 end;
 
 procedure TTerrainView.MouseWheel(Shift: TShiftState; WheelDelta: Integer;
   var Handled: Boolean);
 begin
   inherited;
-  FDistance := EnsureRange(FDistance * Power(WHEEL_ZOOM, WheelDelta / 120),
-    MIN_DISTANCE, MAX_DISTANCE);
+  FFlight.Climb(WheelDelta / 120);
   PlaceCamera;
   Handled := True;
 end;
@@ -879,7 +1072,79 @@ end;
 procedure TTerrainView.DblClick;
 begin
   inherited;
+  FDragging := False;
   ResetView;
+end;
+
+{ Which flight control a key is.
+  @param(AKey The key's code; 0 for a character typed.)
+  @param(AKeyChar The character typed.)
+  @param(AControl The control.)
+  @returns(@false if the key is not a flight control.) }
+function KeyControl(AKey: Word; AKeyChar: WideChar; out AControl: TFlightControl): Boolean;
+begin
+  Result := True;
+  case AKey of
+    vkUp: AControl := fcFaster;
+    vkDown: AControl := fcSlower;
+    vkLeft: AControl := fcTurnLeft;
+    vkRight: AControl := fcTurnRight;
+    vkPrior: AControl := fcClimb;
+    vkNext: AControl := fcDescend;
+    vkQ: AControl := fcTiltUp;
+    vkA: AControl := fcTiltDown;
+  else
+    // Some systems send letters only as characters
+    case UpCase(AKeyChar) of
+      'Q': AControl := fcTiltUp;
+      'A': AControl := fcTiltDown;
+    else
+      Result := False;
+    end;
+  end;
+end;
+
+procedure TTerrainView.KeyDown(var Key: Word; var KeyChar: WideChar; Shift: TShiftState);
+var
+  LControl: TFlightControl;
+begin
+  inherited;
+  if KeyControl(Key, KeyChar, LControl) then
+  begin
+    // A crash holds everything until the flight starts again
+    if not FFlight.Crashed then
+      Include(FHeld, LControl);
+  end
+  else if (Key = vkR) or (UpCase(KeyChar) = 'R') then
+    ResetView
+  else if (Key = vkSpace) or (KeyChar = ' ') then
+  begin
+    FFlight.Stop;
+    UpdateInstruments;
+  end
+  else
+    Exit;
+  Key := 0;
+  KeyChar := #0;
+end;
+
+procedure TTerrainView.KeyUp(var Key: Word; var KeyChar: WideChar; Shift: TShiftState);
+var
+  LControl: TFlightControl;
+begin
+  inherited;
+  if not KeyControl(Key, KeyChar, LControl) then
+    Exit;
+  Exclude(FHeld, LControl);
+  Key := 0;
+  KeyChar := #0;
+end;
+
+procedure TTerrainView.DoExit;
+begin
+  inherited;
+  FHeld := [];
+  FDragging := False;
 end;
 
 end.

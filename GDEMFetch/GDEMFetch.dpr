@@ -46,7 +46,9 @@
       GeoTIFF tiles; @link(GDEMTerrain) makes patches of the surface from
       them, @link(GDEMTerrainLod) decides which to draw and has them made
       on worker threads, and @link(GDEMTerrainView) shows them on the 3D
-      tab with Gorilla3D.)
+      tab with Gorilla3D, flown over as @link(GDEMFlight) moves, with
+      @link(GDEMTerrainHud)'s instruments over it and no faster than the
+      display refreshes (@link(GDEMDisplays)).)
     @item(@link(GDEMSystemInfo), in @code(common), reads the computer's
       memory and graphics processors, and this program's use of them, for
       the log.)
@@ -102,6 +104,9 @@ uses
   GDEMEasterEggs in 'lib\GDEMEasterEggs.pas',
   GDEMTerrain in 'lib\GDEMTerrain.pas',
   GDEMTerrainLod in 'lib\GDEMTerrainLod.pas',
+  GDEMFlight in 'lib\GDEMFlight.pas',
+  GDEMDisplays in 'ui\GDEMDisplays.pas',
+  GDEMTerrainHud in 'ui\GDEMTerrainHud.pas',
   GDEMTerrainView in 'ui\GDEMTerrainView.pas';
 
 {$R *.res}
