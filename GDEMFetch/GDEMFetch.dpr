@@ -107,6 +107,8 @@ uses
   GDEMTerrainLod in 'lib\GDEMTerrainLod.pas',
   GDEMFlight in 'lib\GDEMFlight.pas',
   GDEMImagery in 'lib\GDEMImagery.pas',
+  GDEMBookmarks in 'lib\GDEMBookmarks.pas',
+  BookmarkForm in 'ui\BookmarkForm.pas',
   GDEMDisplays in 'ui\GDEMDisplays.pas',
   GDEMTerrainHud in 'ui\GDEMTerrainHud.pas',
   GDEMTerrainView in 'ui\GDEMTerrainView.pas';

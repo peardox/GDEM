@@ -88,9 +88,18 @@ uses
   GDEMCancel, GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex,
   GDEMStore, GDEMThemes, GDEMReport, GDEMVectors, GDEMTileCache, GDEMMarkers,
   GDEMSearch, GDEMViewOptions, GDEMEasterEggs, GDEMTerrainLod, GDEMTerrainView, GDEMImagery,
-  ProgressForm;
+  GDEMBookmarks, ProgressForm;
 
 const
+  { The window's title, before the mode. }
+  APP_TITLE = 'ASTER GDEM V3 Fetch';
+
+  { The mode switch's caption when on. }
+  LAUNCH_MODE_CAPTION = 'Launch Mode';
+
+  { The mode switch's caption when off. }
+  FETCH_MODE_CAPTION = 'Tile Fetch Mode';
+
   { Name of the RCDATA resource holding the world map image. }
   WORLD_MAP_RESOURCE = 'WORLDMAP';
 
@@ -198,11 +207,14 @@ type
     { Shows the selected tile in 3D, then switches to the 3D tab. Enabled
       while exactly one downloaded tile is selected. }
     btnShow3D: TButton;
-    { Caption for @link(swClick3D). }
+    { Names the mode @link(swClick3D) is in: Launch Mode or Tile Fetch
+      Mode. }
     lblClick3D: TLabel;
-    { On, a left click on the map that selects a single downloaded tile
-      also shows it in 3D, as @link(btnShow3D) does; off, a click only
-      selects. Remembered in @code(view.json). }
+    { Launch Mode (on, as every start): a left click on the map that
+      selects a single tile with data prepares for flight there and shows
+      it in 3D, as @link(btnShow3D) does, but only with a bearer token
+      (without one, File > Settings opens). Tile Fetch Mode (off): a click
+      only selects, for Fetch selection. The window's title says which. }
     swClick3D: TSwitch;
     { Describes the map selection. }
     lblSelection: TLabel;
@@ -228,6 +240,15 @@ type
     mnuAddMarker: TMenuItem;
     { Markers > Edit Markers... }
     mnuEditMarkers: TMenuItem;
+    { The Bookmarks menu: Add Bookmark, then the bookmarks and their
+      folders, built from @code(bookmarks.json) by
+      @link(BuildBookmarksMenu). }
+    mnuBookmarks: TMenuItem;
+    { Bookmarks > Add Bookmark...: the 3D view's place, or typed
+      coordinates. }
+    mnuAddBookmark: TMenuItem;
+    { Bookmarks > the line under Add Bookmark. }
+    mnuBookmarksSep: TMenuItem;
     { The tabs filling the window between the toolbar and the status bar. }
     tabMain: TTabControl;
     { First tab: the world map. }
@@ -285,7 +306,7 @@ type
       @param(Sender The button.) }
     procedure btnShow3DClick(Sender: TObject);
 
-    { Remembers the Click for 3D switch.
+    { Shows the mode chosen with the switch, beside it and in the title.
       @param(Sender The switch.) }
     procedure swClick3DSwitch(Sender: TObject);
 
@@ -421,6 +442,10 @@ type
     { Opens the list of markers, to rename, delete or go to them.
       @param(Sender The menu item.) }
     procedure mnuEditMarkersClick(Sender: TObject);
+
+    { Bookmarks > Add Bookmark...: as B in the 3D view.
+      @param(Sender The menu item.) }
+    procedure mnuAddBookmarkClick(Sender: TObject);
   private
     { The user's saved settings, loaded at start-up. }
     FSettings: TGDEMSettings;
@@ -513,8 +538,86 @@ type
       it caches in may have changed. Owned by the form. }
     FImagery: TImageryService;
 
-    { Says what the 3D tab shows, or why it shows nothing. }
-    FTerrainInfo: TLabel;
+    { The user's bookmarks of 3D views, from @code(bookmarks.json). Owned
+      by the form. }
+    FBookmarks: TBookmarkList;
+
+    { The folder the last bookmark went in, offered for the next. }
+    FLastBookmarkFolder: Integer;
+
+    { The 3D tab's Flags box: place names on poles. }
+    FTerrainLabelsBox: TCheckBox;
+
+    { @true while @link(FFlightTargetLatitude) and
+      @link(FFlightTargetLongitude) hold the place last chosen on the map,
+      by a search or a click: Show in 3D starts the flight looking at it
+      when it is in the tile shown. }
+    FFlightTargetSet: Boolean;
+    { The place last chosen on the map, latitude. }
+    FFlightTargetLatitude: Double;
+    { The place last chosen on the map, longitude. }
+    FFlightTargetLongitude: Double;
+    { The easter egg last found in the search, flagged in the 3D view;
+      the others stay hidden. @code(-1) before one is found. }
+    FFoundEgg: Integer;
+    { Where the last plain left press on the map was, latitude. }
+    FPressLatitude: Double;
+    { Where the last plain left press on the map was, longitude. }
+    FPressLongitude: Double;
+    { @true if @link(FPressLatitude) and @link(FPressLongitude) are on the
+      map. }
+    FPressOnMap: Boolean;
+
+    { The work of Preparing for flight: its cancellation token while
+      tiles download; @nil afterwards. }
+    FPrepareToken: TCancelToken;
+    { Watches the 3D view settle while Preparing for flight. }
+    FPrepareTimer: TTimer;
+    { @true once Abort has been pressed in Preparing for flight. }
+    FPrepareCancelled: Boolean;
+    { @true once Preparing for flight has finished and the 3D tab may be
+      shown. }
+    FPrepareDone: Boolean;
+    { Run when Preparing for flight has finished and the view is ready;
+      see @link(PrepareFlight). }
+    FPrepareFinish: TProc;
+    { Ticks of @link(FPrepareTimer) since the 3D view was given its tile,
+      so it is not taken as settled before it has started. }
+    FPrepareTicks: Integer;
+
+    { Tiles the last Preparing for flight had to download; -1 before the
+      first. }
+    FLastFetchTiles: Integer;
+    { When the last Preparing for flight checked the tiles. }
+    FLastFetchAt: TDateTime;
+    { Keeps the status bar's "ago" current on the 3D tab, once a second,
+      and looks for tiles needed ahead of the flight. }
+    FStatusTimer: TTimer;
+    { Ticks of @link(FStatusTimer) since the last look ahead. }
+    FAheadTicks: Integer;
+    { The download of tiles ahead of the flight running now; @nil when
+      none is. It is also @link(FJob) while it runs. }
+    FAheadToken: TCancelToken;
+    { Tiles being downloaded ahead of the flight now. }
+    FAheadTiles: Integer;
+    { No look ahead before this, after a download ahead failed or was
+      cancelled, or with an expired token. }
+    FAheadRetryAt: TDateTime;
+
+    { The 3D tab's search box: as the Map tab's, but a match is flown to
+      (Preparing for flight) instead of shown on the map. }
+    FTerrainSearch: TEdit;
+    { The arrow after @link(FTerrainSearch): flies to the match chosen. }
+    FTerrainSearchGo: TButton;
+    { The search box being typed in, @link(edtSearch) or
+      @link(FTerrainSearch): the one @link(FSearchList) is under and that
+      the matches are for. }
+    FSearchEdit: TEdit;
+    { The match last chosen, whose text is @link(FSearchChosen). }
+    FChosenHit: TSearchHit;
+    { @true once Up or Down has picked a match in the list since the last
+      typing, so Enter or an arrow takes that one. }
+    FSearchPicked: Boolean;
 
     { The tile the 3D tab is centred on; empty when none. }
     FTerrainTile: string;
@@ -701,9 +804,25 @@ type
       @param(Sender The combo box.) }
     procedure TerrainHeightsChange(Sender: TObject);
 
-    { Starts the 3D view's flight again, over the tile shown.
-      @param(Sender The button.) }
-    procedure TerrainResetClick(Sender: TObject);
+    { Flies to the match chosen in the 3D tab's search box.
+      @param(Sender The arrow button.) }
+    procedure TerrainSearchGoClick(Sender: TObject);
+
+    { Hides the search list when the 3D view is clicked.
+      @param(Sender The view.)
+      @param(Button The mouse button.)
+      @param(Shift The keys held.)
+      @param(X Where, across.)
+      @param(Y Where, down.) }
+    procedure TerrainMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
+      X, Y: Single);
+
+    { Makes the 3D view again where the flight is, behind Preparing for
+      flight, after Detail, Heights, Distance or Realistic has changed: the
+      flight is put back as it was and carries on at its speed once the
+      dialog has closed. Queued, so the control that changed has finished
+      first. Nothing without a 3D view. }
+    procedure RelaunchTerrain;
 
     { Gives the 3D view the keyboard, for flying, after a control on the
       3D toolbar has taken it. }
@@ -726,6 +845,129 @@ type
 
     { Gives the 3D view the imagery service and the Realistic choice. }
     procedure ApplyTerrainRealistic;
+
+    { Reads @code(bookmarks.json); a file that cannot be read is logged
+      and left as it is, and the menu starts empty. }
+    procedure LoadBookmarks;
+
+    { Writes @code(bookmarks.json).
+      @returns(@false if it could not be written; the error has been
+        shown.) }
+    function SaveBookmarks: Boolean;
+
+    { Builds the Bookmarks menu's folders and bookmarks again from
+      @link(FBookmarks), under Add Bookmark, and gives the 3D view the
+      bookmarks' flags again. }
+    procedure BuildBookmarksMenu;
+
+    { Adds a folder's folders (as submenus) and bookmarks to a menu.
+      @param(AParent The menu item they go in.)
+      @param(AFolder The folder; @code(BOOKMARK_ROOT) for the top level.) }
+    procedure AddBookmarkItems(AParent: TMenuItem; AFolder: Integer);
+
+    { Goes to the bookmark a menu item stands for.
+      @param(Sender The menu item; its Tag is the bookmark's index.) }
+    procedure BookmarkMenuClick(Sender: TObject);
+
+    { Goes to a bookmark: its heights and imagery, the ground round it,
+      and the flight exactly as it was.
+      @param(AIndex The bookmark's index.) }
+    procedure GoToBookmark(AIndex: Integer);
+
+    { The 3D view's bookmark key, and Bookmarks > Add Bookmark: pauses the
+      view, asks for the bookmark's name, place (the view's, or typed
+      coordinates) and folder, saves it, and carries on as before.
+      @param(Sender The view, or @nil.) }
+    procedure TerrainBookmark(Sender: TObject);
+
+    { Remembers whether the 3D view's controls panel is collapsed.
+      @param(Sender The view.) }
+    procedure TerrainControlsToggle(Sender: TObject);
+
+    { The tile Show in 3D would show: the only tile with data selected,
+      or the only one downloaded when there is no tile index yet.
+      @returns(Its name, or empty if there is none.) }
+    function Show3DTile: string;
+
+    { Remembers a place chosen on the map, to start the flight looking at.
+      @param(ALatitude Its latitude.)
+      @param(ALongitude Its longitude.) }
+    procedure SetFlightTarget(ALatitude, ALongitude: Double);
+
+    { Makes the 3D view ready to fly, in a modal dialog titled Preparing
+      for flight with an Abort button: downloads the tiles the view will
+      load round the place that are not downloaded yet (if there is a
+      bearer token), gives the view the tile and places the flight, waits
+      for the ground (and, with Realistic on, its imagery) to be made, then
+      shows the 3D tab. Aborted, the 3D tab is not shown.
+      @param(ATile The tile to show.)
+      @param(ALatitude Where the flight will be, latitude, for the tiles
+        round it.)
+      @param(ALongitude Where the flight will be, longitude.)
+      @param(APlace Places the flight once the view has the tile, such as
+        @code(StartLookingAt) or @code(JumpTo).)
+      @param(AFinish Run once the dialog has closed and the view is ready,
+        not if aborted, such as to set the flight moving; may be @nil.) }
+    procedure PrepareFlight(const ATile: string; ALatitude, ALongitude: Double;
+      const APlace: TProc; const AFinish: TProc = nil);
+
+    { Ends Preparing for flight once its dialog has closed: uncovers the
+      view and, if it is ready, shows the 3D tab and runs what
+      @link(PrepareFlight) was given to finish with. }
+    procedure FinishPreparing;
+
+    { Shows how far Preparing for flight has got while the 3D view is
+      made, and closes the dialog once it has settled or Abort is pressed.
+      @param(Sender The timer.) }
+    procedure PrepareTimerTick(Sender: TObject);
+
+    { Gives the 3D view the places to label: towns and cities, mountains
+      and markers. }
+    procedure UpdateTerrainLabels;
+
+    { Turns the 3D view's place names on or off as the Flags box says,
+      and remembers it.
+      @param(Sender The check box.) }
+    procedure TerrainLabelsChange(Sender: TObject);
+
+    { The 3D view's L key turned the place names on or off: ticks the box
+      to match and remembers it.
+      @param(Sender The view.) }
+    procedure TerrainLabelsToggle(Sender: TObject);
+
+    { The flight moved: on the 3D tab, its latitude and longitude go in
+      the status bar, where the map shows the tile under the pointer.
+      @param(Sender The view.) }
+    procedure TerrainFlightMoved(Sender: TObject);
+
+    { Another tab was chosen: on the 3D tab the status bar shows the
+      flight's position; elsewhere it is cleared for the map to fill.
+      @param(Sender The tabs.) }
+    procedure TabMainChange(Sender: TObject);
+
+    { Refreshes the 3D tab's status bar, so its "ago" stays current.
+      @param(Sender The timer.) }
+    procedure StatusTimerTick(Sender: TObject);
+
+    { While flying on the 3D tab, downloads quietly the tiles that exist
+      but are not here, round the flight and round the place it will be in
+      @link(TILES_AHEAD_SECONDS) (at most @link(TILES_AHEAD_KM) ahead):
+      at most @link(TILES_AHEAD_MAX) at a time, nearest first, as a job
+      without a dialog, logged on the Debug tab. Each tile's ground is made
+      again as it lands. Does nothing while another job runs, with no
+      bearer token or an expired one, or with no tile index. }
+    procedure FetchTilesAhead;
+
+    { Downloads tiles ahead of the flight in the background, for
+      @link(FetchTilesAhead).
+      @param(ATiles The tiles' names, nearest first.) }
+    procedure StartTilesAhead(const ATiles: TArray<string>);
+
+    { What the last Preparing for flight had to download, and how long
+      ago, for the status bar.
+      @returns(Such as @code(last fetch 3 tiles, 2 min ago); empty before
+        the first.) }
+    function LastFetchText: string;
 
     { The View menu item that shows a layer.
       @param(ALayer The layer.)
@@ -765,23 +1007,47 @@ type
       easter eggs. }
     procedure RebuildSearch;
 
-    { Searches for what is in @link(edtSearch) and shows the matches. }
+    { Searches for what is in @link(FSearchEdit) and shows the matches. }
     procedure RunSearch;
 
-    { Goes to the match picked in the search list, or the best one,
-      searching first if the list is not showing; for Enter and
-      @link(btnSearchGo). }
+    { Goes to (or, from the 3D tab, flies to) the match picked in the
+      search list, or the best one, searching first if the list is not
+      showing; for Enter and the arrow buttons. }
     procedure GoToSearchChoice;
 
+    { The one match the search box means, if it means only one: the match
+      last chosen while the box still shows it, one picked with Up or Down,
+      or the only match (or the only exact one).
+      @param(AHit The match.)
+      @returns(@false if there is none, or several and none picked.) }
+    function UniqueSearchHit(out AHit: TSearchHit): Boolean;
+
+    { Flies to what the search box means, for the arrow buttons and Enter
+      on the 3D tab: @link(LaunchHit) if it means one place, otherwise the
+      list is shown to choose from. }
+    procedure LaunchSearchChoice;
+
+    { Goes to a match on the map, or flies to it from the 3D tab's search
+      box, as @link(FSearchEdit) says.
+      @param(AHit The match.) }
+    procedure ChooseHit(const AHit: TSearchHit);
+
+    { Flies to a match: Preparing for flight there, then the 3D view looks
+      at it, as Launch Mode does from the map; a country at its middle.
+      The view moves only once the dialog has closed.
+      @param(AHit The match.) }
+    procedure LaunchHit(const AHit: TSearchHit);
+
     { Puts a right-pointing triangle, drawn as a vector path as Sprite3D
-      draws its buttons, on @link(btnSearchGo). }
-    procedure BuildSearchGoIcon;
+      draws its buttons, on a search arrow button.
+      @param(AButton @link(btnSearchGo) or @link(FTerrainSearchGo).) }
+    procedure BuildSearchGoIcon(AButton: TButton);
 
     { Empties the search box, which closes the list and removes the ring,
       as emptying it by hand does. }
     procedure ClearSearchBox;
 
-    { Shows @link(FSearchList) under @link(edtSearch), sized to the
+    { Shows @link(FSearchList) under @link(FSearchEdit), sized to the
       matches. }
     procedure ShowSearchList;
 
@@ -1120,7 +1386,32 @@ uses
   Winapi.Windows,
   {$ENDIF}
   GDEMTiles, GDEMDownloadBatch, GDEMDrawing, GDEMMapTiles, GDEMTileSet, GDEMGpuPreference,
-  GDEMTerrain, GDEMSystemInfo, SettingsForm, MarkersForm;
+  GDEMTerrain, GDEMSystemInfo, GDEMTerrainHud, SettingsForm, MarkersForm, BookmarkForm,
+  System.DateUtils, System.Generics.Collections, System.Generics.Defaults, GDEMFlight;
+
+const
+  { Ticks of the status timer (a second each) between looks for tiles
+    needed ahead of the flight. }
+  TILES_AHEAD_TICKS = 3;
+  { Tiles ahead are those round where the flight will be in this many
+    seconds at its speed now, up to @link(TILES_AHEAD_KM). }
+  TILES_AHEAD_SECONDS = 90;
+  { The farthest ahead the tiles needed are looked for, kilometres. }
+  TILES_AHEAD_KM = 150;
+  { The most tiles downloaded ahead at a time. }
+  TILES_AHEAD_MAX = 6;
+  { Minutes before looking ahead again after a download ahead failed or
+    was cancelled. }
+  TILES_AHEAD_BACKOFF_MINUTES = 2;
+
+type
+  { @abstract(A tile that may be downloaded ahead of the flight.) }
+  TAheadCandidate = record
+    { Its name, such as @code(N53W003). }
+    Name: string;
+    { Roughly how far it is from the flight, degrees. }
+    Distance: Double;
+  end;
 
 { TfrmMain }
 
@@ -1236,6 +1527,11 @@ begin
   FMarkers := TMarkerList.Create;
   LoadMarkers;
   FMap.Markers := FMarkers;
+  // After the menu bar is in place (on Linux, the copy), so the items go
+  // under the Bookmarks menu in use
+  FBookmarks := TBookmarkList.Create;
+  LoadBookmarks;
+  BuildBookmarksMenu;
   LoadEasterEggs;
   FSearch := TPlaceSearch.Create;
   RebuildSearch;
@@ -1247,7 +1543,8 @@ begin
   FSearchList.CanFocus := False;
   FSearchList.ItemHeight := SEARCH_ITEM_HEIGHT;
   FSearchList.OnItemClick := SearchListItemClick;
-  BuildSearchGoIcon;
+  FSearchEdit := edtSearch;
+  BuildSearchGoIcon(btnSearchGo);
   LoadTileIndex;
   OpenStore(False);
   MapSelectionChanged(FMap);
@@ -1283,6 +1580,14 @@ begin
   tmrStorage.Enabled := False;
   // Taken from the 3D view before it goes, and its workers waited for
   CloseImagery;
+  if FTerrainView <> nil then
+  begin
+    FTerrainView.OnBookmark := nil;
+    FTerrainView.OnControlsToggle := nil;
+    FTerrainView.OnLabelsToggle := nil;
+    FTerrainView.OnFlightMoved := nil;
+  end;
+  FreeAndNil(FBookmarks);
   FMap.Vectors := nil;
   FVectors.Free;
   FMap.MapTiles := nil;
@@ -1636,13 +1941,19 @@ var
 
 var
   I: Integer;
-  LButton: TButton;
 begin
   FTerrainUpdating := True;
   try
-    // The Map tab's switch, as it was left; its handler only saves, so
-    // setting it here saves the same value back, harmlessly
-    swClick3D.IsChecked := FViewOptions.ClickShows3D;
+    // Every start is in Launch Mode
+    swClick3D.IsChecked := True;
+    swClick3DSwitch(swClick3D);
+    tabMain.OnChange := TabMainChange;
+    FLastFetchTiles := -1;
+    FFoundEgg := -1;
+    FStatusTimer := TTimer.Create(Self);
+    FStatusTimer.Interval := 1000;
+    FStatusTimer.OnTimer := StatusTimerTick;
+    FStatusTimer.Enabled := True;
     FTerrainBar := TLayout.Create(Self);
     FTerrainBar.Parent := tab3D;
     FTerrainBar.Align := TAlignLayout.Top;
@@ -1689,15 +2000,27 @@ begin
     FTerrainRealisticBox.OnChange := TerrainRealisticChange;
     AddToBar(FTerrainRealisticBox, 84, 16);
 
-    LButton := TButton.Create(Self);
-    LButton.Text := 'Start Again';
-    LButton.OnClick := TerrainResetClick;
-    AddToBar(LButton, 96, 16);
+    FTerrainLabelsBox := TCheckBox.Create(Self);
+    FTerrainLabelsBox.Text := 'Flags';
+    FTerrainLabelsBox.IsChecked := FViewOptions.TerrainLabels;
+    FTerrainLabelsBox.OnChange := TerrainLabelsChange;
+    AddToBar(FTerrainLabelsBox, 70, 16);
 
-    FTerrainInfo := TLabel.Create(Self);
-    FTerrainInfo.Parent := FTerrainBar;
-    FTerrainInfo.Align := TAlignLayout.Client;
-    FTerrainInfo.Text := 'Select one downloaded tile on the map and press Show in 3D.';
+    // A copy of the Map tab's search, whose matches are flown to
+    AddToBar(BarLabel('Search'), 52, 6);
+    FTerrainSearch := TEdit.Create(Self);
+    FTerrainSearch.TextPrompt := 'Place, mountain or marker';
+    FTerrainSearch.OnChangeTracking := edtSearchChangeTracking;
+    FTerrainSearch.OnKeyDown := edtSearchKeyDown;
+    FTerrainSearch.OnEnter := edtSearchEnter;
+    FTerrainSearch.OnClick := edtSearchClick;
+    AddToBar(FTerrainSearch, 236, 4);
+    FTerrainSearchGo := TButton.Create(Self);
+    FTerrainSearchGo.OnClick := TerrainSearchGoClick;
+    FTerrainSearchGo.OnApplyStyleLookup := btnSearchGoApplyStyleLookup;
+    FTerrainSearchGo.Hint := 'Fly there';
+    AddToBar(FTerrainSearchGo, 32, 16);
+    BuildSearchGoIcon(FTerrainSearchGo);
   finally
     FTerrainUpdating := False;
   end;
@@ -1728,7 +2051,8 @@ begin
     Exit;
   if not FStore.IsAvailable or not TryParseTileName(ATile, LSouth, LWest) then
   begin
-    FTerrainInfo.Text := 'The data folder is not available.';
+    AddLog('WARNING: 3D: the data folder is not available, so ' + ATile +
+      ' cannot be shown');
     Exit;
   end;
   try
@@ -1740,6 +2064,14 @@ begin
       FTerrainView.TileLookup := TerrainTileInfo;
       FTerrainView.OnSettled := TerrainSettled;
       FTerrainView.OnLog := TerrainLog;
+      FTerrainView.OnBookmark := TerrainBookmark;
+      FTerrainView.OnControlsToggle := TerrainControlsToggle;
+      FTerrainView.ControlsCollapsed := FViewOptions.TerrainControlsCollapsed;
+      FTerrainView.OnLabelsToggle := TerrainLabelsToggle;
+      FTerrainView.OnFlightMoved := TerrainFlightMoved;
+      FTerrainView.OnMouseDown := TerrainMouseDown;
+      FTerrainView.ShowLabels := FViewOptions.TerrainLabels;
+      UpdateTerrainLabels;
     end;
     FTerrainView.MaxDetail := ChosenTerrainDetail;
     FTerrainView.Range := ChosenTerrainRange;
@@ -1749,7 +2081,7 @@ begin
     // A new tile starts the flight again; the same one again keeps it
     FTerrainView.ShowArea(LSouth, LWest, ATile <> FTerrainTile);
     FTerrainTile := ATile;
-    FTerrainInfo.Text := ATile + ' and the tiles round it: loading...';
+    mnuAddBookmark.Enabled := True;
     AddLog(Format('3D: showing %s and the tiles round it; detail %d, distance detail %s, ' +
       'heights x %d; the flight starts %d m above the ground', [ATile, ChosenTerrainDetail,
        TERRAIN_RANGE_NAMES[Max(FTerrainRangeBox.ItemIndex, 0)], ChosenTerrainHeights,
@@ -1757,7 +2089,6 @@ begin
   except
     on E: Exception do
     begin
-      FTerrainInfo.Text := 'Could not show ' + ATile + ': ' + E.Message;
       AddLog('WARNING: could not show ' + ATile + ' in 3D (' + E.ClassName + ': ' +
         E.Message.TrimRight(['.']) + ')');
     end;
@@ -1792,9 +2123,6 @@ var
 begin
   AddLog(AText);
   LTile := FTerrainTile;
-  FTerrainInfo.Text := Format('%s: %d patches. Up/Down speed, Left/Right turn, ' +
-    'PgUp/PgDn height, Q/A camera, Space hover, R start again; drag to look, wheel for height.',
-    [LTile, FTerrainView.ShownPatches]);
   // Measured a moment later, once the meshes have been drawn and so sent
   // to the graphics processor
   TThread.ForceQueue(nil,
@@ -1823,9 +2151,7 @@ begin
     Exit;
   FViewOptions.TerrainRange := ChosenTerrainRange;
   SaveViewOptions;
-  if FTerrainView <> nil then
-    FTerrainView.Range := ChosenTerrainRange;
-  FocusTerrainView;
+  RelaunchTerrain;
 end;
 
 procedure TfrmMain.SelectTileAt(ALat, ALon: Double; const AName: string);
@@ -1844,17 +2170,586 @@ end;
 
 procedure TfrmMain.btnShow3DClick(Sender: TObject);
 var
-  LNames: TArray<string>;
+  LTile: string;
+  LSouth, LWest: Integer;
+  LLatitude, LLongitude: Double;
 begin
   // Only this sends a tile to the 3D tab: selecting on the map only
-  // selects, so a click is never taken as asking for 3D. The 3D tab opens
-  // at once and sharpens as its patches are made
-  LNames := SelectedTileNames(FDownloaded);
-  if Length(LNames) <> 1 then
+  // selects, so a click is never taken as asking for 3D
+  LTile := Show3DTile;
+  if not TryParseTileName(LTile, LSouth, LWest) then
     Exit;
-  ShowTerrainTile(LNames[0], False);
+  // The place chosen on the map, when it is in this tile, is where the
+  // flight looks at first; otherwise the tile's middle
+  if FFlightTargetSet and (Floor(FFlightTargetLatitude) = LSouth) and
+     (Floor(FFlightTargetLongitude) = LWest) then
+  begin
+    LLatitude := FFlightTargetLatitude;
+    LLongitude := FFlightTargetLongitude;
+    PrepareFlight(LTile, LLatitude, LLongitude,
+      procedure
+      begin
+        FTerrainView.StartLookingAt(LLatitude, LLongitude);
+      end);
+  end
+  else
+    PrepareFlight(LTile, LSouth + 0.5, LWest + 0.5,
+      procedure
+      begin
+        FTerrainView.ResetView;
+      end);
+end;
+
+function TfrmMain.Show3DTile: string;
+var
+  LNames: TArray<string>;
+begin
+  Result := '';
+  if (FTileIndex <> nil) and not FTileIndex.IsEmpty then
+    LNames := SelectedTileNames(FTileIndex)
+  else
+    LNames := SelectedTileNames(FDownloaded);
+  if Length(LNames) = 1 then
+    Result := LNames[0];
+end;
+
+procedure TfrmMain.PrepareFlight(const ATile: string; ALatitude, ALongitude: Double;
+  const APlace: TProc; const AFinish: TProc);
+var
+  LMissing: TArray<string>;
+  LTile: TPoint;
+  LDownload: Boolean;
+  LBearer: string;
+  LStore: TGDEMStore;
+  LReserve: Int64;
+  LSpeed: TDownloadSpeed;
+  LTileName: string;
+  LPlace: TProc;
+  LToFetch: Integer;
+  LTileArg: string;
+  LLatitude, LLongitude: Double;
+  LPlaceArg, LFinishArg: TProc;
+begin
+  // Tiles being fetched ahead of the flight give way: stopped, and this
+  // tried again once they have
+  if (FJob <> nil) and (FJob = FAheadToken) then
+  begin
+    FAheadToken.Cancel;
+    LTileArg := ATile;
+    LLatitude := ALatitude;
+    LLongitude := ALongitude;
+    LPlaceArg := APlace;
+    LFinishArg := AFinish;
+    TThread.ForceQueue(nil,
+      procedure
+      begin
+        PrepareFlight(LTileArg, LLatitude, LLongitude, LPlaceArg, LFinishArg);
+      end, 200);
+    Exit;
+  end;
+  if FJob <> nil then
+  begin
+    ReportError('Please wait for the current job to finish, or cancel it, first.');
+    Exit;
+  end;
+  if not FStore.IsAvailable then
+  begin
+    ReportError('The data folder is not available, so there is no ground to fly over.');
+    Exit;
+  end;
+  LTileName := ATile;
+  LPlace := APlace;
+
+  // The tiles the view will load round the place that exist but are not
+  // here yet
+  LMissing := nil;
+  if not FTileIndex.IsEmpty then
+    for LTile in TerrainWindowTiles(ALatitude, ALongitude) do
+      if FTileIndex.Has(LTile.Y, LTile.X) and not FDownloaded.Has(LTile.Y, LTile.X) then
+        LMissing := LMissing + [TileName(LTile.Y, LTile.X)];
+  LDownload := Length(LMissing) > 0;
+  if LDownload and (FSettings.BearerToken = '') then
+  begin
+    AddLog(Format('WARNING: %d tile(s) round %s are not downloaded, and there is no bearer ' +
+      'token to download them with (File > Settings); they are drawn flat', [Length(LMissing),
+       ATile]));
+    LDownload := False;
+  end
+  else if LDownload and not CheckTokenExpiry then
+    LDownload := False;
+  if LDownload then
+    LToFetch := Length(LMissing)
+  else
+    LToFetch := 0;
+  AddLog(Format('3D: preparing for flight at %s %s: %d tile(s) to download', [
+    FormatLat(ALatitude), FormatLon(ALongitude), LToFetch]));
+
+  LBearer := FSettings.BearerToken;
+  LStore := FStore;
+  LReserve := ReserveBytes;
+  LSpeed := DownloadSpeedFromKey(FSettings.DownloadSpeed);
+  FPrepareCancelled := False;
+  FPrepareDone := False;
+  FPrepareFinish := AFinish;
+  // The view is hidden until it is ready, so the new place and its
+  // imagery are not seen coming in, even behind the dialog
+  if FTerrainView <> nil then
+    FTerrainView.Covered := True;
+  FPrepareToken := TCancelToken.Create;
+  // A job, so no other work on the data folder starts meanwhile
+  FJob := FPrepareToken;
+  TKeepAwake.Acquire('Preparing for flight');
+  UpdateButtons;
+  BeginProgress('Preparing for flight',
+    procedure
+    begin
+      FPrepareCancelled := True;
+      if FPrepareToken <> nil then
+        FPrepareToken.Cancel;
+      AddLog('Preparing for flight: aborted');
+    end,
+    True);
+  if LDownload then
+    ProgressStatus(Format('Downloading %d tile(s) round %s...', [Length(LMissing), ATile]))
+  else
+    ProgressStatus('Every tile is here.');
+
+  TTask.Run(
+    procedure
+    var
+      LError: string;
+    begin
+      LError := '';
+      try
+        if LDownload then
+          RunDownloads(FPrepareToken, LMissing, LBearer, LStore, LReserve, LSpeed, 0);
+      except
+        on E: EOperationCancelled do
+          ;
+        on E: Exception do
+          LError := E.Message;
+      end;
+      // Queued after the tiles' own marks, so the view finds them
+      // downloaded
+      TThread.Queue(nil,
+        procedure
+        begin
+          FJob := nil;
+          TKeepAwake.Release;
+          FreeAndNil(FPrepareToken);
+          UpdateButtons;
+          RefreshStorageStatus;
+          if LError <> '' then
+            AddLog('WARNING: preparing for flight: ' + LError +
+              '; the tiles not downloaded are drawn flat');
+          if not FPrepareCancelled then
+          begin
+            FLastFetchTiles := LToFetch;
+            FLastFetchAt := Now;
+          end;
+          if FPrepareCancelled then
+          begin
+            EndProgress;
+            CloseIfIdle;
+            Exit;
+          end;
+          // The ground, and its imagery with Realistic on
+          ProgressStatus('Making the ground...');
+          ShowTerrainTile(LTileName, True);
+          if (FTerrainView = nil) or not FTerrainView.HasTerrain then
+          begin
+            EndProgress;
+            Exit;
+          end;
+          // Made just now on a first flight
+          FTerrainView.Covered := True;
+          if Assigned(LPlace) then
+            LPlace();
+          if FPrepareTimer = nil then
+          begin
+            FPrepareTimer := TTimer.Create(Self);
+            FPrepareTimer.Interval := 100;
+            FPrepareTimer.OnTimer := PrepareTimerTick;
+          end;
+          FPrepareTicks := 0;
+          FPrepareTimer.Enabled := True;
+        end);
+    end);
+
+  // Blocks until the dialog closes (on desktop platforms)
+  ShowProgressModal;
+  {$IFNDEF ANDROID}
+  FinishPreparing;
+  {$ENDIF}
+end;
+
+procedure TfrmMain.FinishPreparing;
+var
+  LFinish: TProc;
+begin
+  LFinish := FPrepareFinish;
+  FPrepareFinish := nil;
+  // Ready or aborted, the view shows again
+  if FTerrainView <> nil then
+    FTerrainView.Covered := False;
+  if not FPrepareDone then
+    Exit;
   tabMain.ActiveTab := tab3D;
   FocusTerrainView;
+  if Assigned(LFinish) then
+    LFinish();
+end;
+
+procedure TfrmMain.PrepareTimerTick(Sender: TObject);
+var
+  LDone, LTotal: Integer;
+  LText: string;
+begin
+  if FPrepareCancelled or (FTerrainView = nil) then
+  begin
+    FPrepareTimer.Enabled := False;
+    EndProgress;
+    {$IFDEF ANDROID}
+    FinishPreparing;
+    {$ENDIF}
+    Exit;
+  end;
+  Inc(FPrepareTicks);
+  FTerrainView.WorkProgress(LDone, LTotal, LText);
+  ProgressOverall(LDone, Max(LTotal, 1), LText);
+  // Settled, and not straight away: the view needs a tick or two to start
+  if (FPrepareTicks > 3) and FTerrainView.Settled then
+  begin
+    FPrepareTimer.Enabled := False;
+    FPrepareDone := True;
+    AddLog('3D: ready for flight; ' + LText);
+    EndProgress;
+    {$IFDEF ANDROID}
+    // Android does not block on the dialog, so the tab is shown here
+    FinishPreparing;
+    {$ENDIF}
+  end;
+end;
+
+procedure TfrmMain.UpdateTerrainLabels;
+var
+  LLabels: TArray<TTerrainPlaceLabel>;
+  LLabel: TTerrainPlaceLabel;
+  I: Integer;
+begin
+  if FTerrainView = nil then
+    Exit;
+  LLabels := nil;
+  // The easter egg found, if any, before everything: it was looked for
+  if InRange(FFoundEgg, 0, High(FEasterEggs)) then
+  begin
+    LLabel.Name := FEasterEggs[FFoundEgg].Name;
+    LLabel.Latitude := FEasterEggs[FFoundEgg].Lat;
+    LLabel.Longitude := FEasterEggs[FFoundEgg].Lon;
+    LLabel.Kind := tlkFound;
+    LLabel.Rank := -2;
+    LLabels := LLabels + [LLabel];
+  end;
+  // Bookmarks, where each was made (the camera's place), then markers,
+  // then mountains, then towns and cities by how important Natural Earth
+  // makes them
+  for I := 0 to FBookmarks.Count - 1 do
+  begin
+    LLabel.Name := FBookmarks[I].Name;
+    LLabel.Latitude := FBookmarks[I].Latitude;
+    LLabel.Longitude := FBookmarks[I].Longitude;
+    LLabel.Kind := tlkBookmark;
+    LLabel.Rank := -1.5;
+    LLabels := LLabels + [LLabel];
+  end;
+  for I := 0 to FMarkers.Count - 1 do
+  begin
+    LLabel.Name := FMarkers[I].Name;
+    LLabel.Latitude := FMarkers[I].Lat;
+    LLabel.Longitude := FMarkers[I].Lon;
+    LLabel.Kind := tlkMarker;
+    LLabel.Rank := -1;
+    LLabels := LLabels + [LLabel];
+  end;
+  if FVectors <> nil then
+  begin
+    for I := 0 to High(FVectors.Peaks) do
+    begin
+      LLabel.Name := Format('%s %s m', [FVectors.Peaks[I].Name,
+        FormatFloat('#,##0', FVectors.Peaks[I].Elevation)]);
+      LLabel.Latitude := FVectors.Peaks[I].Lat;
+      LLabel.Longitude := FVectors.Peaks[I].Lon;
+      LLabel.Kind := tlkPeak;
+      LLabel.Rank := FVectors.Peaks[I].MinZoom - 0.5;
+      LLabels := LLabels + [LLabel];
+    end;
+    for I := 0 to High(FVectors.Places) do
+    begin
+      LLabel.Name := FVectors.Places[I].Name;
+      LLabel.Latitude := FVectors.Places[I].Lat;
+      LLabel.Longitude := FVectors.Places[I].Lon;
+      LLabel.Kind := tlkPlace;
+      LLabel.Rank := FVectors.Places[I].MinZoom;
+      LLabels := LLabels + [LLabel];
+    end;
+  end;
+  FTerrainView.PlaceLabels := LLabels;
+end;
+
+procedure TfrmMain.TerrainLabelsChange(Sender: TObject);
+begin
+  if FTerrainUpdating then
+    Exit;
+  FViewOptions.TerrainLabels := FTerrainLabelsBox.IsChecked;
+  SaveViewOptions;
+  if FTerrainView <> nil then
+    FTerrainView.ShowLabels := FTerrainLabelsBox.IsChecked;
+  FocusTerrainView;
+end;
+
+procedure TfrmMain.TerrainFlightMoved(Sender: TObject);
+var
+  LState: TTerrainFlightState;
+begin
+  if (FTerrainView = nil) or (tabMain.ActiveTab <> tab3D) or not FTerrainView.HasTerrain then
+    Exit;
+  LState := FTerrainView.FlightState;
+  lblHover.Text := FormatLat(LState.Latitude) + '  ' + FormatLon(LState.Longitude);
+  if LastFetchText <> '' then
+    lblHover.Text := lblHover.Text + '   ' + LastFetchText;
+end;
+
+function TfrmMain.LastFetchText: string;
+var
+  LSeconds: Int64;
+  LAgo: string;
+begin
+  Result := '';
+  if FAheadTiles > 0 then
+    Exit(Format('fetching %d tile(s) ahead', [FAheadTiles]));
+  if FLastFetchTiles < 0 then
+    Exit;
+  LSeconds := SecondsBetween(Now, FLastFetchAt);
+  if LSeconds < 10 then
+    LAgo := 'just now'
+  else if LSeconds < 60 then
+    LAgo := Format('%d s ago', [LSeconds])
+  else if LSeconds < 3600 then
+    LAgo := Format('%d min ago', [LSeconds div 60])
+  else
+    LAgo := Format('%d h %d min ago', [LSeconds div 3600, (LSeconds mod 3600) div 60]);
+  if FLastFetchTiles = 0 then
+    Result := 'no fetch needed, ' + LAgo
+  else if FLastFetchTiles = 1 then
+    Result := 'last fetch 1 tile, ' + LAgo
+  else
+    Result := Format('last fetch %d tiles, %s', [FLastFetchTiles, LAgo]);
+end;
+
+procedure TfrmMain.StatusTimerTick(Sender: TObject);
+begin
+  if tabMain.ActiveTab <> tab3D then
+    Exit;
+  TerrainFlightMoved(FTerrainView);
+  Inc(FAheadTicks);
+  if FAheadTicks >= TILES_AHEAD_TICKS then
+  begin
+    FAheadTicks := 0;
+    FetchTilesAhead;
+  end;
+end;
+
+procedure TfrmMain.FetchTilesAhead;
+var
+  LState: TTerrainFlightState;
+  LAheadLat, LAheadLon, LDistance: Double;
+  LSeen: TDictionary<string, Boolean>;
+  LCandidates: TList<TAheadCandidate>;
+  LTiles: TArray<string>;
+  LExpires: TDateTime;
+  I: Integer;
+
+  { Adds the tiles of the window round a place that exist but are not
+    here, with their distance from the flight.
+    @param(ALatitude The place's latitude.)
+    @param(ALongitude Its longitude.) }
+  procedure AddWindow(ALatitude, ALongitude: Double);
+  var
+    LName: string;
+    LLat, LLon: Double;
+    LTile: TPoint;
+    LCandidate: TAheadCandidate;
+  begin
+    for LTile in TerrainWindowTiles(ALatitude, ALongitude) do
+    begin
+      if not FTileIndex.Has(LTile.Y, LTile.X) or FDownloaded.Has(LTile.Y, LTile.X) then
+        Continue;
+      LName := TileName(LTile.Y, LTile.X);
+      if LSeen.ContainsKey(LName) then
+        Continue;
+      LSeen.Add(LName, True);
+      // From the flight to the tile's middle, roughly, for the order
+      LLat := LTile.Y + 0.5 - LState.Latitude;
+      LLon := LTile.X + 0.5 - LState.Longitude;
+      if LLon > 180 then
+        LLon := LLon - 360
+      else if LLon < -180 then
+        LLon := LLon + 360;
+      LLon := LLon * Cos(DegToRad(LState.Latitude));
+      LCandidate.Name := LName;
+      LCandidate.Distance := Sqrt(Sqr(LLat) + Sqr(LLon));
+      LCandidates.Add(LCandidate);
+    end;
+  end;
+
+begin
+  if (FTerrainView = nil) or not FTerrainView.HasTerrain or FTerrainView.Paused or
+     (FJob <> nil) or (FAheadToken <> nil) or (Now < FAheadRetryAt) or
+     (FSettings.BearerToken = '') or FTileIndex.IsEmpty or not FStore.IsAvailable then
+    Exit;
+  if TokenExpiry(FSettings.BearerToken, LExpires) and (LExpires <= Now) then
+  begin
+    // Said once an hour, not every look
+    AddLog('WARNING: tiles ahead of the flight are not downloaded, as the bearer token has ' +
+      'expired (File > Settings); they are drawn flat');
+    FAheadRetryAt := Now + 1 / 24;
+    Exit;
+  end;
+
+  LState := FTerrainView.FlightState;
+  LDistance := Min(LState.Speed * TILES_AHEAD_SECONDS, TILES_AHEAD_KM * 1000);
+  DestinationPoint(LState.Latitude, LState.Longitude, LState.Heading, LDistance, LAheadLat,
+    LAheadLon);
+  LSeen := TDictionary<string, Boolean>.Create;
+  LCandidates := TList<TAheadCandidate>.Create;
+  try
+    // Round the flight too, in case it has outrun the looks ahead
+    AddWindow(LState.Latitude, LState.Longitude);
+    if LDistance > 1000 then
+      AddWindow(LAheadLat, LAheadLon);
+    if LCandidates.Count = 0 then
+      Exit;
+    LCandidates.Sort(TComparer<TAheadCandidate>.Construct(
+      function(const A, B: TAheadCandidate): Integer
+      begin
+        Result := CompareValue(A.Distance, B.Distance);
+      end));
+    LTiles := nil;
+    for I := 0 to Min(LCandidates.Count, TILES_AHEAD_MAX) - 1 do
+      LTiles := LTiles + [LCandidates[I].Name];
+  finally
+    LCandidates.Free;
+    LSeen.Free;
+  end;
+
+  StartTilesAhead(LTiles);
+end;
+
+procedure TfrmMain.StartTilesAhead(const ATiles: TArray<string>);
+var
+  LTiles: TArray<string>;
+  LBearer: string;
+  LStore: TGDEMStore;
+  LReserve: Int64;
+  LSpeed: TDownloadSpeed;
+  LToken: TCancelToken;
+begin
+  LTiles := ATiles;
+  AddLog(Format('3D: downloading %d tile(s) ahead of the flight: %s', [Length(LTiles),
+    string.Join(', ', LTiles)]));
+  LBearer := FSettings.BearerToken;
+  LStore := FStore;
+  LReserve := ReserveBytes;
+  LSpeed := DownloadSpeedFromKey(FSettings.DownloadSpeed);
+  LToken := TCancelToken.Create;
+  FAheadToken := LToken;
+  FAheadTiles := Length(LTiles);
+  // A job, so no other work on the data folder starts meanwhile; the
+  // Cancel button on the Map tab stops it
+  FJob := LToken;
+  UpdateButtons;
+  TerrainFlightMoved(FTerrainView);
+  TTask.Run(
+    procedure
+    var
+      LBatch: TDownloadBatch;
+      LResult: TDownloadBatchResult;
+      LError: string;
+      LCancelled: Boolean;
+    begin
+      LError := '';
+      LCancelled := False;
+      LResult := Default(TDownloadBatchResult);
+      try
+        LBatch := TDownloadBatch.Create(LBearer, LStore, LReserve, LSpeed);
+        try
+          // No dialog: the log only, and each tile marked (and its ground
+          // made again) as it lands
+          LBatch.OnLog := AddLog;
+          LBatch.OnTileDownloaded := QueueMarkDownloaded;
+          LResult := LBatch.Run(LToken, LTiles, 0);
+        finally
+          LBatch.Free;
+        end;
+      except
+        on E: EOperationCancelled do
+          LCancelled := True;
+        on E: Exception do
+          LError := E.Message;
+      end;
+      // Queued after the tiles' own marks
+      TThread.Queue(nil,
+        procedure
+        begin
+          if FJob = LToken then
+            FJob := nil;
+          FAheadToken := nil;
+          FAheadTiles := 0;
+          LToken.Free;
+          UpdateButtons;
+          RefreshStorageStatus;
+          if LCancelled then
+          begin
+            AddLog('3D: downloading tiles ahead of the flight: cancelled');
+            FAheadRetryAt := Now + TILES_AHEAD_BACKOFF_MINUTES / MinsPerDay;
+          end
+          else if (LError <> '') or (LResult.Failed > 0) then
+          begin
+            if LError = '' then
+              LError := Format('%d tile(s) could not be downloaded', [LResult.Failed]);
+            AddLog(Format('WARNING: downloading tiles ahead of the flight: %s; trying again ' +
+              'in %d min, and meanwhile they are drawn flat', [HideURLQueries(LError),
+               TILES_AHEAD_BACKOFF_MINUTES]));
+            FAheadRetryAt := Now + TILES_AHEAD_BACKOFF_MINUTES / MinsPerDay;
+          end;
+          if LResult.Downloaded > 0 then
+          begin
+            FLastFetchTiles := LResult.Downloaded;
+            FLastFetchAt := Now;
+          end;
+          if tabMain.ActiveTab = tab3D then
+            TerrainFlightMoved(FTerrainView);
+          CloseIfIdle;
+        end);
+    end);
+end;
+
+procedure TfrmMain.TabMainChange(Sender: TObject);
+begin
+  // It belongs to the other tab's box
+  HideSearchList;
+  if tabMain.ActiveTab = tab3D then
+    TerrainFlightMoved(FTerrainView)
+  else
+    lblHover.Text := '';
+end;
+
+procedure TfrmMain.TerrainLabelsToggle(Sender: TObject);
+begin
+  if FTerrainView = nil then
+    Exit;
+  // The box follows; its handler remembers it
+  FTerrainLabelsBox.IsChecked := FTerrainView.ShowLabels;
 end;
 
 procedure TfrmMain.TerrainRealisticChange(Sender: TObject);
@@ -1863,12 +2758,11 @@ begin
     Exit;
   FViewOptions.TerrainRealistic := FTerrainRealisticBox.IsChecked;
   SaveViewOptions;
-  ApplyTerrainRealistic;
   if FTerrainRealisticBox.IsChecked then
     AddLog('3D: realistic, with ' + ImageryCredit(ImageryService.Layer))
   else
     AddLog('3D: height colours');
-  FocusTerrainView;
+  RelaunchTerrain;
 end;
 
 function TfrmMain.ImageryService: TImageryService;
@@ -1919,10 +2813,11 @@ end;
 
 procedure TfrmMain.swClick3DSwitch(Sender: TObject);
 begin
-  if FViewOptions = nil then
-    Exit;
-  FViewOptions.ClickShows3D := swClick3D.IsChecked;
-  SaveViewOptions;
+  if swClick3D.IsChecked then
+    lblClick3D.Text := LAUNCH_MODE_CAPTION
+  else
+    lblClick3D.Text := FETCH_MODE_CAPTION;
+  Caption := APP_TITLE + ' - ' + lblClick3D.Text;
 end;
 
 procedure TfrmMain.TerrainDetailChange(Sender: TObject);
@@ -1931,11 +2826,7 @@ begin
     Exit;
   FViewOptions.TerrainDetail := ChosenTerrainDetail;
   SaveViewOptions;
-  // Finer or coarser near the camera from the next look; nothing is read
-  // again
-  if FTerrainView <> nil then
-    FTerrainView.MaxDetail := ChosenTerrainDetail;
-  FocusTerrainView;
+  RelaunchTerrain;
 end;
 
 procedure TfrmMain.TerrainHeightsChange(Sender: TObject);
@@ -1944,22 +2835,310 @@ begin
     Exit;
   FViewOptions.TerrainHeights := ChosenTerrainHeights;
   SaveViewOptions;
-  FocusTerrainView;
-  if FTerrainView = nil then
-    Exit;
-  // Every patch is made again; TerrainSettled logs when it is done
-  FTerrainView.Exaggeration := ChosenTerrainHeights;
   AddLog(Format('3D: heights x %d', [ChosenTerrainHeights]));
+  RelaunchTerrain;
 end;
 
-procedure TfrmMain.TerrainResetClick(Sender: TObject);
+procedure TfrmMain.RelaunchTerrain;
 begin
-  if FTerrainView <> nil then
-    FTerrainView.ResetView;
-  FocusTerrainView;
+  if (FTerrainView = nil) or not FTerrainView.HasTerrain then
+    Exit;
+  TThread.ForceQueue(nil,
+    procedure
+    var
+      LState: TTerrainFlightState;
+      LSpeed: Double;
+    begin
+      if (FTerrainView = nil) or not FTerrainView.HasTerrain then
+        Exit;
+      // Hovering while it is made again, then off at the same speed
+      LState := FTerrainView.FlightState;
+      LSpeed := LState.Speed;
+      LState.Speed := 0;
+      PrepareFlight(TileNameAt(LState.Latitude, LState.Longitude), LState.Latitude,
+        LState.Longitude,
+        procedure
+        begin
+          FTerrainView.JumpTo(LState);
+        end,
+        procedure
+        begin
+          if LSpeed > 0 then
+            FTerrainView.FlightSpeed := LSpeed;
+        end);
+    end);
+end;
+
+procedure TfrmMain.TerrainSearchGoClick(Sender: TObject);
+begin
+  FSearchEdit := FTerrainSearch;
+  LaunchSearchChoice;
+end;
+
+procedure TfrmMain.TerrainMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
+  X, Y: Single);
+begin
+  HideSearchList;
 end;
 
 { Markers and search }
+
+{ Bookmarks }
+
+procedure TfrmMain.LoadBookmarks;
+begin
+  try
+    if FBookmarks.Load then
+      AddLog(Format('Bookmarks: %d in %d folder(s), from %s', [FBookmarks.Count,
+        FBookmarks.FolderCount, FBookmarks.FileName]));
+  except
+    on E: Exception do
+      AddLog('WARNING: ' + E.Message.TrimRight(['.']) +
+        '; starting with no bookmarks, and the file is left as it is until one is added');
+  end;
+end;
+
+function TfrmMain.SaveBookmarks: Boolean;
+begin
+  try
+    FBookmarks.Save;
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      ReportError('The bookmark could not be saved: ' + E.Message);
+      Result := False;
+    end;
+  end;
+end;
+
+procedure TfrmMain.BuildBookmarksMenu;
+var
+  I: Integer;
+  LNone: TMenuItem;
+begin
+  // Every change to the bookmarks comes here, so their flags in the 3D
+  // view follow too
+  UpdateTerrainLabels;
+  if mnuBookmarks = nil then
+    Exit;
+  // Everything under the line, made last time
+  for I := mnuBookmarks.ItemsCount - 1 downto 0 do
+    if mnuBookmarks.Items[I].TagString <> '' then
+      mnuBookmarks.Items[I].Free;
+  if FBookmarks.Count + FBookmarks.FolderCount = 0 then
+  begin
+    LNone := TMenuItem.Create(Self);
+    LNone.Text := 'No bookmarks yet';
+    LNone.Enabled := False;
+    LNone.TagString := 'none';
+    LNone.Parent := mnuBookmarks;
+  end
+  else
+    AddBookmarkItems(mnuBookmarks, BOOKMARK_ROOT);
+  mnuAddBookmark.Enabled := True;
+  // The system's own menu bar is made again from the items; on Linux the
+  // FMX menu bar shows them as they are
+  if mnuMain <> nil then
+    mnuMain.RecreateOSMenu;
+end;
+
+procedure TfrmMain.AddBookmarkItems(AParent: TMenuItem; AFolder: Integer);
+var
+  LIndex: Integer;
+  LItem, LEmpty: TMenuItem;
+  LFolder: TBookmarkFolder;
+begin
+  // Folders first, as submenus, then the bookmarks, each in its order
+  for LIndex in FBookmarks.FoldersIn(AFolder) do
+  begin
+    LFolder := FBookmarks.Folders[LIndex];
+    LItem := TMenuItem.Create(Self);
+    // An ampersand would make the next letter a shortcut
+    LItem.Text := LFolder.Name.Replace('&', '&&');
+    LItem.TagString := 'folder';
+    LItem.Parent := AParent;
+    AddBookmarkItems(LItem, LFolder.Id);
+    if LItem.ItemsCount = 0 then
+    begin
+      LEmpty := TMenuItem.Create(Self);
+      LEmpty.Text := '(empty)';
+      LEmpty.Enabled := False;
+      LEmpty.TagString := 'none';
+      LEmpty.Parent := LItem;
+    end;
+  end;
+  for LIndex in FBookmarks.BookmarksIn(AFolder) do
+  begin
+    LItem := TMenuItem.Create(Self);
+    LItem.Text := FBookmarks[LIndex].Name.Replace('&', '&&');
+    LItem.Tag := LIndex;
+    LItem.TagString := 'bookmark';
+    LItem.OnClick := BookmarkMenuClick;
+    LItem.Parent := AParent;
+  end;
+end;
+
+procedure TfrmMain.BookmarkMenuClick(Sender: TObject);
+begin
+  if Sender is TMenuItem then
+    GoToBookmark(TMenuItem(Sender).Tag);
+end;
+
+procedure TfrmMain.GoToBookmark(AIndex: Integer);
+var
+  LBookmark: TBookmark;
+begin
+  if (AIndex < 0) or (AIndex >= FBookmarks.Count) then
+    Exit;
+  LBookmark := FBookmarks[AIndex];
+
+  // The ground round it; then, hidden behind the dialog, drawn as it was
+  // and the flight back from its flag along its heading, at its height,
+  // looking at the flag; it sets off at its speed once the dialog has
+  // closed
+  PrepareFlight(TileNameAt(LBookmark.Latitude, LBookmark.Longitude), LBookmark.Latitude,
+    LBookmark.Longitude,
+    procedure
+    var
+      I: Integer;
+    begin
+      // The boxes follow without their handlers, which would take the
+      // focus from the dialog
+      FTerrainUpdating := True;
+      try
+        for I := 0 to High(TERRAIN_HEIGHTS) do
+          if TERRAIN_HEIGHTS[I] = LBookmark.Heights then
+            FTerrainHeightsBox.ItemIndex := I;
+        FTerrainRealisticBox.IsChecked := LBookmark.Realistic;
+      finally
+        FTerrainUpdating := False;
+      end;
+      FViewOptions.TerrainHeights := ChosenTerrainHeights;
+      FViewOptions.TerrainRealistic := FTerrainRealisticBox.IsChecked;
+      SaveViewOptions;
+      FTerrainView.Exaggeration := ChosenTerrainHeights;
+      ApplyTerrainRealistic;
+      FTerrainView.StartLookingAlong(LBookmark.Latitude, LBookmark.Longitude,
+        LBookmark.Heading, LBookmark.Altitude, LBookmark.AboveGround, LBookmark.Tilt);
+    end,
+    procedure
+    begin
+      if (FTerrainView <> nil) and (LBookmark.Speed > 0) then
+        FTerrainView.FlightSpeed := LBookmark.Speed;
+    end);
+  AddLog(Format('3D: bookmark "%s": %s %s, %s, heading %.0f, %s km/h, camera %.0f ' +
+    'degrees down, heights x %d%s', [LBookmark.Name, FormatLat(LBookmark.Latitude),
+     FormatLon(LBookmark.Longitude), FormatHudHeight(LBookmark.Altitude), LBookmark.Heading,
+     FormatFloat('#,##0', LBookmark.Speed * 3.6), LBookmark.Tilt, LBookmark.Heights,
+     IfThen(LBookmark.Realistic, ', realistic', '')]));
+end;
+
+procedure TfrmMain.TerrainControlsToggle(Sender: TObject);
+begin
+  if (FTerrainView = nil) or (FViewOptions = nil) then
+    Exit;
+  FViewOptions.TerrainControlsCollapsed := FTerrainView.ControlsCollapsed;
+  SaveViewOptions;
+end;
+
+procedure TfrmMain.mnuAddBookmarkClick(Sender: TObject);
+begin
+  // With a 3D view, its place can be bookmarked; without, typed
+  // coordinates only
+  if (FTerrainView <> nil) and FTerrainView.HasTerrain then
+    tabMain.ActiveTab := tab3D;
+  TerrainBookmark(FTerrainView);
+end;
+
+procedure TfrmMain.TerrainBookmark(Sender: TObject);
+var
+  LState: TTerrainFlightState;
+  LHaveCurrent, LWasPaused: Boolean;
+  LCopy: TBookmarkList;
+  LHeights: Integer;
+  LRealistic: Boolean;
+begin
+  // The moment the key was pressed, held still while the dialog is open;
+  // with no 3D view, only typed coordinates can be bookmarked
+  LHaveCurrent := (FTerrainView <> nil) and FTerrainView.HasTerrain;
+  LWasPaused := False;
+  if LHaveCurrent then
+  begin
+    LState := FTerrainView.FlightState;
+    LWasPaused := FTerrainView.Paused;
+    FTerrainView.Paused := True;
+  end
+  else
+    LState := Default(TTerrainFlightState);
+  LHeights := ChosenTerrainHeights;
+  LRealistic := FViewOptions.TerrainRealistic;
+  // The dialog adds folders to a copy, so Cancel leaves the list as it was
+  LCopy := TBookmarkList.Create(FBookmarks.FileName);
+  LCopy.Assign(FBookmarks);
+  TfrmBookmark.Ask(LCopy, FLastBookmarkFolder, LHaveCurrent, LState.Latitude, LState.Longitude,
+    Max(FSettings.FlightStartHeight, 0),
+    procedure(const AResult: TBookmarkDialogResult)
+    var
+      LBookmark: TBookmark;
+    begin
+      try
+        if AResult.Ok then
+        begin
+          LBookmark := Default(TBookmark);
+          LBookmark.Folder := AResult.Folder;
+          LBookmark.Name := AResult.Name;
+          if AResult.UseCurrent then
+          begin
+            LBookmark.Latitude := LState.Latitude;
+            LBookmark.Longitude := LState.Longitude;
+            LBookmark.Altitude := LState.Altitude;
+            LBookmark.Heading := LState.Heading;
+            LBookmark.Speed := LState.Speed;
+            LBookmark.Tilt := LState.Tilt;
+          end
+          else
+          begin
+            // Typed: the ground there is not known yet, so the height is
+            // kept as above it
+            LBookmark.Latitude := AResult.Latitude;
+            LBookmark.Longitude := AResult.Longitude;
+            LBookmark.Altitude := AResult.AboveGround;
+            LBookmark.AboveGround := True;
+            LBookmark.Heading := AResult.Heading;
+            LBookmark.Speed := AResult.SpeedKmh / 3.6;
+            LBookmark.Tilt := AResult.Tilt;
+          end;
+          LBookmark.Heights := LHeights;
+          LBookmark.Realistic := LRealistic;
+          LBookmark.Made := DateToISO8601(TTimeZone.Local.ToUniversalTime(Now), True);
+          try
+            LCopy.Add(LBookmark);
+            FBookmarks.Assign(LCopy);
+            FLastBookmarkFolder := AResult.Folder;
+            if SaveBookmarks then
+              AddLog(Format('Bookmark "%s" added: %s %s, %s%s, heading %.0f, %s km/h',
+                [LBookmark.Name, FormatLat(LBookmark.Latitude), FormatLon(LBookmark.Longitude),
+                 FormatHudHeight(LBookmark.Altitude),
+                 IfThen(LBookmark.AboveGround, ' above the ground', ''), LBookmark.Heading,
+                 FormatFloat('#,##0', LBookmark.Speed * 3.6)]));
+            BuildBookmarksMenu;
+          except
+            on E: Exception do
+              ReportError('The bookmark could not be added: ' + E.Message);
+          end;
+        end;
+      finally
+        LCopy.Free;
+        // Carries on as it was before the key
+        if LHaveCurrent and (FTerrainView <> nil) then
+        begin
+          FTerrainView.Paused := LWasPaused;
+          FocusTerrainView;
+        end;
+      end;
+    end);
+end;
 
 procedure TfrmMain.LoadMarkers;
 begin
@@ -1985,6 +3164,7 @@ begin
   end;
   RebuildSearch;
   FMap.MarkersChanged;
+  UpdateTerrainLabels;
 end;
 
 procedure TfrmMain.LoadEasterEggs;
@@ -2017,14 +3197,15 @@ procedure TfrmMain.RunSearch;
 var
   LHit: TSearchHit;
 begin
-  if edtSearch.Text.Trim = '' then
+  if FSearchEdit.Text.Trim = '' then
   begin
     FSearchHits := nil;
     HideSearchList;
-    FMap.ClearHighlight;
+    if FSearchEdit = edtSearch then
+      FMap.ClearHighlight;
     Exit;
   end;
-  FSearchHits := FSearch.Search(edtSearch.Text);
+  FSearchHits := FSearch.Search(FSearchEdit.Text);
   FSearchList.BeginUpdate;
   try
     FSearchList.Clear;
@@ -2046,7 +3227,7 @@ var
   LRows: Integer;
 begin
   // Right edges lined up, just under the box, in the form's coordinates
-  LTopRight := edtSearch.LocalToAbsolute(PointF(edtSearch.Width, edtSearch.Height + 2));
+  LTopRight := FSearchEdit.LocalToAbsolute(PointF(FSearchEdit.Width, FSearchEdit.Height + 2));
   LRows := Max(1, FSearchList.Count);
   FSearchList.SetBounds(Max(0, LTopRight.X - SEARCH_LIST_WIDTH), LTopRight.Y,
     Min(SEARCH_LIST_WIDTH, ClientWidth), LRows * SEARCH_ITEM_HEIGHT + 4);
@@ -2072,6 +3253,8 @@ begin
   // Markers > Edit Markers can go to one from any tab
   tabMain.ActiveTab := tabMap;
   HideSearchList;
+  // The Map tab's box shows what was chosen
+  FSearchEdit := edtSearch;
   case AHit.Kind of
     skCountry:
       begin
@@ -2089,6 +3272,9 @@ begin
         LPlace := FVectors.Places[AHit.Index];
         FMap.CentreOn(LPlace.Lat, LPlace.Lon);
         FMap.ShowHighlight(LPlace.Lat, LPlace.Lon);
+        // Its tile, ready for Show in 3D, which starts looking at it
+        SelectTileAt(LPlace.Lat, LPlace.Lon, LPlace.Name);
+        SetFlightTarget(LPlace.Lat, LPlace.Lon);
       end;
     skPeak:
       begin
@@ -2101,6 +3287,7 @@ begin
           LPeak.Lon - LHalfLon, LPeak.Lon + LHalfLon);
         FMap.ShowHighlight(LPeak.Lat, LPeak.Lon);
         SelectTileAt(LPeak.Lat, LPeak.Lon, LPeak.Name);
+        SetFlightTarget(LPeak.Lat, LPeak.Lon);
         lblHover.Text := FVectors.PeakText(AHit.Index);
       end;
     skMarker:
@@ -2108,6 +3295,8 @@ begin
         LMarker := FMarkers[AHit.Index];
         FMap.CentreOn(LMarker.Lat, LMarker.Lon);
         FMap.ShowHighlight(LMarker.Lat, LMarker.Lon);
+        SelectTileAt(LMarker.Lat, LMarker.Lon, LMarker.Name);
+        SetFlightTarget(LMarker.Lat, LMarker.Lon);
       end;
     skEgg:
       begin
@@ -2124,6 +3313,11 @@ begin
         else
           FMap.CentreOn(LEgg.Lat, LEgg.Lon);
         FMap.ShowHighlight(LEgg.Lat, LEgg.Lon);
+        SelectTileAt(LEgg.Lat, LEgg.Lon, LEgg.Name);
+        SetFlightTarget(LEgg.Lat, LEgg.Lon);
+        // Found, so it gets a flag in 3D; the others stay hidden
+        FFoundEgg := AHit.Index;
+        UpdateTerrainLabels;
         if LEgg.Note <> '' then
         begin
           AddLog(LEgg.Name + ': ' + LEgg.Note);
@@ -2136,6 +3330,7 @@ begin
   try
     edtSearch.Text := AHit.Text;
     FSearchChosen := AHit.Text;
+    FChosenHit := AHit;
     edtSearch.SelectAll;
   finally
     FSearchUpdating := False;
@@ -2146,22 +3341,118 @@ procedure TfrmMain.SearchListItemClick(const Sender: TCustomListBox;
   const Item: TListBoxItem);
 begin
   if (Item <> nil) and InRange(Item.Index, 0, High(FSearchHits)) then
-    GoToHit(FSearchHits[Item.Index]);
+    ChooseHit(FSearchHits[Item.Index]);
+end;
+
+procedure TfrmMain.ChooseHit(const AHit: TSearchHit);
+begin
+  if FSearchEdit = FTerrainSearch then
+    LaunchHit(AHit)
+  else
+    GoToHit(AHit);
+end;
+
+procedure TfrmMain.LaunchHit(const AHit: TSearchHit);
+var
+  LExtent: TRectF;
+  LLatitude, LLongitude: Double;
+  LName: string;
+begin
+  HideSearchList;
+  // As Launch Mode: nothing without a bearer token but Settings
+  if FSettings.BearerToken = '' then
+  begin
+    TThread.ForceQueue(nil,
+      procedure
+      begin
+        AddLog('Flying to a place needs a bearer token: File > Settings');
+        ShowSettings(nil);
+      end);
+    Exit;
+  end;
+  LName := AHit.Text;
+  case AHit.Kind of
+    skCountry:
+      begin
+        LExtent := FVectors.CountryExtent(AHit.Index);
+        if (LExtent.Left = 0) and (LExtent.Right = 0) and (LExtent.Top = 0) and
+           (LExtent.Bottom = 0) then
+          Exit;
+        // Its middle; bounds hold south in Top and north in Bottom, and
+        // east may be past 180
+        LLatitude := (LExtent.Top + LExtent.Bottom) / 2;
+        LLongitude := (LExtent.Left + LExtent.Right) / 2;
+        if LLongitude >= 180 then
+          LLongitude := LLongitude - 360;
+      end;
+    skPlace:
+      begin
+        LLatitude := FVectors.Places[AHit.Index].Lat;
+        LLongitude := FVectors.Places[AHit.Index].Lon;
+      end;
+    skPeak:
+      begin
+        LLatitude := FVectors.Peaks[AHit.Index].Lat;
+        LLongitude := FVectors.Peaks[AHit.Index].Lon;
+      end;
+    skMarker:
+      begin
+        LLatitude := FMarkers[AHit.Index].Lat;
+        LLongitude := FMarkers[AHit.Index].Lon;
+      end;
+    skEgg:
+      begin
+        LLatitude := FEasterEggs[AHit.Index].Lat;
+        LLongitude := FEasterEggs[AHit.Index].Lon;
+        // Found, so it gets a flag
+        FFoundEgg := AHit.Index;
+        UpdateTerrainLabels;
+        if FEasterEggs[AHit.Index].Note <> '' then
+          AddLog(FEasterEggs[AHit.Index].Name + ': ' + FEasterEggs[AHit.Index].Note);
+      end;
+  else
+    Exit;
+  end;
+  // Show what was chosen, without searching for it again
+  FSearchUpdating := True;
+  try
+    FSearchEdit.Text := LName;
+    FSearchChosen := LName;
+    FChosenHit := AHit;
+    FSearchEdit.SelectAll;
+  finally
+    FSearchUpdating := False;
+  end;
+  // The map follows, ready for Show in 3D
+  SelectTileAt(LLatitude, LLongitude, LName);
+  SetFlightTarget(LLatitude, LLongitude);
+  AddLog(Format('3D: flying to %s, %s %s', [LName, FormatLat(LLatitude),
+    FormatLon(LLongitude)]));
+  PrepareFlight(TileNameAt(LLatitude, LLongitude), LLatitude, LLongitude,
+    procedure
+    begin
+      FTerrainView.StartLookingAt(LLatitude, LLongitude);
+    end);
 end;
 
 procedure TfrmMain.edtSearchChangeTracking(Sender: TObject);
 begin
+  if Sender is TEdit then
+    FSearchEdit := TEdit(Sender);
   if not FSearchUpdating then
+  begin
+    FSearchPicked := False;
     RunSearch;
+  end;
 end;
 
-procedure TfrmMain.BuildSearchGoIcon;
+procedure TfrmMain.BuildSearchGoIcon(AButton: TButton);
 var
   LIcon: FMX.Objects.TPath;
 begin
-  btnSearchGo.Text := '';
+  AButton.Text := '';
   LIcon := FMX.Objects.TPath.Create(Self);
-  LIcon.Parent := btnSearchGo;
+  LIcon.Parent := AButton;
   LIcon.Align := TAlignLayout.Center;
   LIcon.Width := 18;
   LIcon.Height := 18;
@@ -2172,10 +3463,10 @@ begin
   // The theme's text colour once the button is styled
   LIcon.Fill.Color := TAlphaColors.Black;
   LIcon.HitTest := False;
-  btnSearchGo.TagObject := LIcon;
+  AButton.TagObject := LIcon;
   // In case the button was styled already; a later theme change styles it
   // again, which colours the icon through the same handler
-  btnSearchGoApplyStyleLookup(btnSearchGo);
+  btnSearchGoApplyStyleLookup(AButton);
 end;
 
 procedure TfrmMain.GoToSearchChoice;
@@ -2186,38 +3477,101 @@ begin
     RunSearch;
   LIndex := Max(FSearchList.ItemIndex, 0);
   if InRange(LIndex, 0, High(FSearchHits)) then
-    GoToHit(FSearchHits[LIndex]);
+    ChooseHit(FSearchHits[LIndex]);
 end;
 
 procedure TfrmMain.ClearSearchBox;
 begin
   FSearchChosen := '';
-  if edtSearch.Text <> '' then
+  if FSearchEdit.Text <> '' then
     // Taken as typing, so the list closes and the ring goes
-    edtSearch.Text := '';
+    FSearchEdit.Text := '';
 end;
 
 procedure TfrmMain.edtSearchEnter(Sender: TObject);
 begin
+  if Sender is TEdit then
+    FSearchEdit := TEdit(Sender);
   ClearSearchBox;
 end;
 
 procedure TfrmMain.edtSearchClick(Sender: TObject);
 begin
-  if (FSearchChosen <> '') and (edtSearch.Text = FSearchChosen) then
+  if Sender is TEdit then
+    FSearchEdit := TEdit(Sender);
+  if (FSearchChosen <> '') and (FSearchEdit.Text = FSearchChosen) then
     ClearSearchBox;
 end;
 
 procedure TfrmMain.btnSearchGoClick(Sender: TObject);
 begin
-  GoToSearchChoice;
+  // The arrow flies there; Enter only goes there on the map
+  FSearchEdit := edtSearch;
+  LaunchSearchChoice;
+end;
+
+function TfrmMain.UniqueSearchHit(out AHit: TSearchHit): Boolean;
+var
+  LHits: TArray<TSearchHit>;
+  LHit: TSearchHit;
+  LExact: Integer;
+begin
+  Result := False;
+  if FSearchEdit.Text.Trim = '' then
+    Exit;
+  // Chosen from the list, and still showing
+  if (FSearchChosen <> '') and (FSearchEdit.Text = FSearchChosen) then
+  begin
+    AHit := FChosenHit;
+    Exit(True);
+  end;
+  // Picked with Up or Down
+  if FSearchPicked and FSearchList.Visible and
+     InRange(FSearchList.ItemIndex, 0, High(FSearchHits)) then
+  begin
+    AHit := FSearchHits[FSearchList.ItemIndex];
+    Exit(True);
+  end;
+  LHits := FSearch.Search(FSearchEdit.Text);
+  if Length(LHits) = 1 then
+  begin
+    AHit := LHits[0];
+    Exit(True);
+  end;
+  // Several, but only one by exactly that name
+  LExact := 0;
+  for LHit in LHits do
+    if LHit.Match = smExact then
+    begin
+      Inc(LExact);
+      AHit := LHit;
+    end;
+  Result := LExact = 1;
+end;
+
+procedure TfrmMain.LaunchSearchChoice;
+var
+  LHit: TSearchHit;
+begin
+  if UniqueSearchHit(LHit) then
+    LaunchHit(LHit)
+  else if FSearchEdit.Text.Trim <> '' then
+  begin
+    // Not one place: the matches, to choose from
+    RunSearch;
+    lblHover.Text := 'Choose one of the matches to fly there.';
+  end;
 end;
 
 procedure TfrmMain.btnSearchGoApplyStyleLookup(Sender: TObject);
+var
+  LButton: TButton;
 begin
-  if btnSearchGo.TagObject is FMX.Objects.TPath then
-    FMX.Objects.TPath(btnSearchGo.TagObject).Fill.Color :=
-      btnSearchGo.ResultingTextSettings.FontColor;
+  if not (Sender is TButton) then
+    Exit;
+  LButton := TButton(Sender);
+  if LButton.TagObject is FMX.Objects.TPath then
+    FMX.Objects.TPath(LButton.TagObject).Fill.Color := LButton.ResultingTextSettings.FontColor;
 end;
 
 procedure TfrmMain.edtSearchKeyDown(Sender: TObject; var Key: Word; var KeyChar: WideChar;
@@ -2225,6 +3579,8 @@ procedure TfrmMain.edtSearchKeyDown(Sender: TObject; var Key: Word; var KeyChar:
 var
   LIndex: Integer;
 begin
+  if Sender is TEdit then
+    FSearchEdit := TEdit(Sender);
   case Key of
     vkDown, vkUp:
       begin
@@ -2238,12 +3594,18 @@ begin
           else
             Dec(LIndex);
           FSearchList.ItemIndex := EnsureRange(LIndex, 0, High(FSearchHits));
+          FSearchPicked := True;
         end;
         Key := 0;
       end;
     vkReturn:
       begin
-        GoToSearchChoice;
+        // On the 3D tab Enter flies there, as the arrow does; on the map
+        // it goes there
+        if FSearchEdit = FTerrainSearch then
+          LaunchSearchChoice
+        else
+          GoToSearchChoice;
         Key := 0;
         KeyChar := #0;
       end;
@@ -2251,7 +3613,7 @@ begin
       begin
         if FSearchList.Visible then
           HideSearchList
-        else
+        else if FSearchEdit = edtSearch then
           FMap.ClearHighlight;
         Key := 0;
       end;
@@ -2298,6 +3660,16 @@ begin
   // marks, neither of which selects
   FMapLeftClick := (Button = TMouseButton.mbLeft) and
     ([ssShift, ssCtrl, ssCommand] * Shift = []);
+  // Where it was, to start the flight looking at if this click selects
+  if FMapLeftClick then
+    FPressOnMap := FMap.ScreenToGeo(PointF(X, Y), FPressLatitude, FPressLongitude);
+end;
+
+procedure TfrmMain.SetFlightTarget(ALatitude, ALongitude: Double);
+begin
+  FFlightTargetSet := True;
+  FFlightTargetLatitude := ALatitude;
+  FFlightTargetLongitude := ALongitude;
 end;
 
 procedure TfrmMain.MapMarkerClick(Sender: TObject; ALat, ALon: Double; AShift: TShiftState);
@@ -2454,10 +3826,29 @@ begin
   UpdateButtons;
   LClicked := FMapLeftClick;
   FMapLeftClick := False;
-  // With Click for 3D on, the user's own click on a downloaded tile
-  // shows it, as Show in 3D does
-  if LClicked and swClick3D.IsChecked and btnShow3D.Enabled then
-    btnShow3DClick(btnShow3D);
+  // A click picks the place to start the flight looking at, as a search
+  // does
+  if LClicked and FPressOnMap then
+    SetFlightTarget(FPressLatitude, FPressLongitude);
+  // In Launch Mode the user's own click on a tile flies there, as Show in
+  // 3D does, after the click's handling (the dialogs are modal); with no
+  // bearer token it asks for one first and does nothing else
+  if LClicked and swClick3D.IsChecked then
+  begin
+    if FSettings.BearerToken = '' then
+      TThread.ForceQueue(nil,
+        procedure
+        begin
+          AddLog('Launch Mode needs a bearer token: File > Settings');
+          ShowSettings(nil);
+        end)
+    else if btnShow3D.Enabled then
+      TThread.ForceQueue(nil,
+        procedure
+        begin
+          btnShow3DClick(btnShow3D);
+        end);
+  end;
 end;
 
 procedure TfrmMain.MapRightClick(Sender: TObject; ALat, ALon: Double; AShift: TShiftState);
@@ -2567,7 +3958,7 @@ begin
   LHaveSelection := not FMap.Selection.IsEmpty;
   btnFetchSelection.Enabled := not LBusy and LHaveSelection;
   btnCancel.Enabled := LBusy;
-  btnShow3D.Enabled := SelectedTileCount(FDownloaded) = 1;
+  btnShow3D.Enabled := Show3DTile <> '';
   mnuZoomSelection.Enabled := LHaveSelection;
   mnuRefreshIndex.Enabled := FIndexBuilder = nil;
   mnuRescan.Enabled := not LBusy;
@@ -3343,6 +4734,9 @@ begin
   end;
   FMap.TileIndexChanged;
   MapSelectionChanged(FMap);
+  // Drawn flat in the 3D view until now
+  if FTerrainView <> nil then
+    FTerrainView.TileDownloaded(ASouth, AWest);
 end;
 
 procedure TfrmMain.QueueMarkDownloaded(ASouth, AWest: Integer);

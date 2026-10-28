@@ -94,6 +94,13 @@ const
   { The name of the cache's folder in the data folder. }
   IMAGERY_FOLDER_NAME = 'Imagery';
 
+  { The most tiles waiting to be fetched ahead of the flight; see
+    @link(TImageryService.Prefetch). }
+  IMAGERY_PREFETCH_QUEUE = 64;
+
+  { The id downloads fetched ahead go under, never a request's. }
+  IMAGERY_PREFETCH_ID = -1;
+
 type
   { @abstract(A texture made for a request, or why it could not be.) }
   TImageryResult = record
@@ -125,6 +132,16 @@ type
   { @abstract(A tile decoded, kept in memory for the next texture that
     needs it.) }
   TImageryTilePixels = TArray<TAlphaColor>;
+
+  { @abstract(One of EOX's tiles.) }
+  TImageryTileRef = record
+    { The level. }
+    Zoom: Integer;
+    { The row, from the north. }
+    Row: Integer;
+    { The column, from 180 west. }
+    Column: Integer;
+  end;
 
   { @abstract(One file in the disk cache.) }
   TImageryCacheEntry = record
@@ -185,10 +202,40 @@ type
     FPauseMs: Double;
     { Backing field for @link(Refusals). }
     FRefusals: Integer;
+    { Tiles to fetch ahead into the disk cache, nearest first. }
+    FPrefetch: TQueue<TImageryTileRef>;
+    { @true while the worker that fetches ahead is running. }
+    FPrefetching: Boolean;
+    { Backing field for @link(Prefetched). }
+    FPrefetched: Integer;
 
-    { Starts workers for waiting requests, up to @link(IMAGERY_WORKERS);
-      called with @link(FLock) held. }
+    { Starts workers for waiting requests, up to @link(IMAGERY_WORKERS),
+      and, with none waiting, the worker that fetches ahead; called with
+      @link(FLock) held. }
     procedure Pump;
+
+    { Fetches the tiles queued by @link(Prefetch) into the disk cache, one
+      at a time, while no request is waiting; on a worker thread. }
+    procedure PrefetchWork;
+
+    { @true while a request is still wanted, or, for
+      @link(IMAGERY_PREFETCH_ID), while no request is waiting; called with
+      @link(FLock) held.
+      @param(AId The request.)
+      @returns(@true if wanted.) }
+    function WantedLocked(AId: Int64): Boolean;
+
+    { @true if a tile is in memory or in the disk cache; called with
+      @link(FLock) held.
+      @param(ATile The tile.)
+      @returns(@true if it is had already.) }
+    function HaveTileLocked(const ATile: TImageryTileRef): Boolean;
+
+    { Reader for @link(Prefetched). @returns(Tiles fetched ahead.) }
+    function GetPrefetched: Integer;
+
+    { Reader for @link(PrefetchWaiting). @returns(Tiles queued.) }
+    function GetPrefetchWaiting: Integer;
 
     { Makes one texture; on a worker thread.
       @param(AId The request's id.) }
@@ -335,6 +382,19 @@ type
     { Requests waiting or being made. }
     function Pending: Integer;
 
+    { Asks for tiles to be fetched into the disk cache before they are
+      needed, such as along the flight's way ahead. They go only while no
+      request for a texture is waiting, one at a time, at the same pace and
+      with the same pauses as other downloads. The list replaces any still
+      queued; tiles had already are left out, and at most
+      @link(IMAGERY_PREFETCH_QUEUE) are kept. Does nothing with no disk
+      cache.
+      @param(ATiles The tiles, the most wanted first.) }
+    procedure Prefetch(const ATiles: TArray<TImageryTileRef>);
+
+    { Forgets the tiles queued by @link(Prefetch). }
+    procedure ClearPrefetch;
+
     { EOX's layer. }
     property Layer: string read FLayer;
 
@@ -343,7 +403,20 @@ type
 
     { Times EOX has refused a tile so far. }
     property Refusals: Integer read GetRefusals;
+
+    { Tiles fetched ahead into the disk cache so far. }
+    property Prefetched: Integer read GetPrefetched;
+
+    { Tiles queued to be fetched ahead. }
+    property PrefetchWaiting: Integer read GetPrefetchWaiting;
   end;
+
+{ The tile of a level that holds a place.
+  @param(ALatitude The place's latitude, degrees.)
+  @param(ALongitude Its longitude, degrees, any turn.)
+  @param(AZoom The level.)
+  @returns(The tile.) }
+function ImageryTileAt(ALatitude, ALongitude: Double; AZoom: Integer): TImageryTileRef;
 
 { The year a layer shows.
   @param(ALayer Such as @code(s2cloudless-2025); plain
@@ -499,6 +572,21 @@ begin
   Result := Format('%d/%d/%d', [AZoom, ARow, AColumn]);
 end;
 
+function ImageryTileAt(ALatitude, ALongitude: Double; AZoom: Integer): TImageryTileRef;
+var
+  LColumns, LRows: Integer;
+  LDegrees: Double;
+begin
+  LRows := 1 shl AZoom;
+  LColumns := LRows * 2;
+  LDegrees := 180 / LRows;
+  Result.Zoom := AZoom;
+  Result.Row := EnsureRange(Floor((90 - ALatitude) / LDegrees), 0, LRows - 1);
+  Result.Column := Floor((ALongitude + 180) / LDegrees) mod LColumns;
+  if Result.Column < 0 then
+    Inc(Result.Column, LColumns);
+end;
+
 { TImageryService }
 
 constructor TImageryService.Create(const ALayer, ACacheRoot: string; ACacheMB: Integer);
@@ -517,6 +605,7 @@ begin
   FTileOrder := TList<string>.Create;
   FFetching := TDictionary<string, Boolean>.Create;
   FCacheFiles := TDictionary<string, TImageryCacheEntry>.Create;
+  FPrefetch := TQueue<TImageryTileRef>.Create;
   FClock := TStopwatch.StartNew;
   FRate := IMAGERY_START_RATE;
   FPauseMs := IMAGERY_FIRST_PAUSE_MS;
@@ -557,6 +646,7 @@ begin
     FClosing := True;
     FQueue.Clear;
     FWanted.Clear;
+    FPrefetch.Clear;
   finally
     FLock.Leave;
   end;
@@ -572,6 +662,7 @@ begin
     if LBusy then
       Sleep(10);
   until not LBusy or (LWatch.ElapsedMilliseconds > 30000);
+  FPrefetch.Free;
   FCacheFiles.Free;
   FFetching.Free;
   FTileOrder.Free;
@@ -670,6 +761,156 @@ begin
   end;
 end;
 
+function TImageryService.WantedLocked(AId: Int64): Boolean;
+begin
+  if FClosing then
+    Exit(False);
+  if AId = IMAGERY_PREFETCH_ID then
+    Result := FWanted.Count = 0
+  else
+    Result := FWanted.ContainsKey(AId);
+end;
+
+function TImageryService.HaveTileLocked(const ATile: TImageryTileRef): Boolean;
+var
+  LKey, LFile: string;
+begin
+  LKey := TileKey(ATile.Zoom, ATile.Row, ATile.Column);
+  if FTiles.ContainsKey(LKey) or FFetching.ContainsKey(LKey) then
+    Exit(True);
+  LFile := CacheFile(ATile.Zoom, ATile.Row, ATile.Column);
+  Result := (LFile = '') or FCacheFiles.ContainsKey(LFile);
+end;
+
+procedure TImageryService.Prefetch(const ATiles: TArray<TImageryTileRef>);
+var
+  LTile: TImageryTileRef;
+  LSeen: TDictionary<string, Boolean>;
+  LKey: string;
+begin
+  LSeen := TDictionary<string, Boolean>.Create;
+  FLock.Enter;
+  try
+    FPrefetch.Clear;
+    // Until the cache is measured, what it holds is not known
+    if FClosing or (FCacheFolder = '') or not FCacheScanned then
+      Exit;
+    for LTile in ATiles do
+    begin
+      if FPrefetch.Count >= IMAGERY_PREFETCH_QUEUE then
+        Break;
+      LKey := TileKey(LTile.Zoom, LTile.Row, LTile.Column);
+      if LSeen.ContainsKey(LKey) then
+        Continue;
+      LSeen.Add(LKey, True);
+      if not HaveTileLocked(LTile) then
+        FPrefetch.Enqueue(LTile);
+    end;
+    Pump;
+  finally
+    FLock.Leave;
+    LSeen.Free;
+  end;
+end;
+
+procedure TImageryService.ClearPrefetch;
+begin
+  FLock.Enter;
+  try
+    FPrefetch.Clear;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+function TImageryService.GetPrefetched: Integer;
+begin
+  FLock.Enter;
+  try
+    Result := FPrefetched;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+function TImageryService.GetPrefetchWaiting: Integer;
+begin
+  FLock.Enter;
+  try
+    Result := FPrefetch.Count;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TImageryService.PrefetchWork;
+var
+  LTile: TImageryTileRef;
+  LKey, LFile: string;
+  LGo: Boolean;
+  LBytes: TBytes;
+begin
+  try
+    repeat
+      LKey := '';
+      FLock.Enter;
+      try
+        // A request for a texture comes first: stop, and start again when
+        // the requests are done (Pump)
+        LGo := WantedLocked(IMAGERY_PREFETCH_ID) and (FPrefetch.Count > 0);
+        if LGo then
+        begin
+          LTile := FPrefetch.Dequeue;
+          LGo := not HaveTileLocked(LTile);
+          LKey := TileKey(LTile.Zoom, LTile.Row, LTile.Column);
+          if LGo then
+            FFetching.Add(LKey, True)
+          else
+            // Had already: on to the next
+            Continue;
+        end;
+      finally
+        FLock.Leave;
+      end;
+      if not LGo then
+        Break;
+      try
+        try
+          LBytes := Download(IMAGERY_PREFETCH_ID, LTile.Zoom, LTile.Row, LTile.Column);
+          // Only a tile that decodes is kept, as for requests
+          Decode(LBytes);
+          LFile := CacheFile(LTile.Zoom, LTile.Row, LTile.Column);
+          CacheWrite(LFile, LBytes);
+          FLock.Enter;
+          try
+            Inc(FPrefetched);
+          finally
+            FLock.Leave;
+          end;
+        except
+          // Given up, or a request came: it will be asked for when needed
+        end;
+      finally
+        FLock.Enter;
+        try
+          FFetching.Remove(LKey);
+        finally
+          FLock.Leave;
+        end;
+      end;
+    until False;
+  finally
+    FLock.Enter;
+    try
+      FPrefetching := False;
+      Dec(FInFlight);
+      Pump;
+    finally
+      FLock.Leave;
+    end;
+  end;
+end;
+
 function TImageryService.MakeWork(AId: Int64): TProc;
 begin
   Result :=
@@ -691,6 +932,18 @@ begin
       Continue;
     Inc(FInFlight);
     TTask.Run(MakeWork(LId));
+  end;
+  // Fetching ahead only while nothing else is wanted
+  if not FClosing and not FPrefetching and (FWanted.Count = 0) and (FPrefetch.Count > 0) and
+     (FInFlight < IMAGERY_WORKERS) then
+  begin
+    FPrefetching := True;
+    Inc(FInFlight);
+    TTask.Run(
+      procedure
+      begin
+        PrefetchWork;
+      end);
   end;
 end;
 
@@ -940,7 +1193,7 @@ function TImageryService.StillWanted(AId: Int64): Boolean;
 begin
   FLock.Enter;
   try
-    Result := not FClosing and FWanted.ContainsKey(AId);
+    Result := WantedLocked(AId);
   finally
     FLock.Leave;
   end;
@@ -973,7 +1226,7 @@ begin
   repeat
     FLock.Enter;
     try
-      if FClosing or not FWanted.ContainsKey(AId) then
+      if not WantedLocked(AId) then
         Exit(False);
       LNow := FClock.Elapsed.TotalMilliseconds;
       LSlot := Max(LNow, Max(FNextSlotMs, FPausedUntilMs));

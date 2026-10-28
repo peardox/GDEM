@@ -27,7 +27,23 @@ uses
 const
   { The starting height above the ground, metres, when the settings give
     none. }
-  DEFAULT_FLIGHT_START_HEIGHT = 10000;
+  DEFAULT_FLIGHT_START_HEIGHT = 1000;
+
+  { The least distance a flight started looking at a place starts from
+    it, metres. }
+  MIN_FLIGHT_START_BACK = 200;
+
+  { The farthest a start looking at a place is from it, metres, however
+    high and however shallow the tilt. }
+  MAX_FLIGHT_START_BACK = 30000;
+
+  { The shallowest tilt used to work out how far back a start looking at
+    a place goes, degrees; a shallower one would put it far away. }
+  MIN_FLIGHT_START_TILT = 5;
+
+  { The least a start at a height above the sea is kept above the ground
+    there, metres, so it never starts underground. }
+  MIN_FLIGHT_START_CLEARANCE = 20;
 
   { The most speed, metres a second: about 10,800 km/h, three times the
     speed of sound, enough to cross a tile in 40 seconds. }
@@ -129,6 +145,24 @@ type
     FStartPending: Boolean;
     { Backing field for @link(Ground). }
     FGround: TGroundHeightFunc;
+    { @true while the start waits to aim at a place
+      (@link(StartLookingAt)). }
+    FTargetSet: Boolean;
+    { The height above the ground the pending start lifts the flight to,
+      once that ground is known, metres. }
+    FPendingHeight: Double;
+    { @true if @link(FPendingHeight) is above the ground; @false if it is
+      above the sea, kept at least @link(MIN_FLIGHT_START_CLEARANCE) above
+      the ground. }
+    FPendingAboveGround: Boolean;
+    { The place aimed at, latitude, degrees. }
+    FTargetLatitude: Double;
+    { The place aimed at, longitude, degrees. }
+    FTargetLongitude: Double;
+    { How far the start is from the place aimed at, metres. }
+    FStartBack: Double;
+    { Backing field for @link(LookStretch). }
+    FLookStretch: Double;
 
     { The height above the ground now, metres, for the climb rate; the
       altitude if the ground is not known.
@@ -150,6 +184,35 @@ type
       @param(ALatitude Latitude, degrees.)
       @param(ALongitude Longitude, degrees.) }
     procedure Start(ALatitude, ALongitude: Double);
+
+    { Starts again looking at a place: hovering, facing north, a short way
+      south of it (@link(StartHeight) over the tangent of the starting
+      tilt, so from that height it is in the middle of the view), at
+      @link(StartHeight) above the ground there or at the place, whichever
+      is higher. Once the ground at both is known the tilt is set to look straight at the place, as drawn
+      with heights stretched by @link(LookStretch).
+      @param(ATargetLatitude The place's latitude, degrees.)
+      @param(ATargetLongitude Its longitude, degrees.) }
+    procedure StartLookingAt(ATargetLatitude, ATargetLongitude: Double);
+
+    { Starts again looking at a place from a heading, height and tilt, as
+      a bookmark keeps them: hovering, back from the place along the
+      heading by the height over the tangent of the tilt (at least
+      @link(MIN_FLIGHT_START_TILT), between @link(MIN_FLIGHT_START_BACK)
+      and @link(MAX_FLIGHT_START_BACK)), facing it. Once the ground at both
+      is known the height is set and the tilt is made to look straight at
+      the place, so it is in the middle of the view.
+      @param(ATargetLatitude The place's latitude, degrees.)
+      @param(ATargetLongitude Its longitude, degrees.)
+      @param(AHeading The way to face, degrees clockwise from north.)
+      @param(AHeight The height, metres.)
+      @param(AAboveGround @true if the height is above the ground at the
+        start or at the place, whichever is higher; @false if above the
+        sea.)
+      @param(ATilt The camera's tilt below the level, degrees, from which
+        the distance back is worked out.) }
+    procedure StartLookingAlong(ATargetLatitude, ATargetLongitude, AHeading, AHeight: Double;
+      AAboveGround: Boolean; ATilt: Double);
 
     { Moves on by a length of time with some controls held, and tests for
       the ground.
@@ -173,6 +236,34 @@ type
 
     { Stops at once, to a hover. }
     procedure Stop;
+
+    { Sets the speed at once.
+      @param(AValue Metres a second, 0 to @link(MAX_FLIGHT_SPEED).) }
+    procedure SetSpeed(AValue: Double);
+
+    { Puts the flight exactly where and as it was, as a bookmark holds it:
+      not crashed, and not waiting to lift to its start height.
+      @param(ALatitude Latitude, degrees.)
+      @param(ALongitude Longitude, degrees.)
+      @param(AAltitude True height above sea level, metres.)
+      @param(AHeading Degrees clockwise from true north.)
+      @param(ASpeed Metres a second, 0 to @link(MAX_FLIGHT_SPEED).)
+      @param(ATilt The camera's tilt below the level, degrees, from
+        @link(MIN_FLIGHT_TILT) to @link(MAX_FLIGHT_TILT).) }
+    procedure SetState(ALatitude, ALongitude, AAltitude, AHeading, ASpeed, ATilt: Double);
+
+    { As @link(SetState), but at a height above the ground rather than
+      above the sea: the flight waits there, at that height above sea level,
+      until the ground under it is known, then lifts to that height above
+      it.
+      @param(ALatitude Latitude, degrees.)
+      @param(ALongitude Longitude, degrees.)
+      @param(AAboveGround Height above the ground, metres.)
+      @param(AHeading Degrees clockwise from true north.)
+      @param(ASpeed Metres a second.)
+      @param(ATilt The camera's tilt below the level, degrees.) }
+    procedure SetStateAboveGround(ALatitude, ALongitude, AAboveGround, AHeading, ASpeed,
+      ATilt: Double);
 
     { Latitude, degrees. }
     property Latitude: Double read FLatitude;
@@ -200,7 +291,23 @@ type
 
     { How far above the ground the flight starts, metres. }
     property StartHeight: Double read FStartHeight write FStartHeight;
+
+    { How much heights are stretched where they are drawn, 1 or more, so a
+      start looking at a place (@link(StartLookingAt)) aims at it as
+      drawn. }
+    property LookStretch: Double read FLookStretch write FLookStretch;
   end;
+
+{ The place a distance away along a heading, on a great circle at sea
+  level: where a flight there would be, for looking ahead.
+  @param(ALatitude Where it starts, latitude, degrees.)
+  @param(ALongitude Where it starts, longitude, degrees.)
+  @param(AHeading The heading, degrees clockwise from north.)
+  @param(AMetres How far, metres.)
+  @param(AToLatitude The latitude reached.)
+  @param(AToLongitude The longitude reached, -180 to 180.) }
+procedure DestinationPoint(ALatitude, ALongitude, AHeading, AMetres: Double;
+  out AToLatitude, AToLongitude: Double);
 
 { Brings an angle into 0 to 360 degrees.
   @param(ADegrees The angle.)
@@ -214,6 +321,22 @@ begin
   Result := ADegrees - 360 * Floor(ADegrees / 360);
 end;
 
+procedure DestinationPoint(ALatitude, ALongitude, AHeading, AMetres: Double;
+  out AToLatitude, AToLongitude: Double);
+var
+  LAngle, LSinLat1, LCosLat1, LSinAngle, LCosAngle, LSinHeading, LCosHeading, LSinLat2: Double;
+begin
+  // As TFlight.MoveOn, at sea level
+  LAngle := AMetres / FLIGHT_EARTH_RADIUS;
+  SinCos(DegToRad(ALatitude), LSinLat1, LCosLat1);
+  SinCos(LAngle, LSinAngle, LCosAngle);
+  SinCos(DegToRad(AHeading), LSinHeading, LCosHeading);
+  LSinLat2 := EnsureRange(LSinLat1 * LCosAngle + LCosLat1 * LSinAngle * LCosHeading, -1, 1);
+  AToLatitude := RadToDeg(ArcSin(LSinLat2));
+  AToLongitude := WrapDegrees(ALongitude + RadToDeg(ArcTan2(LSinHeading * LSinAngle * LCosLat1,
+    LCosAngle - LSinLat1 * LSinLat2)) + 180) - 180;
+end;
+
 { TFlight }
 
 constructor TFlight.Create(AGround: TGroundHeightFunc);
@@ -222,6 +345,7 @@ begin
   FGround := AGround;
   FStartHeight := DEFAULT_FLIGHT_START_HEIGHT;
   FTilt := DEFAULT_FLIGHT_TILT;
+  FLookStretch := 1;
 end;
 
 procedure TFlight.Start(ALatitude, ALongitude: Double);
@@ -233,7 +357,48 @@ begin
   FTilt := DEFAULT_FLIGHT_TILT;
   FCrashed := False;
   FAltitude := FStartHeight;
+  FPendingHeight := FStartHeight;
+  FPendingAboveGround := True;
   FStartPending := True;
+  FTargetSet := False;
+end;
+
+procedure TFlight.StartLookingAt(ATargetLatitude, ATargetLongitude: Double);
+begin
+  // From the south, at the start height, at the starting tilt
+  StartLookingAlong(ATargetLatitude, ATargetLongitude, 0, FStartHeight, True,
+    DEFAULT_FLIGHT_TILT);
+end;
+
+procedure TFlight.StartLookingAlong(ATargetLatitude, ATargetLongitude, AHeading, AHeight: Double;
+  AAboveGround: Boolean; ATilt: Double);
+var
+  LTilt: Double;
+begin
+  Start(ATargetLatitude, ATargetLongitude);
+  LTilt := EnsureRange(ATilt, MIN_FLIGHT_START_TILT, MAX_FLIGHT_TILT);
+  AHeight := Max(AHeight, 0);
+  // Back from the place along the ground, the opposite way to the
+  // heading; the heading on arrival is the way on, so turned round it
+  // faces the place along the same great circle
+  FStartBack := EnsureRange(AHeight / Tan(DegToRad(LTilt)), MIN_FLIGHT_START_BACK,
+    MAX_FLIGHT_START_BACK);
+  FAltitude := 0;
+  FHeading := WrapDegrees(AHeading + 180);
+  MoveOn(FStartBack);
+  FHeading := WrapDegrees(FHeading + 180);
+  FTilt := LTilt;
+  FAltitude := Min(AHeight, MAX_FLIGHT_ALTITUDE);
+  FPendingHeight := AHeight;
+  FPendingAboveGround := AAboveGround;
+  FTargetLatitude := ATargetLatitude;
+  FTargetLongitude := ATargetLongitude;
+  FTargetSet := True;
+end;
+
+procedure TFlight.SetSpeed(AValue: Double);
+begin
+  FSpeed := EnsureRange(AValue, 0, MAX_FLIGHT_SPEED);
 end;
 
 function TFlight.HeightAboveGround: Double;
@@ -272,7 +437,7 @@ end;
 
 function TFlight.Step(AControls: TFlightControls; ASeconds: Double): Boolean;
 var
-  LRate, LGround, LBefore: Double;
+  LRate, LGround, LTargetGround, LBefore: Double;
 begin
   Result := False;
   ASeconds := EnsureRange(ASeconds, 0, 0.1);
@@ -282,12 +447,33 @@ begin
   if FStartPending then
   begin
     if AControls * [fcClimb, fcDescend] <> [] then
-      FStartPending := False
+    begin
+      FStartPending := False;
+      FTargetSet := False;
+    end
     else if Assigned(FGround) and FGround(FLatitude, FLongitude, LGround) then
     begin
-      FAltitude := LGround + FStartHeight;
-      FStartPending := False;
-      Result := True;
+      if not FTargetSet then
+      begin
+        FAltitude := LGround + FPendingHeight;
+        FStartPending := False;
+        Result := True;
+      end
+      else if FGround(FTargetLatitude, FTargetLongitude, LTargetGround) then
+      begin
+        // The tilt that looks straight at the place, as drawn
+        // Above the higher of the two, so a place above the start (a
+        // summit seen from its slopes) is looked down on, not up at
+        if FPendingAboveGround then
+          FAltitude := Max(LGround, LTargetGround) + FPendingHeight
+        else
+          FAltitude := Max(FPendingHeight, LGround + MIN_FLIGHT_START_CLEARANCE);
+        FTilt := EnsureRange(RadToDeg(ArcTan2((FAltitude - LTargetGround) * Max(FLookStretch, 0.1),
+          FStartBack)), MIN_FLIGHT_TILT, MAX_FLIGHT_TILT);
+        FTargetSet := False;
+        FStartPending := False;
+        Result := True;
+      end;
     end;
   end;
 
@@ -367,6 +553,28 @@ end;
 procedure TFlight.Stop;
 begin
   FSpeed := 0;
+end;
+
+procedure TFlight.SetState(ALatitude, ALongitude, AAltitude, AHeading, ASpeed, ATilt: Double);
+begin
+  FLatitude := EnsureRange(ALatitude, -90, 90);
+  FLongitude := WrapDegrees(ALongitude + 180) - 180;
+  FAltitude := Min(AAltitude, MAX_FLIGHT_ALTITUDE);
+  FHeading := WrapDegrees(AHeading);
+  FSpeed := EnsureRange(ASpeed, 0, MAX_FLIGHT_SPEED);
+  FTilt := EnsureRange(ATilt, MIN_FLIGHT_TILT, MAX_FLIGHT_TILT);
+  FCrashed := False;
+  FStartPending := False;
+end;
+
+procedure TFlight.SetStateAboveGround(ALatitude, ALongitude, AAboveGround, AHeading, ASpeed,
+  ATilt: Double);
+begin
+  SetState(ALatitude, ALongitude, Max(AAboveGround, 0), AHeading, ASpeed, ATilt);
+  FPendingHeight := Max(AAboveGround, 0);
+  FPendingAboveGround := True;
+  FTargetSet := False;
+  FStartPending := True;
 end;
 
 end.

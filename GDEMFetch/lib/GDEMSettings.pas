@@ -53,7 +53,7 @@ const
     ground the 3D view's flight starts at. The same as
     @code(DEFAULT_FLIGHT_START_HEIGHT) in @code(GDEMFlight), written out so
     settings do not depend on the 3D units. }
-  DEFAULT_FLIGHT_START_METRES = 10000;
+  DEFAULT_FLIGHT_START_METRES = 1000;
 
   { Default for @link(TGDEMSettings.ImageryLayer): the newest year of
     EOX's Sentinel-2 cloudless (CC BY-NC-SA 4.0). The same as
@@ -62,6 +62,13 @@ const
 
   { Default for @link(TGDEMSettings.ImageryCacheMB): 2 GB. }
   DEFAULT_IMAGERY_CACHE_SIZE_MB = 2048;
+
+  { The smallest imagery cache the Settings dialog allows, megabytes. }
+  MIN_IMAGERY_CACHE_MB = 64;
+
+  { The largest imagery cache the Settings dialog allows, megabytes
+    (1 TB). }
+  MAX_IMAGERY_CACHE_MB = 1048576;
 
   { Most files downloaded at once at any speed. NASA does not publish a
     limit, but cuts off or refuses downloads when it has had enough; the
@@ -310,9 +317,9 @@ type
     property ImageryLayer: string read FImageryLayer write FImageryLayer;
 
     { The most the imagery cache in the data folder may hold, megabytes;
-      the tiles used least recently are deleted past it. Not in the
-      Settings dialog: change @code(imageryCacheMB) in @code(settings.json).
-      Defaults to @link(DEFAULT_IMAGERY_CACHE_SIZE_MB). }
+      the tiles used least recently are deleted past it. Set in the
+      Settings dialog, @link(MIN_IMAGERY_CACHE_MB) to
+      @link(MAX_IMAGERY_CACHE_MB). Defaults to @link(DEFAULT_IMAGERY_CACHE_SIZE_MB). }
     property ImageryCacheMB: Integer read FImageryCacheMB write FImageryCacheMB;
   end;
 

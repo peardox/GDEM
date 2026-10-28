@@ -112,6 +112,10 @@ type
     FTerrainRange: Integer;
     { Backing field for @link(TerrainRealistic). }
     FTerrainRealistic: Boolean;
+    { Backing field for @link(TerrainControlsCollapsed). }
+    FTerrainControlsCollapsed: Boolean;
+    { Backing field for @link(TerrainLabels). }
+    FTerrainLabels: Boolean;
   public
     { Sets the defaults: tile tints and markers on, the other layers
       off. }
@@ -167,8 +171,8 @@ type
     { The 3D tab's height stretch, times true scale. 2 by default. }
     property TerrainHeights: Integer read FTerrainHeights write FTerrainHeights;
 
-    { The Map tab's Click for 3D switch: @true if a click selecting a
-      single downloaded tile also shows it in 3D. @false by default. }
+    { No longer used: the Map tab's switch, now Launch Mode, starts on
+      every time. Kept so older files read as before. }
     property ClickShows3D: Boolean read FClickShows3D write FClickShows3D;
 
     { The 3D tab's distance detail, in tenths (see @code(TERRAIN_RANGES)
@@ -179,6 +183,15 @@ type
     { The 3D tab's Realistic switch: @true to draw satellite imagery
       instead of height colours. @false by default. }
     property TerrainRealistic: Boolean read FTerrainRealistic write FTerrainRealistic;
+
+    { The 3D view's controls panel: @true if collapsed to its title.
+      @false (open) by default. }
+    property TerrainControlsCollapsed: Boolean read FTerrainControlsCollapsed
+      write FTerrainControlsCollapsed;
+
+    { The 3D tab's Labels switch: @true to show the names of places on
+      poles over the ground. @true by default. }
+    property TerrainLabels: Boolean read FTerrainLabels write FTerrainLabels;
   end;
 
 { The layers to turn on the first time the user chooses how GDEMFetch
@@ -248,6 +261,7 @@ begin
   FTerrainDetail := 3601;
   FTerrainHeights := 2;
   FTerrainRange := 20;
+  FTerrainLabels := True;
 end;
 
 class function TViewOptions.FileName: string;

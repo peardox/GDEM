@@ -141,6 +141,16 @@ object frmMain: TfrmMain
         OnClick = mnuEditMarkersClick
       end
     end
+    object mnuBookmarks: TMenuItem
+      Text = 'Bookmarks'
+      object mnuAddBookmark: TMenuItem
+        Text = 'Add Bookmark... (B)'
+        OnClick = mnuAddBookmarkClick
+      end
+      object mnuBookmarksSep: TMenuItem
+        Text = '-'
+      end
+    end
   end
   object tmrStorage: TTimer
     Enabled = False
@@ -239,17 +249,17 @@ object frmMain: TfrmMain
           OnClick = btnShow3DClick
         end
         object lblClick3D: TLabel
-          Position.X = 328.000000000000000000
+          Position.X = 326.000000000000000000
           Position.Y = 9.000000000000000000
-          Size.Width = 76.000000000000000000
+          Size.Width = 108.000000000000000000
           Size.Height = 22.000000000000000000
           Size.PlatformDefault = False
           TextSettings.HorzAlign = Trailing
-          Text = 'Click for 3D'
+          Text = 'Launch Mode'
         end
         object swClick3D: TSwitch
-          IsChecked = False
-          Position.X = 410.000000000000000000
+          IsChecked = True
+          Position.X = 440.000000000000000000
           Position.Y = 8.000000000000000000
           Size.Width = 48.000000000000000000
           Size.Height = 24.000000000000000000
@@ -259,9 +269,9 @@ object frmMain: TfrmMain
         end
         object lblSelection: TLabel
           Anchors = [akLeft, akTop, akRight]
-          Position.X = 468.000000000000000000
+          Position.X = 498.000000000000000000
           Position.Y = 9.000000000000000000
-          Size.Width = 284.000000000000000000
+          Size.Width = 254.000000000000000000
           Size.Height = 22.000000000000000000
           Size.PlatformDefault = False
           TextSettings.Trimming = Character

@@ -3,7 +3,7 @@ object frmSettings: TfrmSettings
   Top = 0
   BorderIcons = [biSystemMenu]
   Caption = 'Settings'
-  ClientHeight = 600
+  ClientHeight = 632
   ClientWidth = 560
   Position = MainFormCenter
   FormFactor.Width = 320
@@ -77,7 +77,7 @@ object frmSettings: TfrmSettings
     Margins.Right = 12.000000000000000000
     Margins.Bottom = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 552.000000000000000000
+    Position.Y = 584.000000000000000000
     Size.Width = 536.000000000000000000
     Size.Height = 36.000000000000000000
     Size.PlatformDefault = False
@@ -114,7 +114,7 @@ object frmSettings: TfrmSettings
     Margins.Left = 12.000000000000000000
     Margins.Right = 12.000000000000000000
     Position.X = 12.000000000000000000
-    Position.Y = 532.000000000000000000
+    Position.Y = 564.000000000000000000
     Size.Width = 536.000000000000000000
     Size.Height = 20.000000000000000000
     Size.PlatformDefault = False
@@ -131,7 +131,7 @@ object frmSettings: TfrmSettings
     Position.X = 12.000000000000000000
     Position.Y = 372.000000000000000000
     Size.Width = 536.000000000000000000
-    Size.Height = 160.000000000000000000
+    Size.Height = 192.000000000000000000
     Size.PlatformDefault = False
     TabOrder = 2
     object lblDataFolder: TLabel
@@ -244,6 +244,36 @@ object frmSettings: TfrmSettings
       TextSettings.Font.Size = 11.000000000000000000
       TextSettings.Trimming = Character
       Text = 'Fast suits fast lines; eases off if NASA objects'
+    end
+    object lblImageryCache: TLabel
+      Position.Y = 162.000000000000000000
+      Size.Width = 200.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'Imagery cache size:'
+    end
+    object nbImageryCache: TNumberBox
+      Touch.InteractiveGestures = [LongTap, DoubleTap]
+      TabOrder = 5
+      Cursor = crIBeam
+      OnChangeTracking = InputChangeTracking
+      Position.X = 208.000000000000000000
+      Position.Y = 161.000000000000000000
+      Size.Width = 100.000000000000000000
+      Size.Height = 24.000000000000000000
+      Size.PlatformDefault = False
+    end
+    object lblImageryCacheUnit: TLabel
+      Anchors = [akLeft, akTop, akRight]
+      StyledSettings = [Family, Style, FontColor]
+      Position.X = 316.000000000000000000
+      Position.Y = 162.000000000000000000
+      Size.Width = 220.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      TextSettings.Font.Size = 11.000000000000000000
+      TextSettings.Trimming = Character
+      Text = 'MB of satellite imagery kept for the 3D view'
     end
   end
   object layTheme: TLayout
