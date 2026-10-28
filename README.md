@@ -577,7 +577,7 @@ along the bottom while Realistic is on, and the choice is remembered in
   halves and downloads pause, for a second at first and twice as long with
   each refusal in a row, up to a minute. A refused tile is asked for again
   up to six times; a patch whose imagery still could not be had keeps its
-  height colours and asks again a minute later. The Debug tab says when
+  height colours and asks again a minute later. The flight log says when
   EOX first limits requests and every fiftieth time, and the `3D: settled`
   line adds the textures made, how long each took, the tiles downloaded,
   the pace reached and the refusals.
@@ -632,7 +632,18 @@ lit from the north-west, so the relief shows at any angle. Voids (-9999)
 are filled from the heights around them. Detail, Distance and Heights are
 remembered in `view.json`.
 
-When the patches wanted are all made, the Debug tab logs a `3D: settled`
+**The flight log.** The 3D view's working detail goes to a flight log,
+not the Debug tab: `flight-yyyymmdd-hhnnss.log` in the same `Reports`
+folder as the download reports, one per run of GDEMFetch, made at its
+first line (the Debug tab says where; the newest 50 are kept). It holds
+the `3D: settled` and `3D: memory with` lines, the imagery service's
+lines, the downloads of tiles ahead of the flight (with their own
+download reports), the display's refresh rate and the like. The Debug
+tab keeps what you do and what goes wrong: preparing for flight, ready
+for flight, crashes, the autopilot switched on or off, and every
+`WARNING` and `ERROR` line, which go to both.
+
+When the patches wanted are all made, the flight log gets a `3D: settled`
 line: the time taken, the patches on show and their triangles, the
 patches kept, the tiles (and how many have heights), how many patches the
 workers made and how long each took, and how long turning them into
@@ -986,7 +997,7 @@ Removable drives are normally mounted under `/media/<user>/` or
 |------|-------|
 | Settings (`settings.json`, holds the bearer token) | Windows: `%APPDATA%\GDEM`<br>macOS: `~/Library/Application Support/GDEM`<br>Linux: `$XDG_CONFIG_HOME/GDEM` or `~/.config/GDEM`<br>Android and iOS: `GDEM` in the app's documents folder |
 | Tile index (`tileindex.bin`) | Same folder as the settings |
-| Download reports (`Reports/download-*.log`) | Same folder as the settings |
+| Download reports (`Reports/download-*.log`) and flight logs (`Reports/flight-*.log`) | Same folder as the settings |
 | Markers (`markers.json`) | Same folder as the settings |
 | What the View menu shows, the 3D tab's Detail, Distance, Heights and Realistic, whether its Controls panel is collapsed, and its Labels (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
 | Bookmarks of 3D views (`bookmarks.json`) | Same folder as the settings |

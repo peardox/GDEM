@@ -600,6 +600,10 @@ type
     { Keeps the status bar's "ago" current on the 3D tab, once a second,
       and looks for tiles needed ahead of the flight. }
     FStatusTimer: TTimer;
+    { The flight log: the 3D view's working detail (settled and memory
+      lines, imagery, fetching ahead), kept out of the Debug tab; made at
+      the first line, one file per run of the program; @nil until then. }
+    FFlightLog: TDownloadReport;
     { Ticks of @link(FStatusTimer) since the last look ahead. }
     FAheadTicks: Integer;
     { The download of tiles ahead of the flight running now; @nil when
@@ -774,10 +778,19 @@ type
       @param(AText The report.) }
     procedure TerrainSettled(Sender: TObject; const AText: string);
 
-    { Logs the 3D view's problems.
+    { Logs the 3D view's lines to the flight log, and crashes and problems
+      to the Debug tab too.
       @param(Sender The view.)
       @param(AText The line.) }
     procedure TerrainLog(Sender: TObject; const AText: string);
+
+    { Writes a line to the flight log, @code(flight-yyyymmdd-hhnnss.log) in
+      the Reports folder, made at the first line (the Debug tab says where);
+      lines starting @code(WARNING) or @code(ERROR) go to the Debug tab too.
+      Safe from any thread: other threads' lines are queued to the main
+      thread. If the file cannot be made, lines go to the Debug tab.
+      @param(AText The line.) }
+    procedure FlightLog(const AText: string);
 
     { The distance detail chosen on the 3D tab.
       @returns(Tenths, from @code(TERRAIN_RANGES).) }
@@ -1605,6 +1618,7 @@ begin
     FTerrainView.OnFlightMoved := nil;
   end;
   FreeAndNil(FBookmarks);
+  FreeAndNil(FFlightLog);
   FMap.Vectors := nil;
   FVectors.Free;
   FMap.MapTiles := nil;
@@ -2154,20 +2168,59 @@ procedure TfrmMain.TerrainSettled(Sender: TObject; const AText: string);
 var
   LTile: string;
 begin
-  AddLog(AText);
+  // Working detail, for the flight log rather than the Debug tab
+  FlightLog(AText);
   LTile := FTerrainTile;
   // Measured a moment later, once the meshes have been drawn and so sent
   // to the graphics processor
   TThread.ForceQueue(nil,
     procedure
     begin
-      AddLog('3D: memory with ' + LTile + ' on show: ' + DescribeMemoryUse);
+      FlightLog('3D: memory with ' + LTile + ' on show: ' + DescribeMemoryUse);
     end, MEMORY_MEASURE_DELAY);
 end;
 
 procedure TfrmMain.TerrainLog(Sender: TObject; const AText: string);
 begin
-  AddLog(AText);
+  FlightLog(AText);
+  // A crash is news; problems are copied by FlightLog
+  if AText.StartsWith('3D: crashed') then
+    AddLog(AText);
+end;
+
+procedure TfrmMain.FlightLog(const AText: string);
+var
+  LText: string;
+begin
+  if TThread.CurrentThread.ThreadID <> MainThreadID then
+  begin
+    LText := AText;
+    TThread.Queue(nil,
+      procedure
+      begin
+        FlightLog(LText);
+      end);
+    Exit;
+  end;
+  if AText.StartsWith('WARNING') or AText.StartsWith('ERROR') then
+    AddLog(AText);
+  if FFlightLog = nil then
+    try
+      FFlightLog := TDownloadReport.Create('flight');
+      AddLog('3D: the flight log (settled and memory lines, imagery, tiles fetched ahead) ' +
+        'is ' + FFlightLog.FileName);
+    except
+      on E: Exception do
+      begin
+        AddLog('WARNING: the flight log could not be made (' + E.Message.TrimRight(['.']) +
+          '), so its lines go here');
+        FFlightLog := nil;
+      end;
+    end;
+  if FFlightLog <> nil then
+    FFlightLog.Add(AText)
+  else if not (AText.StartsWith('WARNING') or AText.StartsWith('ERROR')) then
+    AddLog(AText);
 end;
 
 function TfrmMain.ChosenTerrainRange: Integer;
@@ -2742,7 +2795,7 @@ var
   LToken: TCancelToken;
 begin
   LTiles := ATiles;
-  AddLog(Format('3D: downloading %d tile(s) ahead of the flight: %s', [Length(LTiles),
+  FlightLog(Format('3D: downloading %d tile(s) ahead of the flight: %s', [Length(LTiles),
     string.Join(', ', LTiles)]));
   LBearer := FSettings.BearerToken;
   LStore := FStore;
@@ -2772,7 +2825,7 @@ begin
         try
           // No dialog: the log only, and each tile marked (and its ground
           // made again) as it lands
-          LBatch.OnLog := AddLog;
+          LBatch.OnLog := FlightLog;
           LBatch.OnTileDownloaded := QueueMarkDownloaded;
           LResult := LBatch.Run(LToken, LTiles, 0);
         finally
@@ -2797,7 +2850,7 @@ begin
           RefreshStorageStatus;
           if LCancelled then
           begin
-            AddLog('3D: downloading tiles ahead of the flight: cancelled');
+            FlightLog('3D: downloading tiles ahead of the flight: cancelled');
             FAheadRetryAt := Now + TILES_AHEAD_BACKOFF_MINUTES / MinsPerDay;
           end
           else if (LError <> '') or (LResult.Failed > 0) then

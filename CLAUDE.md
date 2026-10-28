@@ -2109,6 +2109,26 @@ and the altitude adjusted less often. Not yet built.
   ticks Autopilot too; `TerrainAutopilotChange` unticks Hug when the
   autopilot goes off. The 3D toolbar is now about 1,300 pixels wide.
 
+### Flight log (28 October 2026)
+
+The owner: too much in the Debug tab (settled and memory lines every few
+seconds while flying); write such lines to a flight log file in Reports.
+Not yet built.
+
+- `TfrmMain.FlightLog(text)`: a `TDownloadReport('flight')` made at the
+  first line (`Reports/flight-yyyymmdd-hhnnss.log`, one per run, newest
+  50 kept, the Debug tab names it once); lines starting `WARNING` or
+  `ERROR` go to the Debug tab too; other threads' lines are queued to the
+  main thread; if the file cannot be made, lines go to the Debug tab.
+  Freed in `FormDestroy`.
+- Sent there: `TerrainSettled` (the settled line), the `3D: memory with`
+  line, everything from the view's `OnLog` (`TerrainLog`: display rate,
+  rebase, vertex layout, imagery service messages, cover, tile refreshed;
+  a `3D: crashed` line is copied to the Debug tab), the tiles-ahead
+  batch's `OnLog` and its start and cancel lines. Left in the Debug tab:
+  preparing / ready for flight, showing, bookmarks, autopilot and hugging
+  switches, heights and Realistic changes, all warnings.
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection
