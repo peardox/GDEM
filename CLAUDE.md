@@ -6,56 +6,66 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 28 October 2026, 16:05, after the owner pushed `44dc3a5`
-"Handover" and before a new conversation.
+Last updated: 28 October 2026, 19:45, at the end of a session, as the
+owner was about to start a new conversation.
 
-## Where to pick up (28 October 2026, 16:00)
+## Where to pick up (28 October 2026, 19:45)
 
-**GitHub.** The work is on branch `flighttest`, merged into `main` by
-pull request #2 (`ac1e9f8`); both hold `44dc3a5` "Handover", which has
-everything delivered up to the end of 28 October 2026 (checked file by
-file against the working copy at 16:05: identical, and every check
-passes). Clone `flighttest` (the owner works there). Nothing is waiting
-to be pushed. Everything from "Bookmarks, pause, controls panel" to the
-end of the dated sections below is in that push but **not yet built**.
+**GitHub.** The owner works on branch `flighttest` (merged into `main`
+by pull requests). The latest push is `3f947dc` "Handover" (CLAUDE.md
+only) on top of `44dc3a5` "Handover", which holds everything up to and
+including the README token note. Clone `flighttest`.
 
-**Built and tested by the owner so far:** the level-of-detail view, the
-flight, the instruments, the imagery (with pacing), bookmarks, Preparing
-for flight, labels, Launch Mode, the status bar, the egg's flag; the
-owner said "This is getting very nice now". Reports since then are
-handled in the sections below.
+**Delivered since `44dc3a5`, not yet pushed** (all in
+`gdem-flightpath.zip`, cumulative, every file changed since the push):
+Autopilot and Mach 1, Ground hugging, Flight log, Flight paths (with the
+10-degree camera, the map fitting the path, and distance flown); see the
+last four dated sections below. Files: README.md, CLAUDE.md;
+GDEMFetch.dpr, GDEMFetch.dproj (new unit `lib/GDEMFlightPath`); lib:
+GDEMFlight, GDEMFlightPath (new), GDEMViewOptions; ui: GDEMTerrainHud,
+GDEMTerrainView, GDEMWorldMap, MainForm (.pas and .fmx). When the owner
+says it is pushed, fetch and compare each of these with GitHub, then
+reset the working copy to `origin/flighttest`.
+
+**Built and tried by the owner:** everything up to the autopilot and
+Mach 1 ("That's working well"), and ground hugging was then built and
+used enough to ask for the flight log (the owner's Debug tab paste
+showed the settled/memory lines, tiles fetched ahead at N50W074, EOX
+pace 32, 2 refusals, vertices copied straight). So the earlier "not yet
+built" list (cover with a picture, starts above summits, 3D search,
+bookmarks at flags, fetching ahead, cache size in Settings, label poles
+after resize, bookmark flags) compiled and ran; no problems were
+reported about them, but none was confirmed item by item. Worth asking:
+whether the cover showed a picture (the log line `3D: covered with a
+picture of the view` or `... no picture`), and whether flags stay on
+their poles after a resize.
 
 **Not yet built (newest first), and what to check:**
 
-1. Cover with a picture (`TTerrainView.PictureOfView`): the log line
-   `3D: covered with a picture of the view` or `... no picture`; if the
-   picture shows only the dark background, `MakeScreenshot` does not
-   catch Gorilla3D's drawing.
-2. Starts 1000 m above the higher of the start's and the target's
-   ground (Everest: about 9,850 m, looking 20 degrees down at it).
-3. 3D toolbar Search (Start Again removed); both arrows launch when the
-   search is unique (`UniqueSearchHit`); Enter launches on the 3D tab
-   only; Detail, Distance, Heights, Realistic relaunch in place
-   (`RelaunchTerrain`). Open question to the owner: "start again" was
-   read as rebuilding in place, keeping the flight; they may have meant
-   the tile's starting point.
-4. Bookmarks launch back from their flag (`StartLookingAlong`); the view
-   covered during preparation; Flags box (was Labels).
-5. Fetching ahead: tiles (`FetchTilesAhead`, up to 6, one report file per
-   batch) and imagery (`Prefetch`); the Imagery cache size in Settings
-   (owner has set 64 GB); label poles after a resize (`Resize` and the
-   viewport's size); bookmark flags (light blue).
+1. Flight paths: menu items File > Save Flight Path... and Save All
+   Flight Paths... (`TSaveDialog`, `TOpenOption.ofOverwritePrompt`), View
+   > Show Flight Path; the map zooming to the path on switching from 3D
+   to Map while in flight; the path across 180 degrees; a `.flt` file's
+   contents; `12.3 km flown` on the speed panel (now 74 pixels high:
+   check the instruments below it still fit); points made by the great
+   circle's own turning on long straight flights (about one a degree).
+2. Camera 10 degrees down by default: launches start 5.7 km back.
+3. Flight log (`Reports/flight-*.log`): the Debug tab should now be
+   quiet while flying.
+4. Ground hugging in use (Hug ground box).
 
 **Known gaps and ideas waiting:**
 
-- Labels: if poles are still off after a resize while flying, Gorilla3D's
-  projection lags the viewport's size; and whether `TERRAIN_FOV` is
-  vertical (labels drifting sideways at the screen's edges would say
-  horizontal).
+- Flight paths are kept only for the run; nothing is saved
+  automatically, and there is no way yet to open a `.flt` and draw it.
+- Labels: whether `TERRAIN_FOV` is vertical (labels drifting sideways at
+  the screen's edges would say horizontal).
 - A country launched from the search goes to the middle of its extent,
   which can be sea.
 - Black patches without imagery (seen once; may be the `ColorF0` copy).
 - macOS and Linux have not run anything 3D yet.
+- The 3D toolbar is about 1,300 pixels wide; narrow windows cut off the
+  search box.
 - Ideas: `GDEMSystemInfo` figures to choose drawing defaults on a first
   run; fog; a list of peaks Natural Earth leaves out; Natural Earth 1:10m
   lines for the high-resolution map.
@@ -63,20 +73,24 @@ handled in the sections below.
   and the README's Licence); permission for the `8081_earthmap10k` image
   (Planet Pixel Emporium) to confirm or replace; the source of
   `maps/world_1080x540.jpg` to ask; the owner's name for `LICENSE`.
-- `imageryLayer` is still only in `settings.json`; `flightStartHeight`
-  too.
+- `imageryLayer` and `flightStartHeight` are still only in
+  `settings.json`.
+- Open question, never answered: changing Detail, Distance, Heights or
+  Realistic rebuilds in place keeping the flight (`RelaunchTerrain`); the
+  owner may have meant going back to the tile's starting point.
 
-**Working rules learned this session** (also in the README's Notes for
-Claude): whole files in a zip of the changed files, paths from the
-repository root; no remarks on compiling, committing or pushing; answer
-the stop hook's "commit and push" in one line (left uncommitted on
-purpose; the owner applies the zips and pushes); run
-`python3 tools/pasdoc_check.py`; ASCII sources; UTF-8 BOM on `.dproj`;
-no FMX in `lib/` or `common/`; JSON through Neon; atomic writes; new
-units in both `.dpr` and `.dproj`; PasDoc everything, private fields
-too; README and this file updated with each change; no credentials in
-source or logs. The owner often sends follow-ups while work is under
-way: fold them into the same delivery.
+**Working rules** (also in the README's Notes for Claude): whole files
+in a zip of the changed files, paths from the repository root; no
+remarks on compiling, committing or pushing; answer the stop hook's
+"commit and push" in one line (left uncommitted on purpose; the owner
+applies the zips and pushes); run `python3 tools/pasdoc_check.py`; ASCII
+sources (`#$00B0`-style codes); UTF-8 BOM on `.dproj`; no FMX in `lib/`
+or `common/`; JSON through Neon; atomic writes; new units in both `.dpr`
+and `.dproj`; PasDoc everything, private fields too; README and this
+file updated with each change; no credentials in source or logs. The
+owner often sends follow-ups while work is under way: fold them into the
+same delivery. Simulate new flight logic in Python (scratchpad) before
+delivering, and give the measured figures.
 
 ## State at the end of 27 October 2026
 
