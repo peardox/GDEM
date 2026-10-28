@@ -400,6 +400,51 @@ Instruments over the view:
 The instruments let the mouse through, so dragging and the wheel work
 over them too.
 
+**Realistic**, on the 3D toolbar, draws the ground with satellite imagery
+instead of height colours: EOX's
+[Sentinel-2 cloudless](https://s2maps.eu) mosaic, a cloud-free picture of
+the whole world at 10 m a pixel. When the view sharpens, a patch stays on
+show until the finer patches replacing it have their imagery (or two
+seconds have passed, so a slow connection does not hold it back), so
+imagery is not replaced by bare patches; at the start, patches show their
+height colours until their imagery arrives; distant patches use
+coarser imagery, so they cost a few small downloads. The imagery is drawn
+as it is, with the real light and shadows of the day it was taken, so the
+relief shading of the height colours is not added. EOX's credit is shown
+along the bottom while Realistic is on, and the choice is remembered in
+`view.json`.
+
+- **Which imagery:** `imageryLayer` in `settings.json`, by default
+  `s2cloudless-2025`, the newest year. EOX serves `s2cloudless` (2016)
+  and `s2cloudless-2017` to `s2cloudless-2025`. 2016 and 2017 are under
+  CC BY 4.0, which allows any use with the credit; **2018 onwards are for
+  non-commercial use only** (CC BY-NC-SA 4.0). See
+  [CREDITS.md](CREDITS.md).
+- **The cache:** imagery is kept in an `Imagery` folder in the data
+  folder, one folder per layer, up to `imageryCacheMB` megabytes (default
+  2048, 2 GB). Past that, the tiles used least recently are deleted, so
+  places you fly over often stay; a tile's file time says when it was last
+  used, so the order lasts from one run to the next. With no data folder,
+  imagery is downloaded each time and kept only in memory. Delete the
+  folder to empty the cache.
+- **Downloading:** in the background while you fly, with no progress
+  dialog, and only for the patches on show (the coarser ones the view
+  keeps hidden behind them fetch nothing). EOX's free service limits how
+  fast it may be asked, and publishes no figures, so downloads are paced:
+  they start at 8 tiles a second and go a little faster with each tile;
+  when EOX refuses one (an HTTP error, or its "heavy load" page), the pace
+  halves and downloads pause, for a second at first and twice as long with
+  each refusal in a row, up to a minute. A refused tile is asked for again
+  up to six times; a patch whose imagery still could not be had keeps its
+  height colours and asks again a minute later. The Debug tab says when
+  EOX first limits requests and every fiftieth time, and the `3D: settled`
+  line adds the textures made, how long each took, the tiles downloaded,
+  the pace reached and the refusals.
+
+`imageryLayer` and `imageryCacheMB` are not in the Settings dialog yet:
+change them in `settings.json` while GDEMFetch is closed, as with
+`flightStartHeight`.
+
 How it works:
 
 - **Patches.** The ground is drawn as square patches of 75 x 75 cells,
@@ -784,9 +829,10 @@ Removable drives are normally mounted under `/media/<user>/` or
 | Tile index (`tileindex.bin`) | Same folder as the settings |
 | Download reports (`Reports/download-*.log`) | Same folder as the settings |
 | Markers (`markers.json`) | Same folder as the settings |
-| What the View menu shows, the 3D tab's Detail, Distance and Heights, and Click for 3D (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
+| What the View menu shows, the 3D tab's Detail, Distance, Heights and Realistic, and Click for 3D (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
 | Windows' graphics processor choice | Windows only: the registry value named after the program's path in `HKEY_CURRENT_USER\Software\Microsoft\DirectX\UserGpuPreferences`; see [Drawing](#drawing) |
 | Downloaded tiles | The **data folder**, chosen in File > Settings. Default: `ASTGTM` in your documents folder. |
+| The 3D view's imagery cache | `Imagery` in the data folder, a folder for each layer, then level, row and column (`Imagery/s2cloudless-2025/13/1662/8090.jpg`, near Manchester); see [The 3D view](#the-3d-view) |
 
 On macOS and Linux `settings.json` is readable by its owner only, because
 it contains a credential.
@@ -1108,6 +1154,7 @@ it:
 | `GDEMMapTiles` | `OpenBuiltInMapTiles`, the tile set linked into the program |
 | `GDEMTerrain` | The pieces of the 3D surface: `TTerrainFrame` (positions on a sphere, from a point, and back to latitude, longitude and height; east and north at any place), `TTerrainTile` (a tile's heights, each overview read when first needed), `BuildTerrainPatch` (one patch's positions, normals, shaded colours and skirt) and `TerrainPatchIndices` (the triangles every patch shares) |
 | `GDEMTerrainLod` | `TTerrainLod`: the trees of patches for the tiles round the camera, which patches to show from where it is, and making them on worker threads |
+| `GDEMImagery` | `TImageryService`: the 3D view's satellite imagery, EOX's tiles fetched on worker threads, kept in a disk cache with a size limit (least recently used deleted first), and made into a 256 x 256 texture for each patch; `ImageryCredit`, `ImageryLicence`, `ImageryPatchTexCoords` |
 | `GDEMFlight` | `TFlight`: the 3D view's flight (latitude, longitude, true altitude, heading, speed, camera tilt), moved along a great circle by the controls held, and the crash test |
 
 **ui/**
@@ -1306,7 +1353,10 @@ got to, what has been tested and what was learned along the way.
   `ProgressStatus`, `ProgressOverall` and `ProgressItem`, which are safe to
   call from any thread. Importing uses the same dialog, because it can run
   for hours. Other local work (rescanning, moving, deleting) shows progress
-  on the main window's bar instead.
+  on the main window's bar instead. The one exception, agreed with the
+  owner, is the 3D view's imagery (`GDEMImagery`), which streams in while
+  flying: it downloads in the background with no dialog, and reports
+  problems as `WARNING:` lines.
 - Anything at start-up that may need the user goes in
   `TfrmMain.RunStartup`, in order, so one dialog never opens on top of
   another.

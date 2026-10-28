@@ -110,6 +110,8 @@ type
     FClickShows3D: Boolean;
     { Backing field for @link(TerrainRange). }
     FTerrainRange: Integer;
+    { Backing field for @link(TerrainRealistic). }
+    FTerrainRealistic: Boolean;
   public
     { Sets the defaults: tile tints and markers on, the other layers
       off. }
@@ -173,6 +175,10 @@ type
       in @code(GDEMTerrain)): a patch is split when the camera is nearer
       than this many tenths of its size. 20 (Medium) by default. }
     property TerrainRange: Integer read FTerrainRange write FTerrainRange;
+
+    { The 3D tab's Realistic switch: @true to draw satellite imagery
+      instead of height colours. @false by default. }
+    property TerrainRealistic: Boolean read FTerrainRealistic write FTerrainRealistic;
   end;
 
 { The layers to turn on the first time the user chooses how GDEMFetch

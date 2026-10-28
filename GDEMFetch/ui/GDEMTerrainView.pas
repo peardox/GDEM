@@ -39,6 +39,22 @@ the viewport, letting the mouse through
   from measures everything again from there (@code(TERRAIN_REBASE_KM)), so
   the flight can go as far as there are tiles.
 
+  With @link(TTerrainView.Realistic) on, each patch is drawn with
+  satellite imagery instead of its height colours: a patch on show is
+  drawn at once in its colours, its texture is asked of
+  @link(TTerrainView.Imagery) (@code(GDEMImagery), which downloads and
+  caches it in the background), and the texture replaces the colours when
+  it arrives. A patch asks when it is shown, or earlier, while it waits to
+  take over from others: the tree (@code(TTerrainLod.OnMeshReady)) keeps a
+  patch on show until the finer patches replacing it have their imagery,
+  and finer ones until the patch put back together has its, so imagery is
+  never replaced by bare patches. A patch that waits longer than
+  @link(IMAGERY_WAIT_MS) for its texture may take over all the same, so a
+  slow connection does not hold the view back. A patch whose texture could
+  not be made asks again a minute later (@link(IMAGERY_RETRY_MS)). Every patch carries texture
+  coordinates, so turning Realistic on or off needs no patch made again. EOX's credit is drawn
+  along the bottom while it is on.
+
   The view draws no more frames a second than the display the window is
   on refreshes at (@code(GDEMDisplays)), and checks four times a second
   whether the window has moved to another display.
@@ -55,21 +71,62 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.Types, System.UITypes, System.Math.Vectors,
-  System.Diagnostics,
+  System.Diagnostics, System.Generics.Collections,
   FMX.Types, FMX.Controls, FMX.Layouts, FMX.Types3D, FMX.Controls3D, FMX.Objects3D,
-  Gorilla.Viewport, Gorilla.Camera, Gorilla.Light, Gorilla.Material.VertexColor,
-  GDEMTerrain, GDEMTerrainLod, GDEMTerrainHud, GDEMFlight;
+  Gorilla.Viewport, Gorilla.Camera, Gorilla.Light, Gorilla.Mesh, Gorilla.Material.VertexColor,
+  Gorilla.Material.Default,
+  GDEMTerrain, GDEMTerrainLod, GDEMTerrainHud, GDEMFlight, GDEMImagery;
 
 const
   { The most milliseconds a timer tick spends turning patches into meshes;
     what is left waits for the next tick. }
   UPLOAD_BUDGET_MS = 12;
 
+  { Milliseconds before a patch whose imagery could not be made asks for
+    it again. }
+  IMAGERY_RETRY_MS = 60000;
+
+  { How often patches on show without imagery are looked for, to ask for
+    it, milliseconds. }
+  IMAGERY_SWEEP_MS = 5000;
+
+  { The longest a patch waits for its imagery before it may take over
+    from others without it, milliseconds. }
+  IMAGERY_WAIT_MS = 2000;
+
+  { How often the tree looks again while patches wait for imagery,
+    milliseconds, so one whose wait runs out takes over. }
+  IMAGERY_LOOK_MS = 100;
+
 type
   { @abstract(Reports a line for the log.)
     @param(Sender The view.)
     @param(AText The line.) }
   TTerrainReportEvent = procedure(Sender: TObject; const AText: string) of object;
+
+  { @abstract(A patch's mesh, with where the patch is, for its imagery.) }
+  TTerrainPatchMesh = class(TGorillaSingletonMesh)
+  public
+    { The id its imagery is asked for under, unique to the mesh. }
+    ImageryId: Int64;
+    { The patch's north edge, degrees. }
+    North: Double;
+    { The patch's west edge, degrees. }
+    West: Double;
+    { The patch's size, degrees, north to south and west to east. }
+    Size: Double;
+    { Its textured material while it has one, owned by the mesh;
+      @nil while it shows its height colours. }
+    Imagery: TGorillaDefaultMaterialSource;
+    { @true while its imagery is asked for and not yet arrived. }
+    ImageryAsked: Boolean;
+    { When its imagery was asked for (@code(TThread.GetTickCount64)). }
+    ImageryAskedAt: UInt64;
+    { When its imagery last could not be made (@code(TThread.GetTickCount64));
+      0 if it has not failed. It is not asked for again until
+      @link(IMAGERY_RETRY_MS) later. }
+    ImageryFailedAt: UInt64;
+  end;
 
   { @abstract(A Gorilla3D view of the ground round a tile, flown over.) }
   TTerrainView = class(TLayout)
@@ -156,6 +213,39 @@ type
     FDisplayName: string;
     { Backing field for @link(StartHeight). }
     FStartHeight: Integer;
+    { Backing field for @link(Imagery). }
+    FImagery: TImageryService;
+    { Backing field for @link(Realistic). }
+    FRealistic: Boolean;
+    { Every patch mesh, by its imagery id, to match textures that arrive. }
+    FMeshes: TDictionary<Int64, TTerrainPatchMesh>;
+    { The next imagery id to give a mesh. }
+    FNextImageryId: Int64;
+    { The texture coordinates every patch shares. }
+    FTexCoords: TArray<TPointF>;
+    { @true once it has been logged that the meshes have no room for
+      texture coordinates. }
+    FNoTexCoordsLogged: Boolean;
+    { EOX's credit, along the bottom while @link(Realistic) is on. }
+    FCredit: TTerrainCredit;
+    { Textures applied since the work started. }
+    FTextures: Integer;
+    { Milliseconds the workers took for them. }
+    FTextureMs: Double;
+    { Tiles downloaded for them. }
+    FTilesDownloaded: Integer;
+    { Textures that could not be made since the work started. }
+    FTextureFailures: Integer;
+    { Times the gap between looks for patches on show without imagery. }
+    FImagerySweep: TStopwatch;
+    { @true once the vertex buffer's layout has been logged. }
+    FLayoutLogged: Boolean;
+    { Times the gap between looks by the tree while patches wait for
+      imagery. }
+    FImageryLook: TStopwatch;
+    { @true when a texture has been put on a mesh since the tree last
+      looked. }
+    FImageryArrived: Boolean;
     { Backing field for @link(OnSettled). }
     FOnSettled: TTerrainReportEvent;
     { Backing field for @link(OnLog). }
@@ -199,11 +289,50 @@ type
       another display, draws no faster than that display refreshes. }
     procedure CheckFrameRate;
 
-    { Makes a patch's mesh, hidden.
+    { Makes a patch's mesh, hidden, and asks for its imagery if
+      @link(Realistic) is on.
       @param(APatch The patch.)
+      @param(ANode Its node in the tree, for where it is.)
       @returns(The mesh.)
       @raises(ETerrainError if Gorilla3D gives it no mesh data.) }
-    function MakeMesh(const APatch: TTerrainPatch): TObject;
+    function MakeMesh(const APatch: TTerrainPatch; ANode: TTerrainNode): TObject;
+
+    { Asks for a mesh's imagery, unless it has it, is waiting for it, or
+      could not have it less than @link(IMAGERY_RETRY_MS) ago.
+      @param(AMesh The mesh.) }
+    procedure RequestImagery(AMesh: TTerrainPatchMesh);
+
+    { Asks for the imagery of every patch on show that has none and is not
+      waiting for it. }
+    procedure SweepImagery;
+
+    { For the tree: whether a mesh may take over from the patches it
+      replaces. With @link(Realistic) on, only once its imagery has
+      arrived, could not be made, or has been waited for
+      @link(IMAGERY_WAIT_MS); asks for it if it has not been.
+      @param(AMesh The mesh.)
+      @returns(@true if it may.) }
+    function MeshReady(AMesh: TObject): Boolean;
+
+    { Puts a texture on its mesh, if the mesh is still there and
+      @link(Realistic) still on.
+      @param(AResult The texture.) }
+    procedure ApplyImagery(const AResult: TImageryResult);
+
+    { Puts a mesh back to its height colours, freeing its texture.
+      @param(AMesh The mesh.) }
+    procedure DropImagery(AMesh: TTerrainPatchMesh);
+
+    { Writer for @link(Realistic): asks for every mesh's imagery, or puts
+      every mesh back to its height colours.
+      @param(AValue @true for imagery.) }
+    procedure SetRealistic(AValue: Boolean);
+
+    { Writer for @link(Imagery): forgets what the old service was asked,
+      and asks the new one for every mesh's imagery if @link(Realistic) is
+      on.
+      @param(AValue The service, or @nil.) }
+    procedure SetImagery(AValue: TImageryService);
 
     { Copies a patch's vertices into a vertex buffer, straight into its
       memory where the layout can be found, otherwise through FMX's
@@ -343,6 +472,14 @@ type
       next start. }
     property StartHeight: Integer read FStartHeight write SetStartHeight;
 
+    { Makes the imagery for @link(Realistic); not owned. Set it to @nil
+      before freeing it. }
+    property Imagery: TImageryService read FImagery write SetImagery;
+
+    { @true to draw satellite imagery from @link(Imagery) instead of
+      height colours. }
+    property Realistic: Boolean read FRealistic write SetRealistic;
+
     { @true once a tile has been shown. }
     property HasTerrain: Boolean read FHasArea;
 
@@ -363,10 +500,10 @@ uses
   // Gorilla.DefTypes declares enumeration values with common names (such as
   // Default), so it comes before System.Math, whose names then win; and
   // Default() is not used in this unit
-  Gorilla.Mesh, Gorilla.DefTypes,
+  Gorilla.DefTypes,
   // For FMX's vertex and index buffer setters to be expanded inline
   System.RTLConsts,
-  System.Math, FMX.Forms, GDEMDisplays;
+  System.Math, System.TypInfo, FMX.Forms, FMX.Graphics, GDEMDisplays;
 
 const
   { The viewport's background, a dark blue-grey that reads as sky. }
@@ -407,6 +544,22 @@ const
   DEFAULT_FRAME_RATE = 60;
   { Refresh rates below this are not believed. }
   MIN_FRAME_RATE = 24;
+  { The credit line's height, pixels. }
+  CREDIT_HEIGHT = 20;
+
+{ The parts a vertex format holds, for the log.
+  @param(AFormat The format.)
+  @returns(Such as @code(Vertex Normal Color0 TexCoord0).) }
+function VertexFormatText(const AFormat: TVertexFormats): string;
+var
+  LPart: TVertexFormat;
+begin
+  Result := '';
+  for LPart := Low(TVertexFormat) to High(TVertexFormat) do
+    if LPart in AFormat then
+      Result := Result + ' ' + GetEnumName(TypeInfo(TVertexFormat), Ord(LPart));
+  Result := Result.Trim;
+end;
 
 { TTerrainView }
 
@@ -424,6 +577,8 @@ begin
   FStartHeight := DEFAULT_FLIGHT_START_HEIGHT;
   FFlight := TFlight.Create(FlightGround);
   FFlight.StartHeight := FStartHeight;
+  FMeshes := TDictionary<Int64, TTerrainPatchMesh>.Create;
+  FTexCoords := ImageryPatchTexCoords;
 
   FViewport := TGorillaViewport.Create(Self);
   FViewport.Parent := Self;
@@ -482,9 +637,13 @@ begin
   FCompass.Parent := Self;
   FBanner := TTerrainBanner.Create(Self);
   FBanner.Parent := Self;
+  FCredit := TTerrainCredit.Create(Self);
+  FCredit.Parent := Self;
   PlaceInstruments;
   FRateWatch := TStopwatch.StartNew;
   FFlightWatch := TStopwatch.StartNew;
+  FImagerySweep := TStopwatch.StartNew;
+  FImageryLook := TStopwatch.StartNew;
 
   FTimer := TTimer.Create(Self);
   FTimer.Interval := TICK_MS;
@@ -497,7 +656,9 @@ begin
   if FTimer <> nil then
     FTimer.Enabled := False;
   // The meshes go with the tree, before the material they use
+  FImagery := nil;
   FreeAndNil(FLod);
+  FreeAndNil(FMeshes);
   FreeAndNil(FFlight);
   inherited;
 end;
@@ -591,7 +752,7 @@ var
   LTop: Single;
 begin
   if (FAltimeter = nil) or (FFrameRate = nil) or (FSpeedPanel = nil) or (FCompass = nil) or
-     (FBanner = nil) then
+     (FBanner = nil) or (FCredit = nil) then
     Exit;
   LTop := HUD_MARGIN;
   FAltimeter.Position.Point := PointF(HUD_MARGIN, LTop);
@@ -603,6 +764,8 @@ begin
     HUD_MARGIN + ALTIMETER_WIDTH + HUD_GAP), HUD_MARGIN);
   FBanner.Position.Point := PointF(Max((Width - BANNER_WIDTH) / 2, 0),
     Max(Height * 0.35 - BANNER_HEIGHT / 2, 0));
+  FCredit.SetBounds(HUD_MARGIN, Max(Height - HUD_MARGIN - CREDIT_HEIGHT, 0),
+    Max(Width - 2 * HUD_MARGIN, 0), CREDIT_HEIGHT);
 end;
 
 procedure TTerrainView.Resize;
@@ -692,6 +855,10 @@ begin
   FBusyWatch := TStopwatch.StartNew;
   FUploadMs := 0;
   FUploads := 0;
+  FTextures := 0;
+  FTextureMs := 0;
+  FTilesDownloaded := 0;
+  FTextureFailures := 0;
   if FLod <> nil then
     FLod.ResetCounts;
   FWasBusy := True;
@@ -706,6 +873,7 @@ begin
     FLod := TTerrainLod.Create(FTileLookup);
     FLod.OnShowMesh := ShowMesh;
     FLod.OnReleaseMesh := ReleaseMesh;
+    FLod.OnMeshReady := MeshReady;
     FLod.OnLog := LodLog;
   end;
   FLod.MaxDepth := TerrainMaxDepth(FMaxDetail);
@@ -767,7 +935,8 @@ var
   LMesh: TObject;
   LChanged, LBusy, LWasCrashed: Boolean;
   LSeconds, LSpeed: Double;
-  LReport, LCopy: string;
+  LReport, LCopy, LMessage: string;
+  LImagery: TImageryResult;
 begin
   if (FLod = nil) or not FLod.Started then
     Exit;
@@ -796,7 +965,7 @@ begin
     while (LWatch.ElapsedMilliseconds < UPLOAD_BUDGET_MS) and FLod.TakeBuilt(LNode, LPatch) do
     begin
       try
-        LMesh := MakeMesh(LPatch);
+        LMesh := MakeMesh(LPatch, LNode);
         FLod.Attach(LNode, LMesh, LPatch);
         Inc(FUploads);
       except
@@ -808,6 +977,35 @@ begin
     if LChanged then
       FUploadMs := FUploadMs + LWatch.Elapsed.TotalMilliseconds;
 
+    // Textures that have arrived, in what is left of the budget
+    if FImagery <> nil then
+    begin
+      while (LWatch.ElapsedMilliseconds < UPLOAD_BUDGET_MS) and FImagery.Take(LImagery) do
+        ApplyImagery(LImagery);
+      while FImagery.TakeMessage(LMessage) do
+        if Assigned(FOnLog) then
+          FOnLog(Self, LMessage);
+      if FImagerySweep.ElapsedMilliseconds >= IMAGERY_SWEEP_MS then
+      begin
+        FImagerySweep := TStopwatch.StartNew;
+        SweepImagery;
+      end;
+    end;
+
+    // Imagery that arrived (or failed) may let a patch take over; while
+    // patches wait for it, the tree looks again now and then, so one whose
+    // wait has run out takes over
+    if FImageryArrived then
+    begin
+      FImageryArrived := False;
+      LChanged := True;
+    end
+    else if FRealistic and (FImagery <> nil) and (FImagery.Pending > 0) and
+       (FImageryLook.ElapsedMilliseconds >= IMAGERY_LOOK_MS) then
+      LChanged := True;
+    if LChanged then
+      FImageryLook := TStopwatch.StartNew;
+
     if LChanged then
     begin
       FCameraMoved := False;
@@ -816,7 +1014,9 @@ begin
       UpdateInstruments;
     end;
 
-    LBusy := FLod.Busy;
+    // Settled once the patches and, with Realistic on, their imagery are
+    // all made
+    LBusy := FLod.Busy or (FRealistic and (FImagery <> nil) and (FImagery.Pending > 0));
     if LBusy and not FWasBusy then
       BeginWork
     else if not LBusy and FWasBusy then
@@ -839,6 +1039,12 @@ begin
            LCopy]);
         if FLod.FailedCount > 0 then
           LReport := LReport + Format('; %d could not be made', [FLod.FailedCount]);
+        if FRealistic and (FImagery <> nil) then
+          LReport := LReport + Format('; imagery: %d textures, %.0f ms each, %d tiles ' +
+            'downloaded, %d still to come, %d could not be made; EOX pace %.1f tiles a ' +
+            'second, %d refused so far', [FTextures, FTextureMs / Max(FTextures, 1),
+             FTilesDownloaded, FImagery.Pending, FTextureFailures, FImagery.Rate,
+             FImagery.Refusals]);
         FOnSettled(Self, LReport);
       end;
     end;
@@ -857,19 +1063,46 @@ function TTerrainView.FillVertices(ABuffer: TVertexBuffer; const APatch: TTerrai
 const
   // A colour no patch has, to find where FMX keeps a vertex's colour
   SENTINEL: TAlphaColor = $A1B2C3D4;
+  // Texture coordinates no patch has, to find where FMX keeps them: FMX
+  // gives no pointer to them, as for colours
+  TEX_SENTINEL_U: Single = 0.3721;
+  TEX_SENTINEL_V: Single = 0.8913;
 var
   LBase, LVertex: PByte;
-  LSize, LVertexOffset, LNormalOffset, LColourOffset, I: Integer;
-  LPointsDirect: Boolean;
+  LSize, LVertexOffset, LNormalOffset, LColourOffset, LColourFOffset, LTexOffset, I: Integer;
+  LPointsDirect, LHasTex: Boolean;
+  LMarkF, LColourF: TAlphaColorF;
+
+  { @true if four floats at an offset are, within rounding, a float
+    colour.
+    @param(AOffset The offset.)
+    @param(AColour The colour.)
+    @returns(@true if they match.) }
+  function IsColourF(AOffset: Integer; const AColour: TAlphaColorF): Boolean;
+  begin
+    Result := (Abs(PSingle(LBase + AOffset)^ - AColour.R) < 1E-5) and
+      (Abs(PSingle(LBase + AOffset + 4)^ - AColour.G) < 1E-5) and
+      (Abs(PSingle(LBase + AOffset + 8)^ - AColour.B) < 1E-5) and
+      (Abs(PSingle(LBase + AOffset + 12)^ - AColour.A) < 1E-5);
+  end;
+
+  { @true if some bytes at an offset would overlap a position or normal.
+    @param(AOffset The offset.)
+    @param(ALength How many bytes.)
+    @returns(@true if they overlap.) }
+  function OverlapsPoints(AOffset, ALength: Integer): Boolean;
+  begin
+    Result :=
+      ((AOffset + ALength > LVertexOffset) and (AOffset < LVertexOffset + SizeOf(TPoint3D))) or
+      ((AOffset + ALength > LNormalOffset) and (AOffset < LNormalOffset + SizeOf(TPoint3D)));
+  end;
 
   { @true if a colour at an offset would overlap a position or normal.
     @param(AOffset The offset.)
     @returns(@true if it overlaps.) }
   function Overlaps(AOffset: Integer): Boolean;
   begin
-    Result :=
-      ((AOffset + SizeOf(TAlphaColor) > LVertexOffset) and (AOffset < LVertexOffset + SizeOf(TPoint3D))) or
-      ((AOffset + SizeOf(TAlphaColor) > LNormalOffset) and (AOffset < LNormalOffset + SizeOf(TPoint3D)));
+    Result := OverlapsPoints(AOffset, SizeOf(TAlphaColor));
   end;
 
 begin
@@ -882,17 +1115,68 @@ begin
   LPointsDirect := (LBase <> nil) and InRange(LVertexOffset, 0, LSize - SizeOf(TPoint3D)) and
     InRange(LNormalOffset, 0, LSize - SizeOf(TPoint3D));
   LColourOffset := -1;
+  LColourFOffset := -1;
+  // Texture coordinates, for imagery, where the buffer has room for them
+  LHasTex := TVertexFormat.TexCoord0 in ABuffer.Format;
+  LTexOffset := -1;
+  if LHasTex and LPointsDirect then
+  begin
+    ABuffer.TexCoord0[0] := PointF(TEX_SENTINEL_U, TEX_SENTINEL_V);
+    for I := 0 to LSize - SizeOf(TPointF) do
+      if (PSingle(LBase + I)^ = TEX_SENTINEL_U) and (PSingle(LBase + I + SizeOf(Single))^ =
+         TEX_SENTINEL_V) and not OverlapsPoints(I, SizeOf(TPointF)) then
+      begin
+        LTexOffset := I;
+        Break;
+      end;
+  end;
+  if not LHasTex and not FNoTexCoordsLogged then
+  begin
+    FNoTexCoordsLogged := True;
+    if Assigned(FOnLog) then
+      FOnLog(Self, 'WARNING: the patches'' meshes have no texture coordinates, so Realistic ' +
+        'cannot show imagery');
+  end;
   if LPointsDirect then
   begin
     ABuffer.Color0[0] := SENTINEL;
     for I := 0 to LSize - SizeOf(TAlphaColor) do
-      if (PCardinal(LBase + I)^ = SENTINEL) and not Overlaps(I) then
+      if (PCardinal(LBase + I)^ = SENTINEL) and not Overlaps(I) and
+         ((LTexOffset < 0) or (I + SizeOf(TAlphaColor) <= LTexOffset) or
+          (I >= LTexOffset + SizeOf(TPointF))) then
       begin
         LColourOffset := I;
         Break;
       end;
+    // Gorilla3D's meshes keep colour as four floats (ColorF0), which FMX's
+    // Color0 setter fills; looked for as floats when not found as a
+    // 4-byte colour
+    if LColourOffset < 0 then
+    begin
+      LMarkF := TAlphaColorF.Create(SENTINEL);
+      I := 0;
+      while I <= LSize - SizeOf(TAlphaColorF) do
+      begin
+        if IsColourF(I, LMarkF) and not OverlapsPoints(I, SizeOf(TAlphaColorF)) and
+           ((LTexOffset < 0) or (I + SizeOf(TAlphaColorF) <= LTexOffset) or
+            (I >= LTexOffset + SizeOf(TPointF))) then
+        begin
+          LColourFOffset := I;
+          Break;
+        end;
+        Inc(I, SizeOf(Single));
+      end;
+    end;
   end;
 
+  if not FLayoutLogged and Assigned(FOnLog) then
+  begin
+    FLayoutLogged := True;
+    FOnLog(Self, Format('3D: vertex layout: %d bytes a vertex, format %s; position at %d, ' +
+      'normal at %d, colour at %d (4 bytes) or %d (4 floats), texture at %d (-1 not found)',
+      [LSize, VertexFormatText(ABuffer.Format), LVertexOffset, LNormalOffset, LColourOffset,
+       LColourFOffset, LTexOffset]));
+  end;
   if LPointsDirect then
     for I := 0 to High(APatch.Positions) do
     begin
@@ -901,8 +1185,17 @@ begin
       PPoint3D(LVertex + LNormalOffset)^ := APatch.Normals[I];
       if LColourOffset >= 0 then
         PAlphaColor(LVertex + LColourOffset)^ := APatch.Colours[I]
+      else if LColourFOffset >= 0 then
+      begin
+        LColourF := TAlphaColorF.Create(APatch.Colours[I]);
+        System.Move(LColourF, (LVertex + LColourFOffset)^, SizeOf(TAlphaColorF));
+      end
       else
         ABuffer.Color0[I] := APatch.Colours[I];
+      if LTexOffset >= 0 then
+        PPointF(LVertex + LTexOffset)^ := FTexCoords[I]
+      else if LHasTex then
+        ABuffer.TexCoord0[I] := FTexCoords[I];
     end
   else
     for I := 0 to High(APatch.Positions) do
@@ -910,8 +1203,11 @@ begin
       ABuffer.Vertices[I] := APatch.Positions[I];
       ABuffer.Normals[I] := APatch.Normals[I];
       ABuffer.Color0[I] := APatch.Colours[I];
+      if LHasTex then
+        ABuffer.TexCoord0[I] := FTexCoords[I];
     end;
-  Result := LPointsDirect and (LColourOffset >= 0);
+  Result := LPointsDirect and ((LColourOffset >= 0) or (LColourFOffset >= 0)) and
+    (not LHasTex or (LTexOffset >= 0));
 end;
 
 procedure TTerrainView.FillIndices(ABuffer: TIndexBuffer);
@@ -934,14 +1230,18 @@ begin
       ABuffer.Indices[I] := FIndices[I];
 end;
 
-function TTerrainView.MakeMesh(const APatch: TTerrainPatch): TObject;
+function TTerrainView.MakeMesh(const APatch: TTerrainPatch; ANode: TTerrainNode): TObject;
 var
-  LMesh: TGorillaSingletonMesh;
+  LMesh: TTerrainPatchMesh;
   LData: TMeshData;
   LDef: TMeshDef;
 begin
-  LMesh := TGorillaSingletonMesh.Create(nil);
+  LMesh := TTerrainPatchMesh.Create(nil);
   try
+    // Where the patch is, for its imagery
+    LMesh.Size := NODE_ARCSEC[ANode.Depth] / TILE_ARCSEC;
+    LMesh.North := ANode.Root.South + 1 - ANode.Y * LMesh.Size;
+    LMesh.West := ANode.Root.West + ANode.X * LMesh.Size;
     LMesh.Visible := False;
     LMesh.Parent := FTerrain;
     LData := LMesh.MeshData;
@@ -964,17 +1264,192 @@ begin
     LMesh.Free;
     raise;
   end;
+  Inc(FNextImageryId);
+  LMesh.ImageryId := FNextImageryId;
+  FMeshes.Add(LMesh.ImageryId, LMesh);
+  // Made hidden: its imagery is asked for when the tree shows it
   Result := LMesh;
 end;
 
 procedure TTerrainView.ShowMesh(AMesh: TObject; AVisible: Boolean);
+var
+  LMesh: TTerrainPatchMesh;
 begin
   TControl3D(AMesh).Visible := AVisible;
+  if not (AMesh is TTerrainPatchMesh) then
+    Exit;
+  LMesh := TTerrainPatchMesh(AMesh);
+  // A patch hidden keeps its texture, and its request, for when it is
+  // shown again; it is cancelled only when the patch is freed
+  if AVisible and FRealistic then
+    RequestImagery(LMesh);
+end;
+
+function TTerrainView.MeshReady(AMesh: TObject): Boolean;
+var
+  LMesh: TTerrainPatchMesh;
+begin
+  Result := True;
+  if not FRealistic or (FImagery = nil) or not (AMesh is TTerrainPatchMesh) then
+    Exit;
+  LMesh := TTerrainPatchMesh(AMesh);
+  if (LMesh.Imagery <> nil) or (LMesh.ImageryFailedAt <> 0) then
+    Exit;
+  // Asked for now, while it waits to be shown
+  RequestImagery(LMesh);
+  Result := not LMesh.ImageryAsked or
+    (TThread.GetTickCount64 - LMesh.ImageryAskedAt >= IMAGERY_WAIT_MS);
 end;
 
 procedure TTerrainView.ReleaseMesh(AMesh: TObject);
+var
+  LMesh: TTerrainPatchMesh;
 begin
+  if AMesh is TTerrainPatchMesh then
+  begin
+    LMesh := TTerrainPatchMesh(AMesh);
+    if FMeshes <> nil then
+      FMeshes.Remove(LMesh.ImageryId);
+    if LMesh.ImageryAsked and (FImagery <> nil) then
+      FImagery.Cancel(LMesh.ImageryId);
+  end;
+  // Its textured material, if any, goes with it
   AMesh.Free;
+end;
+
+procedure TTerrainView.RequestImagery(AMesh: TTerrainPatchMesh);
+begin
+  if (FImagery = nil) or (AMesh.Imagery <> nil) or AMesh.ImageryAsked then
+    Exit;
+  if (AMesh.ImageryFailedAt <> 0) and
+     (TThread.GetTickCount64 - AMesh.ImageryFailedAt < IMAGERY_RETRY_MS) then
+    Exit;
+  AMesh.ImageryAsked := True;
+  AMesh.ImageryAskedAt := TThread.GetTickCount64;
+  FImagery.Request(AMesh.ImageryId, AMesh.North, AMesh.West, AMesh.Size);
+end;
+
+procedure TTerrainView.ApplyImagery(const AResult: TImageryResult);
+var
+  LMesh: TTerrainPatchMesh;
+  LBitmap: TBitmap;
+  LData: TBitmapData;
+  LMaterial: TGorillaDefaultMaterialSource;
+  X, Y: Integer;
+begin
+  if not FMeshes.TryGetValue(AResult.Id, LMesh) then
+    Exit;
+  LMesh.ImageryAsked := False;
+  if not FRealistic then
+    Exit;
+  if Length(AResult.Pixels) <> IMAGERY_PIXELS * IMAGERY_PIXELS then
+  begin
+    // Its height colours stay, and it asks again later; the service has
+    // logged why
+    LMesh.ImageryFailedAt := TThread.GetTickCount64;
+    if LMesh.ImageryFailedAt = 0 then
+      LMesh.ImageryFailedAt := 1;
+    FImageryArrived := True;
+    Inc(FTextureFailures);
+    Exit;
+  end;
+  LBitmap := TBitmap.Create(IMAGERY_PIXELS, IMAGERY_PIXELS);
+  try
+    if LBitmap.Map(TMapAccess.Write, LData) then
+    try
+      // TAlphaColor is BGRA in memory, so rows copy straight into a BGRA
+      // bitmap; any other layout goes pixel by pixel
+      if LData.PixelFormat = TPixelFormat.BGRA then
+        for Y := 0 to IMAGERY_PIXELS - 1 do
+          System.Move(AResult.Pixels[Y * IMAGERY_PIXELS], LData.GetScanline(Y)^,
+            IMAGERY_PIXELS * SizeOf(TAlphaColor))
+      else
+        for Y := 0 to IMAGERY_PIXELS - 1 do
+          for X := 0 to IMAGERY_PIXELS - 1 do
+            LData.SetPixel(X, Y, AResult.Pixels[Y * IMAGERY_PIXELS + X]);
+    finally
+      LBitmap.Unmap(LData);
+    end;
+    // Its own material: Gorilla3D's materials take vertex colours or a
+    // texture, not both. The imagery has the real light in it, so it is
+    // drawn flat, unlit
+    LMaterial := TGorillaDefaultMaterialSource.Create(LMesh);
+    LMaterial.UseLighting := False;
+    LMaterial.UseSpecular := False;
+    LMaterial.UseTexturing := True;
+    LMaterial.UseTexture0 := True;
+    LMaterial.Texture.Assign(LBitmap);
+    if LMesh.Imagery <> nil then
+      LMesh.Imagery.Free;
+    LMesh.Imagery := LMaterial;
+    LMesh.MaterialSource := LMaterial;
+  finally
+    LBitmap.Free;
+  end;
+  FImageryArrived := True;
+  Inc(FTextures);
+  FTextureMs := FTextureMs + AResult.Milliseconds;
+  Inc(FTilesDownloaded, AResult.Downloaded);
+end;
+
+procedure TTerrainView.DropImagery(AMesh: TTerrainPatchMesh);
+begin
+  AMesh.MaterialSource := FMaterial;
+  FreeAndNil(AMesh.Imagery);
+  AMesh.ImageryAsked := False;
+  AMesh.ImageryFailedAt := 0;
+end;
+
+procedure TTerrainView.SweepImagery;
+var
+  LMesh: TTerrainPatchMesh;
+begin
+  if not FRealistic or (FImagery = nil) then
+    Exit;
+  for LMesh in FMeshes.Values do
+    if LMesh.Visible then
+      RequestImagery(LMesh);
+end;
+
+procedure TTerrainView.SetRealistic(AValue: Boolean);
+var
+  LMesh: TTerrainPatchMesh;
+begin
+  if AValue = FRealistic then
+    Exit;
+  FRealistic := AValue;
+  if FImagery <> nil then
+    FImagery.CancelAll;
+  for LMesh in FMeshes.Values do
+  begin
+    DropImagery(LMesh);
+    if FRealistic and LMesh.Visible then
+      RequestImagery(LMesh);
+  end;
+  FCredit.Visible := FRealistic and (FImagery <> nil);
+  BeginWork;
+end;
+
+procedure TTerrainView.SetImagery(AValue: TImageryService);
+var
+  LMesh: TTerrainPatchMesh;
+begin
+  if AValue = FImagery then
+    Exit;
+  if FImagery <> nil then
+    FImagery.CancelAll;
+  FImagery := AValue;
+  if FImagery <> nil then
+    FCredit.Text := ImageryCredit(FImagery.Layer);
+  if FMeshes <> nil then
+    for LMesh in FMeshes.Values do
+    begin
+      LMesh.ImageryAsked := False;
+      LMesh.ImageryFailedAt := 0;
+      if FRealistic and LMesh.Visible then
+        RequestImagery(LMesh);
+    end;
+  FCredit.Visible := FRealistic and (FImagery <> nil);
 end;
 
 procedure TTerrainView.LodLog(const AText: string);

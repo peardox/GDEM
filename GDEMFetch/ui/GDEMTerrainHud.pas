@@ -1,7 +1,7 @@
 { @abstract(Instruments drawn over the 3D view: the camera's height above
   the ground and above sea level, a compass showing which way it looks,
   the frames drawn a second, the flight's speed and the camera's tilt,
-  and a banner for a crash.)
+  a banner for a crash, and the imagery's credit.)
 
   Both are plain FMX controls that paint themselves, laid over the
   Gorilla3D viewport by @code(TTerrainView). They do not take the mouse
@@ -252,6 +252,28 @@ type
 
     { The line beneath. }
     property Detail: string read FDetail;
+  end;
+
+  { @abstract(A line of small text in the bottom right corner, on a dark
+    panel just wide enough for it: the credit for the imagery.) }
+  TTerrainCredit = class(TControl)
+  private
+    { Backing field for @link(Text). }
+    FText: string;
+
+    { Writer for @link(Text).
+      @param(AValue The line.) }
+    procedure SetText(const AValue: string);
+  protected
+    { Draws the panel and the line, against the right edge. }
+    procedure Paint; override;
+  public
+    { Makes the line, hidden and not taking the mouse.
+      @param(AOwner The owner.) }
+    constructor Create(AOwner: TComponent); override;
+
+    { The line. }
+    property Text: string read FText write SetText;
   end;
 
 { Writes a height for the instruments: metres with thousands separated
@@ -733,6 +755,42 @@ begin
   Canvas.Font.Style := [];
   Canvas.FillText(RectF(10, 36, Width - 10, Height - 6), FDetail, False, 1, [], TTextAlign.Center,
     TTextAlign.Center);
+end;
+
+{ TTerrainCredit }
+
+constructor TTerrainCredit.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+  HitTest := False;
+  Visible := False;
+end;
+
+procedure TTerrainCredit.SetText(const AValue: string);
+begin
+  if AValue = FText then
+    Exit;
+  FText := AValue;
+  Repaint;
+end;
+
+procedure TTerrainCredit.Paint;
+var
+  LWidth: Single;
+  LBounds: TRectF;
+begin
+  if FText = '' then
+    Exit;
+  Canvas.Font.Size := 10;
+  Canvas.Font.Style := [];
+  LWidth := Min(Canvas.TextWidth(FText) + 16, Width);
+  LBounds := RectF(Width - LWidth + 0.5, 0.5, Width - 0.5, Height - 0.5);
+  Canvas.Fill.Kind := TBrushKind.Solid;
+  Canvas.Fill.Color := HUD_PANEL;
+  Canvas.FillRect(LBounds, 4, 4, AllCorners, 1);
+  Canvas.Fill.Color := HUD_DIM;
+  Canvas.FillText(RectF(LBounds.Left + 8, 0, LBounds.Right - 8, Height), FText, False, 1, [],
+    TTextAlign.Trailing, TTextAlign.Center);
 end;
 
 end.

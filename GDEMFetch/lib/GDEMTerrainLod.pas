@@ -208,6 +208,12 @@ type
     @param(AMesh The mesh.) }
   TTerrainReleaseEvent = procedure(AMesh: TObject) of object;
 
+  { @abstract(Says whether a patch's mesh is ready to take over from the
+    patches it replaces: for the view, whether its imagery has arrived.)
+    @param(AMesh The mesh.)
+    @returns(@true if it may be shown in place of others.) }
+  TTerrainMeshReadyEvent = function(AMesh: TObject): Boolean of object;
+
   { @abstract(Reports something for the log.)
     @param(AText The line.) }
   TTerrainLogEvent = procedure(const AText: string) of object;
@@ -264,6 +270,8 @@ type
     FOnShowMesh: TTerrainShowEvent;
     { Backing field for @link(OnReleaseMesh). }
     FOnReleaseMesh: TTerrainReleaseEvent;
+    { Backing field for @link(OnMeshReady). }
+    FOnMeshReady: TTerrainMeshReadyEvent;
     { Backing field for @link(OnLog). }
     FOnLog: TTerrainLogEvent;
 
@@ -302,6 +310,12 @@ type
       @param(ANode The patch.)
       @returns(@true if every child is ready or failed.) }
     function ChildrenReady(ANode: TTerrainNode): Boolean;
+
+    { @true if a patch may take over from others: it could not be made, or
+      it is made and @link(OnMeshReady) agrees.
+      @param(ANode The patch.)
+      @returns(@true if ready.) }
+    function NodeReady(ANode: TTerrainNode): Boolean;
 
     { Gives a tile's tree a fresh top patch.
       @param(ARoot The tile.) }
@@ -480,6 +494,12 @@ type
 
     { Frees a mesh. }
     property OnReleaseMesh: TTerrainReleaseEvent read FOnReleaseMesh write FOnReleaseMesh;
+
+    { Says whether a made mesh may take over from the patches it replaces;
+      unset, every made mesh may. A patch split stays on show until its
+      finer ones are ready by this, and finer ones stay until the patch
+      put back together is. }
+    property OnMeshReady: TTerrainMeshReadyEvent read FOnMeshReady write FOnMeshReady;
 
     { Reports problems. }
     property OnLog: TTerrainLogEvent read FOnLog write FOnLog;
@@ -849,8 +869,14 @@ var
 begin
   Result := ANode.Children <> nil;
   for LChild in ANode.Children do
-    if not (LChild.State in [nsReady, nsFailed]) then
+    if not NodeReady(LChild) then
       Exit(False);
+end;
+
+function TTerrainLod.NodeReady(ANode: TTerrainNode): Boolean;
+begin
+  Result := (ANode.State = nsFailed) or ((ANode.State = nsReady) and
+    ((ANode.Mesh = nil) or not Assigned(FOnMeshReady) or FOnMeshReady(ANode.Mesh)));
 end;
 
 procedure TTerrainLod.ResetRoot(ARoot: TTerrainRoot);
@@ -984,6 +1010,14 @@ begin
 
   if ANode.State in [nsReady, nsFailed] then
   begin
+    // Being put back together, but not ready to take over (its imagery has
+    // not come): the finer patches stay until it is
+    if not LSplit and not NodeReady(ANode) and ChildrenReady(ANode) then
+    begin
+      for LChild in ANode.Children do
+        Visit(LChild);
+      Exit;
+    end;
     if ANode.State = nsReady then
       Keep(ANode);
     if not LSplit then

@@ -55,6 +55,14 @@ const
     settings do not depend on the 3D units. }
   DEFAULT_FLIGHT_START_METRES = 10000;
 
+  { Default for @link(TGDEMSettings.ImageryLayer): the newest year of
+    EOX's Sentinel-2 cloudless (CC BY-NC-SA 4.0). The same as
+    @code(DEFAULT_IMAGERY_LAYER) in @code(GDEMImagery). }
+  DEFAULT_IMAGERY_LAYER_NAME = 's2cloudless-2025';
+
+  { Default for @link(TGDEMSettings.ImageryCacheMB): 2 GB. }
+  DEFAULT_IMAGERY_CACHE_SIZE_MB = 2048;
+
   { Most files downloaded at once at any speed. NASA does not publish a
     limit, but cuts off or refuses downloads when it has had enough; the
     downloads then back off by themselves (see @code(TDownloadThrottle)). }
@@ -161,6 +169,10 @@ type
     FGpuPreference: string;
     { Backing field for @link(FlightStartHeight). }
     FFlightStartHeight: Integer;
+    { Backing field for @link(ImageryLayer). }
+    FImageryLayer: string;
+    { Backing field for @link(ImageryCacheMB). }
+    FImageryCacheMB: Integer;
 
     { Writer for @link(DataFolder); trims spaces and any trailing path
       separator. It has no other side effects, because Neon may set
@@ -288,6 +300,20 @@ type
       it in @code(settings.json) (@code(flightStartHeight)), which is
       read at start-up. Defaults to @link(DEFAULT_FLIGHT_START_METRES). }
     property FlightStartHeight: Integer read FFlightStartHeight write FFlightStartHeight;
+
+    { EOX's Sentinel-2 cloudless layer the 3D view's Realistic option
+      draws: @code(s2cloudless-2025) by default, or another year such as
+      @code(s2cloudless-2017) (2016 and 2017 are CC BY 4.0, which allows
+      commercial use; later years are non-commercial only). Not in the
+      Settings dialog: change @code(imageryLayer) in @code(settings.json).
+      Defaults to @link(DEFAULT_IMAGERY_LAYER_NAME). }
+    property ImageryLayer: string read FImageryLayer write FImageryLayer;
+
+    { The most the imagery cache in the data folder may hold, megabytes;
+      the tiles used least recently are deleted past it. Not in the
+      Settings dialog: change @code(imageryCacheMB) in @code(settings.json).
+      Defaults to @link(DEFAULT_IMAGERY_CACHE_SIZE_MB). }
+    property ImageryCacheMB: Integer read FImageryCacheMB write FImageryCacheMB;
   end;
 
 implementation
@@ -416,6 +442,8 @@ begin
   FDrawing := 'GPU';
   FGpuPreference := 'Automatic';
   FFlightStartHeight := DEFAULT_FLIGHT_START_METRES;
+  FImageryLayer := DEFAULT_IMAGERY_LAYER_NAME;
+  FImageryCacheMB := DEFAULT_IMAGERY_CACHE_SIZE_MB;
 end;
 
 class function TGDEMSettings.DefaultDataFolder: string;

@@ -28,9 +28,9 @@ owner was about to push the level-of-detail 3D view.
   working single-tile view (the owner chose this stage as a safe point to
   return to).
 - Owner's ideas waiting: use the `GDEMSystemInfo` figures to choose CPU
-  or GPU drawing (and View layers, 3D detail) on a first run; the
-  high-resolution map over the 3D surface. The flying camera has been
-  delivered (see "Flying" below), unbuilt.
+  or GPU drawing (and View layers, 3D detail) on a first run. The flying
+  camera and the Realistic imagery have been delivered (see "Flying" and
+  "Realistic imagery" below), unbuilt.
 
 ## State at the end of 27 October 2026
 
@@ -1507,6 +1507,171 @@ PolyForm Noncommercial 1.0.0 was written in briefly and replaced.
 - README: Licence section, layout rows, and a Notes for Claude rule to
   add anything new to `CREDITS.md`.
 
+### Realistic imagery (28 October 2026)
+
+Asked for by the owner ("sync, check and if ok add the image code") after
+`88d0682` "Licenses", which was checked identical to every file delivered
+since `8e2511f` (14 files) and passed every check. The proposals of the
+licence discussion were taken as agreed: EOX Sentinel-2 cloudless, the
+newest year by default; least recently used rather than FIFO; 2 GB in the
+data folder; background downloads as an exception to the progress dialog
+rule (README rule amended); plain imagery, unlit. Not yet built.
+
+- EOX's WMTS capabilities (fetched 28 October 2026): layers
+  `s2cloudless` (2016), `s2cloudless-2017` ... `s2cloudless-2025`, each
+  also `_3857`; the plain ones in `WGS84` (GoogleCRS84Quad: level z is
+  2^(z+1) x 2^z tiles of 256, top left 90, -180, levels 0 to 17), JPEG,
+  REST template `.../wmts/1.0.0/{layer}/default/WGS84/{z}/{row}/{col}.jpg`.
+  2016 and 2017 CC BY 4.0, 2018 to 2025 CC BY-NC-SA 4.0; AccessConstraints
+  "Proper attribution is required for any usage", following the demo map.
+  The sandbox cannot reach `tiles.maps.eox.at` (proxy 403), so nothing was
+  downloaded here.
+- `lib/GDEMImagery` (new): `TImageryService(layer, cache root, MB)`.
+  `Request(id, north, west, size)`, `Cancel`, `CancelAll`, `Take`,
+  `TakeMessage`, `Pending`. Up to `IMAGERY_WORKERS` (6) `TTask`s; each
+  texture: level `ImageryZoomFor(size)` (the coarsest with at least 255
+  pixel gaps across, at most 13: depth 0 level 8, 1 level 10, 2 level 11,
+  3 level 12, 4 and 5 level 13), its tiles (columns wrapped, `FloorDiv`
+  for the column just west of 180), then 256 x 256 pixels bilinear from
+  the level's pixel centres, texture pixel i at west + i x size / 255.
+  Tiles: memory (96 decoded, LRU), the disk cache, or the web (one
+  `THTTPClient` per download, 10 s / 20 s time-outs, the GDEMFetch user
+  agent); two workers wanting one tile do not both fetch it
+  (`FFetching`, the second polls every 20 ms). Decoded with
+  `TSkImage.MakeFromEncoded` and `ReadPixels` as BGRA8888 (TAlphaColor's
+  own byte order). Disk cache `<data>/Imagery/<layer>/<z>/<row>/<col>.jpg`,
+  written as `.tmp` and renamed, only after it decodes; measured at the
+  start on a worker (`.tmp` leftovers deleted); a file's time is its last
+  use (set on every read), so LRU lasts between runs; past the limit the
+  oldest are deleted down to 90%, logged. Problems: the first 5 in full,
+  then every hundredth, as `WARNING:` through `TakeMessage`.
+  `ImageryPatchTexCoords`: u = (0.5 + c x 255 / 75) / 256, so the edge
+  vertices sit on the centres of pixels 0 and 255 and neighbours match.
+  `ImageryCredit`: "Sentinel-2 cloudless - https://s2maps.eu by EOX IT
+  Services GmbH (Contains modified Copernicus Sentinel data YEAR)" plus
+  the licence; the older wording, not EOX's newer EOxCloudless branding:
+  worth comparing with maps.eox.at's demo.
+- Checked in Python (a port of `ImageryZoomFor`, `Work` and
+  `ImageryPatchTexCoords`) on a synthetic world built tile by tile in the
+  WGS84 grid: 56 textures at every depth, including at 180 degrees and
+  near the poles, never missing a tile; on a picture linear in longitude
+  and latitude every texture pixel is within 4e-10 of a level pixel of
+  where it belongs; neighbouring patches match exactly along their shared
+  edges (east-west, north-south, across 180).
+- `GDEMTerrainView`: `TTerrainPatchMesh` (a `TGorillaSingletonMesh` with
+  `ImageryId`, `North`, `West`, `Size`, `Imagery` material, `ImageryAsked`,
+  `ImageryFailed`); `MakeMesh(patch, node)` sets the place from the node
+  and registers the mesh in `FMeshes`; `FillVertices` writes texture
+  coordinates (straight at `TexCoord0Ptr[0]`'s offset, else the setter)
+  if `TVertexFormat.TexCoord0 in ABuffer.Format`, logging a `WARNING:`
+  once if not. `ApplyImagery` (in `TimerTick`, within the same 12 ms
+  budget as the meshes) makes a `TBitmap`, copies rows straight when
+  `PixelFormat` is BGRA (else `SetPixel`), and gives the mesh its own
+  `TGorillaDefaultMaterialSource` (`UseLighting`/`UseSpecular` off,
+  `UseTexturing`, `UseTexture0`, `Texture.Assign(bitmap)`); Gorilla3D's
+  docs say vertex colour and texture cannot be combined in one material,
+  hence one each. `Realistic` off puts every mesh back on the shared
+  vertex-colour material and frees the textures. `ReleaseMesh` cancels a
+  request. The settled line waits for imagery too and adds its counts.
+  `TTerrainCredit` (HUD) draws the credit bottom right while on.
+- `MainForm`: Realistic check box on the 3D toolbar (`view.json`
+  `terrainRealistic`); `ImageryService` makes the service on first need
+  (cache in `FStore.ImageryFolder('Imagery')`, or none if the data folder
+  is missing); `CloseImagery` in `FormDestroy`, after Settings OK and when
+  the store is made again. `GDEMSettings`: `imageryLayer`,
+  `imageryCacheMB`. `GDEMStore.ImageryFolder`.
+
+To check when built, most likely first: `LMaterial.Texture.Assign` (the
+docs show `Texture.LoadFromFile` and `Texture := ...`; if `Texture` is nil,
+create a `TBitmap` and assign it with `:=`, and check who frees it); the
+`WARNING` about texture coordinates (Gorilla's mesh format may lack
+`TexCoord0`); a patch scrambled or mirrored (u and v the wrong way: the
+texture's row 0 is north); black patches (the material wants lighting or
+a diffuse colour); the cost of ~600 materials (all share one shader, by
+the docs); EOX's answer to a desktop program (status codes in the log);
+the `Imagery:` cache line at the first use; that a data folder rescan
+copes with the extra files (it walks the whole folder).
+
+### Realistic imagery, first run (28 October 2026)
+
+The owner's first run (Windows, N50W002, detail 3601, distance High,
+heights x1): the flight view and the instruments worked; `3D: settled in
+1381 ms: 790 patches on show (9,835,500 triangles) of 1017 kept, over 19
+tiles (18 with heights); 1017 made by up to 24 workers, 2.0 ms each; 1017
+meshes in 1064 ms, 1.05 ms each (vertices through FMX's setters)`; memory
+1.7 GB, GPU 1.1 GB. The display line named `\\.\DISPLAY5` at 240 Hz.
+With Realistic on: `imagery: 263 textures, 435 ms each, 1372 tiles
+downloaded, 0 still to come, 754 could not be made`, and about 750
+`403 Forbidden` from EOX, mixed with successes: EOX's public service is
+rate-limited ("due to heavy load", says maps.eox.at; HTTP errors or a
+redirect to a "Heavy load" page; no figures). It had been asked at about
+60 tiles a second. Fixed, not yet built:
+
+- `GDEMImagery`: downloads paced (`WaitForSlot`; one starts every
+  1000 / `Rate` ms): `IMAGERY_START_RATE` 8 a second, + 0.25 per tile
+  downloaded up to 32; a refusal (any status but 200 and 404, no answer,
+  or a body that is not a JPEG or PNG by its first bytes; redirects are not
+  followed) halves the pace (at least 1) and pauses all downloads, 1 s
+  doubling per refusal in a row up to 60 s, reset by a success. A tile is
+  asked for up to `IMAGERY_TRIES` (6) times; 404 is not retried. Logged on
+  the first refusal and every fiftieth; `Rate` and `Refusals` in the
+  settled line.
+- `GDEMTerrainView`: imagery only for meshes on show (`ShowMesh` asks, or
+  cancels when hidden; `MakeMesh` no longer asks, as meshes are made
+  hidden), so hidden parents (227 of 1017 here) fetch nothing. A failure
+  is retried after `IMAGERY_RETRY_MS` (60 s) (`ImageryFailedAt` replaces
+  `ImageryFailed`); `SweepImagery` every 5 s asks for any patch on show
+  that has none. A one-off `3D: vertex layout` line gives the buffer's
+  size, format and the offsets found (-1 not found), to see why vertices
+  went through FMX's setters (the colour or texture coordinates were not
+  found by their markers, or the format has no colour).
+- Not reported yet: how the imagery looked (orientation, colour, seams).
+
+### Realistic imagery, second run (28 October 2026)
+
+With the pacing (N36W002, detail 3601, distance High, x1): `imagery: 407
+textures, 87 ms each, 189 tiles downloaded, 0 still to come, 0 could not
+be made; EOX pace 32.0 tiles a second, 0 refused so far`, settled in
+5963 ms; the cache held 2,793 tiles, 23 MB, from the first run (measured
+in 38 ms). The window's display was `\\.\DISPLAY6` at 60 Hz. GPU memory
+983 MB without imagery, 988 MB with 407 textures. The layout line:
+`72 bytes a vertex, format Vertex Normal ColorF0 TexCoord0 BiNormal
+Tangent; position at 0, normal at 12, colour at -1, texture at 24`.
+So Gorilla3D's meshes keep colour as `ColorF0` (four floats), which FMX's
+`Color0` setter fills (hence colours always showed), and the 4-byte marker
+search never found it: every mesh went through the setters. Now
+`FillVertices` also looks for the marker as four floats
+(`TAlphaColorF.Create(SENTINEL)`, within 1e-5, on 4-byte steps) and
+copies `TAlphaColorF` straight in; the layout line gives both offsets.
+Not yet built. The owner has not yet said how the imagery looks.
+
+### Imagery: patches going black, then back (28 October 2026)
+
+Owner: "some textures go black then reload". The likely cause: when a
+patch split, the tree swapped in its finer patches as soon as their
+meshes were made, and they asked for imagery only when shown, so each
+showed without a texture until its own arrived (and, as the owner saw it,
+black rather than in height colours: to be checked, see below). Now, not
+yet built:
+
+- `GDEMTerrainLod`: `OnMeshReady` (`TTerrainMeshReadyEvent`) and
+  `NodeReady` (failed, or made and `OnMeshReady` agrees); `ChildrenReady`
+  uses it, so a split patch stays on show until its finer ones are ready;
+  and a patch being put back together that is made but not ready keeps
+  its finer ones on show until it is.
+- `GDEMTerrainView.MeshReady`: with Realistic on, a mesh is ready once it
+  has its texture, its texture failed, or it was asked for
+  `IMAGERY_WAIT_MS` (2 s) ago; it asks for it at once if not asked, so
+  hidden patches waiting to take over fetch imagery. `ShowMesh` no longer
+  cancels a hidden patch's request (only `ReleaseMesh` does). The tree
+  looks again when a texture arrives or fails (`FImageryArrived`), and
+  every `IMAGERY_LOOK_MS` (100 ms) while any is pending, so a wait that
+  runs out takes effect.
+- Still to find out: whether patches without imagery are black rather
+  than height coloured. If so, the float colour copy (`ColorF0`, the
+  previous zip) or the vertex-colour material is at fault; compare with
+  Realistic off, and with the previous build.
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection
@@ -1677,3 +1842,14 @@ reasons are here.
   "Identifier redeclared", 28 October 2026): something already in scope
   has the name, not found without the compiler. The property was not
   needed and was removed; choose another name if one is wanted.
+- FMX's `TVertexBuffer` has `VerticesPtr` and `NormalsPtr` but no
+  `TexCoord0Ptr` (E2003, 28 October 2026), as it has no pointer for
+  colours: `FillVertices` finds the texture coordinates' offset as it finds
+  the colour's, by writing a marker value through the setter and looking
+  for it. `RenameFile` is an inline that wants `Winapi.Windows` (H2443);
+  `TFile.Move` does not.
+- A type used in a unit's interface (a field's type, say) needs its unit
+  in the interface uses, not only the implementation's: one `TStopwatch`
+  field added to `TImageryService`, with `System.Diagnostics` only in the
+  implementation uses, gave 30 errors, most of them knock-on (28 October
+  2026). When adding a field, check the interface uses.

@@ -87,7 +87,8 @@ uses
   FMX.Controls.Presentation, FMX.Menus, FMX.TabControl, FMX.ListBox,
   GDEMCancel, GDEMSettings, GDEMDownloader, GDEMWorldMap, GDEMTileIndex,
   GDEMStore, GDEMThemes, GDEMReport, GDEMVectors, GDEMTileCache, GDEMMarkers,
-  GDEMSearch, GDEMViewOptions, GDEMEasterEggs, GDEMTerrainLod, GDEMTerrainView, ProgressForm;
+  GDEMSearch, GDEMViewOptions, GDEMEasterEggs, GDEMTerrainLod, GDEMTerrainView, GDEMImagery,
+  ProgressForm;
 
 const
   { Name of the RCDATA resource holding the world map image. }
@@ -503,6 +504,15 @@ type
       @code(TERRAIN_RANGES). }
     FTerrainRangeBox: TComboBox;
 
+    { The 3D tab's Realistic switch: satellite imagery instead of height
+      colours. }
+    FTerrainRealisticBox: TCheckBox;
+
+    { Makes the imagery for the 3D view's Realistic option; made when it
+      is first needed, and made again after Settings, as the data folder
+      it caches in may have changed. Owned by the form. }
+    FImagery: TImageryService;
+
     { Says what the 3D tab shows, or why it shows nothing. }
     FTerrainInfo: TLabel;
 
@@ -698,6 +708,24 @@ type
     { Gives the 3D view the keyboard, for flying, after a control on the
       3D toolbar has taken it. }
     procedure FocusTerrainView;
+
+    { Turns the 3D view's imagery on or off as the Realistic box says, and
+      remembers it.
+      @param(Sender The check box.) }
+    procedure TerrainRealisticChange(Sender: TObject);
+
+    { The imagery service, made if there is none yet, caching in the data
+      folder when it is available.
+      @returns(The service.) }
+    function ImageryService: TImageryService;
+
+    { Frees the imagery service, taking it from the 3D view first; the
+      next @link(ImageryService) makes another, from the settings and data
+      folder then. }
+    procedure CloseImagery;
+
+    { Gives the 3D view the imagery service and the Realistic choice. }
+    procedure ApplyTerrainRealistic;
 
     { The View menu item that shows a layer.
       @param(ALayer The layer.)
@@ -1253,6 +1281,8 @@ end;
 procedure TfrmMain.FormDestroy(Sender: TObject);
 begin
   tmrStorage.Enabled := False;
+  // Taken from the 3D view before it goes, and its workers waited for
+  CloseImagery;
   FMap.Vectors := nil;
   FVectors.Free;
   FMap.MapTiles := nil;
@@ -1653,6 +1683,12 @@ begin
     FTerrainRangeBox.OnChange := TerrainRangeChange;
     AddToBar(FTerrainRangeBox, 90, 16);
 
+    FTerrainRealisticBox := TCheckBox.Create(Self);
+    FTerrainRealisticBox.Text := 'Realistic';
+    FTerrainRealisticBox.IsChecked := FViewOptions.TerrainRealistic;
+    FTerrainRealisticBox.OnChange := TerrainRealisticChange;
+    AddToBar(FTerrainRealisticBox, 84, 16);
+
     LButton := TButton.Create(Self);
     LButton.Text := 'Start Again';
     LButton.OnClick := TerrainResetClick;
@@ -1709,6 +1745,7 @@ begin
     FTerrainView.Range := ChosenTerrainRange;
     FTerrainView.Exaggeration := ChosenTerrainHeights;
     FTerrainView.StartHeight := FSettings.FlightStartHeight;
+    ApplyTerrainRealistic;
     // A new tile starts the flight again; the same one again keeps it
     FTerrainView.ShowArea(LSouth, LWest, ATile <> FTerrainTile);
     FTerrainTile := ATile;
@@ -1818,6 +1855,60 @@ begin
   ShowTerrainTile(LNames[0], False);
   tabMain.ActiveTab := tab3D;
   FocusTerrainView;
+end;
+
+procedure TfrmMain.TerrainRealisticChange(Sender: TObject);
+begin
+  if FTerrainUpdating then
+    Exit;
+  FViewOptions.TerrainRealistic := FTerrainRealisticBox.IsChecked;
+  SaveViewOptions;
+  ApplyTerrainRealistic;
+  if FTerrainRealisticBox.IsChecked then
+    AddLog('3D: realistic, with ' + ImageryCredit(ImageryService.Layer))
+  else
+    AddLog('3D: height colours');
+  FocusTerrainView;
+end;
+
+function TfrmMain.ImageryService: TImageryService;
+var
+  LLayer, LRoot: string;
+begin
+  if FImagery = nil then
+  begin
+    LLayer := Trim(FSettings.ImageryLayer);
+    if LLayer = '' then
+      LLayer := DEFAULT_IMAGERY_LAYER;
+    // Cached in the data folder when it is there; otherwise downloaded
+    // each time, and kept only in memory
+    if FStore.IsAvailable then
+      LRoot := FStore.ImageryFolder(IMAGERY_FOLDER_NAME)
+    else
+    begin
+      LRoot := '';
+      AddLog('WARNING: the data folder is not available, so imagery is not kept on disk');
+    end;
+    FImagery := TImageryService.Create(LLayer, LRoot, FSettings.ImageryCacheMB);
+  end;
+  Result := FImagery;
+end;
+
+procedure TfrmMain.CloseImagery;
+begin
+  if FTerrainView <> nil then
+    FTerrainView.Imagery := nil;
+  FreeAndNil(FImagery);
+end;
+
+procedure TfrmMain.ApplyTerrainRealistic;
+begin
+  if FTerrainView = nil then
+    Exit;
+  // The service is made only once imagery is first wanted
+  if FViewOptions.TerrainRealistic then
+    FTerrainView.Imagery := ImageryService;
+  FTerrainView.Realistic := FViewOptions.TerrainRealistic;
 end;
 
 procedure TfrmMain.FocusTerrainView;
@@ -2594,6 +2685,9 @@ begin
       RefreshStorageStatus;
       if not SameFileName(ADataFolder, FSettings.DataFolder) then
         ChangeDataFolder(ADataFolder);
+      // The imagery's layer, cache size or folder may have changed
+      CloseImagery;
+      ApplyTerrainRealistic;
       if Assigned(AOnSaved) then
         AOnSaved();
     end);
@@ -2897,6 +2991,9 @@ procedure TfrmMain.OpenStore(APromptIfMissing: Boolean);
 begin
   FreeAndNil(FStore);
   FStore := TGDEMStore.Create(FSettings.DataFolder);
+  // The imagery cache lives in the data folder
+  CloseImagery;
+  ApplyTerrainRealistic;
   FStore.OnLog := AddLog;
   FStoreOpen := False;
   FStoreWasAvailable := FStore.IsAvailable;
@@ -3378,6 +3475,9 @@ begin
   begin
     FreeAndNil(FStore);
     FStore := TGDEMStore.Create(FSettings.DataFolder);
+    // The imagery cache lives in the data folder
+    CloseImagery;
+    ApplyTerrainRealistic;
     FStore.OnLog := AddLog;
     FStoreOpen := False;
     FDownloaded.Clear;

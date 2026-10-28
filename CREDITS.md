@@ -19,7 +19,7 @@ TileMaker is given to anyone else.
 | **Natural Earth** 5.2.0-pre (commit `ca96624`) | Borders, coastlines, countries, towns and cities, mountains | Converted into `maps/world_vectors.bin` by `tools/build_vectors.py`; linked into GDEMFetch | Public domain | Nothing; credit given anyway |
 | **World map image** `8081_earthmap10k` (Planet Pixel Emporium, James Hastings-Trew) | The high-resolution map | The source image is kept out of the repository; the tile set made from it is in `maps/tiles/` and `maps/tiles.zip`, and is linked into GDEMFetch | Free to use as a resource in rendering; not to be redistributed as is, nor included in a distributed program without permission | **To be settled:** see note 1 |
 | **World map image** `maps/world_1080x540.jpg` | The map drawn under the tile set, and while it loads | Linked into GDEMFetch | **Not recorded** | **To be settled:** see note 1 |
-| **Sentinel-2 cloudless** (EOX IT Services GmbH; contains modified Copernicus Sentinel data) | Planned: the 3D view's Realistic imagery | Will be downloaded by each user and cached; not in the repository | CC BY-NC-SA 4.0 for the recent years (2016's is CC BY 4.0) | Non-commercial use of the imagery only; EOX's credit shown legibly wherever the imagery is shown (note 5) |
+| **Sentinel-2 cloudless** (EOX IT Services GmbH; contains modified Copernicus Sentinel data) | The 3D view's Realistic imagery | Downloaded by each user from EOX's tile service and cached in the data folder; not in the repository | `s2cloudless` (2016) and `s2cloudless-2017`: CC BY 4.0; 2018 to 2025 (`s2cloudless-2025` is the default): CC BY-NC-SA 4.0 | The credit shown on the map whenever the imagery is (GDEMFetch does); non-commercial use of the imagery for 2018 onwards (note 5) |
 | **Delphi Neon** (Paolo Rossi) | Reading and writing JSON | `delphi-neon/` (submodule) | MIT, Copyright (c) 2015 Paolo Rossi | Keep its copyright and licence notice |
 | **FastMM5** (Pierre le Riche) | The memory manager and leak reports on Windows | `FastMM5/` (submodule); linked into Windows builds | Dual: GPL v3 at no cost, or a commercial licence | **A commercial licence is to be bought:** see note 2 |
 | **Gorilla3D** 1.5.3 | The 3D tab | Installed in Delphi; not in the repository; its runtime is compiled into GDEMFetch | Commercial (held) | A licence for each developer who builds GDEMFetch; see its terms for shipping the runtime |
@@ -72,16 +72,17 @@ Made with Natural Earth. Free vector and raster map data at
    style from RAD Studio's own folder before each build, so the copies
    in `styles/` could be dropped from the repository if that is a concern.
 
-5. **Sentinel-2 cloudless.** EOX's licence
-   (<https://cloudless.eox.at/documentation/license>) asks for its credit,
-   which names EOX IT Services GmbH and says the imagery contains modified
-   Copernicus Sentinel data of the year shown, to be legible wherever the
-   imagery is shown; for an interactive map, in the map itself. The exact
-   wording will be taken from that page when the imagery is added, and the
-   3D view will draw it in a corner whenever Realistic is on. The
-   non-commercial and share-alike terms apply to the imagery, not to
-   GDEM's code: anyone using GDEM commercially would choose the 2016
-   imagery (CC BY 4.0) or NASA's instead.
+5. **Sentinel-2 cloudless.** EOX's tile service says proper attribution
+   is required for any use, following its demo map, and each layer's own
+   licence is in its description: 2016 and 2017 are CC BY 4.0, 2018 to
+   2025 are CC BY-NC-SA 4.0, and for commercial use EOX points to
+   <https://cloudless.eox.at>. GDEMFetch draws the credit along the bottom
+   of the 3D view whenever Realistic is on, naming EOX, the Copernicus
+   Sentinel data and its year, and the layer's licence. Anyone using
+   GDEMFetch commercially should set `imageryLayer` in `settings.json` to
+   `s2cloudless-2017` or `s2cloudless`. The non-commercial and share-alike
+   terms apply to the imagery, not to GDEM's code; the cache is kept on the
+   user's own computer and not shared.
 
 These notes summarise each licence as it was read on 28 October 2026;
 they are not legal advice, and each licence's own text is what counts.
