@@ -6,9 +6,9 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 27 October 2026, late evening, after the owner's push of
-the 3D work (`d25e46b` "Mountains, Pan, Less crap UI", checked identical
-to the delivered files), with the memory and GPU unit since.
+Last updated: 28 October 2026, early morning, before the owner's push
+of the memory and GPU unit (on top of `d25e46b` "Mountains, Pan, Less
+crap UI", which was checked identical to the delivered files).
 
 ## State at the end of 27 October 2026
 
@@ -42,6 +42,10 @@ below):
 8. Five compiler hints fixed (`System.RTLConsts` in `GDEMTerrainView`;
    `IsClear` in `TWorldMapView.PaintPlaces`).
 
+Then, after that push: `common/GDEMSystemInfo.pas`, the memory and GPU
+figures in the log (see "Memory and graphics processors" below), working
+on Windows.
+
 Items 5 to 8 compiled (the owner's build reported only the hints of item
 8), but have not been reported on in use. macOS and Linux have not run
 any of items 2 to 8. Sections below that say "Not yet built" were written
@@ -51,7 +55,26 @@ before the owner's builds. No known bugs.
 
 Asked for by the owner as metrics for showing several tiles in 3D, and
 put in `common/` as it has many uses: `common/GDEMSystemInfo.pas` (no
-FMX; in GDEMFetch's `.dpr` and `.dproj`). Not yet built.
+FMX; in GDEMFetch's `.dpr` and `.dproj`). **Works on Windows** ("That
+worked well"); the owner's start-up lines, laptop with RTX 5090 Mobile
+and Core Ultra 9 275HX, GPU drawing, High performance:
+
+```
+Memory: 63.4 GB, 43.7 GB available
+This program: 251 MB in memory (peak 251 MB), 10 MB allocated
+GPU 1: NVIDIA GeForce RTX 5090 Laptop GPU, 23.6 GB own memory, 47.4 GB shared; this program may use 22.8 GB, this program uses 58 MB
+GPU 2: Intel(R) Graphics, 128 MB own memory, 47.4 GB shared; this program may use 46.7 GB, this program uses 0 MB
+```
+
+Both adapters found, the software renderer left out, DXGI 1.4 budgets
+read. FastMM5's 10 MB allocated against 251 MB in RAM: most of the
+working set is code, the Skia and Vulkan drivers and the decoded map
+tiles held by Skia outside the Delphi heap. Not yet reported: the
+`3D: memory after showing ...` line, and macOS and Linux.
+
+The owner's plan: later, use these figures to choose the CPU or GPU
+drawing default (and perhaps the View layers and 3D detail) on a first
+run, instead of the fixed defaults.
 
 - `ReadMemoryInfo` (`TMemoryInfo`: Total, Available):
   `GlobalMemoryStatusEx`; macOS `sysctl hw.memsize` and
@@ -84,10 +107,9 @@ FMX; in GDEMFetch's `.dpr` and `.dproj`). Not yet built.
   `MEMORY_MEASURE_DELAY` (1 s) after each 3D build
   (`TThread.ForceQueue` with a delay), as `3D: memory after showing
   <tile>: ...`, so the pieces have been drawn and sent to the GPU.
-- To check: the start-up lines on all three systems (both of the
-  laptop's GPUs on Windows, Apple silicon and Intel Macs); the 3D line at
-  each detail, which gives the memory cost per tile for planning several
-  tiles.
+- To check: the start-up lines on macOS (Apple silicon and Intel) and
+  Linux; the 3D line at each detail, which gives the memory cost per
+  tile for planning several tiles.
 
 ### The map jumping while dragging (fixed 27 October 2026)
 
@@ -415,6 +437,9 @@ GitHub (see the top of this file).
    tab" and later sections below). To check: macOS and Linux; FastMM5's
    leak report after switching tiles (a `TMeshDef` leak would mean the
    singleton mesh does not own its definition); the new controls in use.
+   The memory and GPU figures (`GDEMSystemInfo`) are there to plan
+   several tiles from: the `3D: memory after showing` line at each
+   detail gives the cost of one.
    Ideas raised: build the pieces on a worker thread so Full does not
    freeze the window for 2.5 s; several tiles stitched together; the
    high-resolution map laid over the surface; a checked list of the peaks

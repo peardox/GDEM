@@ -623,11 +623,15 @@ At start-up the Debug tab lists the computer's memory, the program's own
 use of it, and each graphics processor with its memory, for example:
 
 ```
-Memory: 63.6 GB, 41.2 GB available
-This program: 212 MB in memory (peak 230 MB), 96 MB allocated
-GPU 1: NVIDIA GeForce RTX 5090 Laptop GPU, 23.6 GB own memory, 31.8 GB shared; this program may use 22.9 GB, this program uses 120 MB
-GPU 2: Intel(R) Graphics, 128 MB own memory, 31.8 GB shared; ...
+Memory: 63.4 GB, 43.7 GB available
+This program: 251 MB in memory (peak 251 MB), 10 MB allocated
+GPU 1: NVIDIA GeForce RTX 5090 Laptop GPU, 23.6 GB own memory, 47.4 GB shared; this program may use 22.8 GB, this program uses 58 MB
+GPU 2: Intel(R) Graphics, 128 MB own memory, 47.4 GB shared; this program may use 46.7 GB, this program uses 0 MB
 ```
+
+(A Windows laptop with two graphics processors. "Allocated" is only
+what the program's own code holds; the rest of its memory is code,
+drivers and images held by Skia and the graphics drivers.)
 
 A second after the 3D view shows a tile, a `3D: memory after showing
 ...` line gives what is in use then, so the cost of a detail setting (or,
@@ -1076,6 +1080,9 @@ the left and latitude 90 at the top.
 
 ## Roadmap
 
+- **Defaults from the hardware:** use the memory and GPU figures to
+  choose CPU or GPU drawing (and perhaps the View layers and 3D detail)
+  on a first run.
 - **3D view:** several tiles stitched together, the high-resolution map
   laid over the surface, finer detail near the camera, and the surface
   built in the background so Full detail does not hold up the window.
