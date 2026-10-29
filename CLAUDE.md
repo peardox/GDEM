@@ -6,25 +6,37 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 29 October 2026, 09:10, after restoring the fix for a first
-flight with no data folder, which a later delivery had undone.
+Last updated: 29 October 2026, 09:25, after the owner pushed the startup
+fix and it was checked against GitHub, as the owner was about to start a
+new conversation.
 
-## Where to pick up (29 October 2026, 09:10)
+## Where to pick up (29 October 2026, 09:25)
 
-**GitHub.** Clone `main`. Its latest push, `9f57e52` "Vulkan leak fixed"
-(on top of `d583285` "Flight Path"), holds all the program's code
-delivered up to the end of 29 October; `flighttest` is behind it at
-`3f947dc`. Waiting to be pushed (`gdem-nodata.zip`): `MainForm.pas`
-(the first-flight fix restored, section "First flight with no data
-folder, again"), README.md (its paragraph restored) and this file
-(which also records the push, the checks below and the Grand Canyon
-flight path).
+**GitHub.** Clone `main`. Its latest push is `5843329` "Startup fix", on
+top of `f0084bf` "GrandCanyon test" and `9f57e52` "Vulkan leak fixed";
+`flighttest` is behind at `3f947dc`. Checked at 09:25: `MainForm.pas`,
+README.md and CLAUDE.md from `gdem-nodata.zip` are identical on GitHub.
+The owner's two pushes also hold changes of the owner's own:
 
-**Also delivered, not in the repository:** `GrandCanyon.flt`, a flight
-path down the Colorado River through the Grand Canyon at Mach 1 (section
-"Grand Canyon flight path"). The owner has not yet said how it flies.
+- `maps/GrandCanyon.flt` (100 m/s) and `maps/Mach1GrandCanyon.flt` (Mach
+  1), the flight paths of section "Grand Canyon flight path". The Mach 1
+  file is identical to the one delivered. The 100 m/s file was the first
+  version, with one time wrongly rounded (a second early, going
+  backwards); it was rebuilt with the fix (one line changes).
+- `maps/tiles/` (the 1,530 map tile images and `tileset.json`) taken out
+  of the repository and added to `maps/.gitignore`, like
+  `8081_earthmap10k.jpg`: they stay in the owner's working copy only.
+  `maps/tiles.zip`, built from them and linked in as the `MAPTILES`
+  resource, is still in the repository, byte for byte as before
+  (`f0084bf` removed it and `5843329` put it back). So `tools/pack_tiles.py`
+  can no longer be run from a clone, and "rebuilds byte for byte from
+  `maps/tiles`" can only be checked on the owner's machine.
 
-**Checked at 06:25 against `9f57e52`:** every file delivered on 29
+**Waiting to be pushed** (`gdem-handover.zip`): `maps/GrandCanyon.flt`
+(rebuilt as above), README.md (`maps/` and the built-in tile set described
+as they now are, the two `.flt` files listed) and this file.
+
+**Checked at 06:25 against `9f57e52`** (the day's code, before the startup fix): every file delivered on 29
 October is identical on GitHub (README.md, CLAUDE.md;
 `GDEMFetch/GDEMFetch.dpr`, `.dproj`; lib `GDEMFlight`, `GDEMFlightPath`,
 `GDEMReport`; ui `FlightPathForm`, `GDEMTerrainView`, `MainForm` .pas and
@@ -58,7 +70,8 @@ reported, but none was confirmed item by item.
     preparing for flight: opening the data folder ...`, the rescan of the
     new folder, then `3D: preparing for flight at ...: N tile(s) to
     download` with N > 0, and the dialog downloading them.
-0. `GrandCanyon.flt` with File > Load Flight Path...: that it stays in
+0. `maps/Mach1GrandCanyon.flt` (and `GrandCanyon.flt`, 100 m/s) with
+   File > Load Flight Path...: that it stays in
    the canyon; with Hug ground on, how close it comes to the walls, and
    how far it rises over steep ledges at Mach 1; the view's swing in the
    tightest bends.
@@ -2392,7 +2405,10 @@ between heading changes but not too close to the cliffs; then at Mach 1.
 Delivered as `GrandCanyon.flt` (one flight, "Grand Canyon: Lees Ferry to
 the Grand Wash Cliffs"): 3,910 points, 435.8 km, 21.3 minutes at 340.3
 m/s (`MACH_1_SPEED`), times from 2026-10-29T07:00:00.000Z, end reason
-Flight Ended. Not in the repository (the owner did not ask for it there).
+Flight Ended. The owner put it in the repository as
+`maps/Mach1GrandCanyon.flt`, with the first, 100 m/s version as
+`maps/GrandCanyon.flt` (3,922 points, 437.4 km, 72.9 minutes; rebuilt on
+29 October at 09:20 with the time fix).
 
 How it was made (Python in the session's scratch folder, lost with it;
 rewrite from this if needed):

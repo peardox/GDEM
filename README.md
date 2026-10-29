@@ -887,8 +887,9 @@ four levels.
   start-up and kept, so there is always something to draw. Up to 400
   other tiles (about 80 MB) are kept in memory, the least recently used
   going first.
-- **Built in:** the repository's tile set, `maps/tiles`, is packed into
-  one file, `maps/tiles.zip`, by `tools/pack_tiles.py`, and linked into
+- **Built in:** the tile set, `maps/tiles` (made locally with TileMaker
+  and not in the repository), is packed into one file, `maps/tiles.zip`,
+  which is in the repository, by `tools/pack_tiles.py`, and linked into
   the program as the `MAPTILES` resource (8.6 MB), so nothing is deployed
   on any platform. The tiles are stored in the zip as they are, not
   compressed again, since they are JPEGs already. After changing
@@ -1408,7 +1409,7 @@ and run it with tile files as arguments.
 | `TileMaker/` | The TileMaker application, laid out the same way (see [TileMaker units](#tilemaker-units)) |
 | `common/` | Units shared by the programs: no FMX, and nothing from any program's folders (see [Common units](#common-units)) |
 | `styles/` | FMX styles for the themes, with the resource script and the pre-build script that builds them; see [Themes](#themes) |
-| `maps/` | World map images and vectors. `world_1080x540.jpg` and `world_vectors.bin` (borders, coastlines, countries, and towns and cities) are linked into GDEMFetch as resources. `8081_earthmap10k.jpg` (10800 x 5400) is kept here locally but is excluded by `maps/.gitignore`, so it is not in the repository; `maps/tiles/` is the tile set TileMaker made from it (225-pixel JPEG tiles, four levels, 1530 tiles, 8.4 MB), which is, and `maps/tiles.zip` the same packed into one file by `tools/pack_tiles.py`, linked into GDEMFetch as a resource. |
+| `maps/` | World map images and vectors. `world_1080x540.jpg` and `world_vectors.bin` (borders, coastlines, countries, and towns and cities) are linked into GDEMFetch as resources. `8081_earthmap10k.jpg` (10800 x 5400) and `maps/tiles/`, the tile set TileMaker makes from it (225-pixel JPEG tiles, four levels, 1530 tiles, 8.4 MB), are kept here locally but excluded by `maps/.gitignore`, so they are not in the repository; `maps/tiles.zip` is that tile set packed into one file by `tools/pack_tiles.py`, which is, linked into GDEMFetch as a resource. `GrandCanyon.flt` and `Mach1GrandCanyon.flt` are flight paths down the Colorado River through the Grand Canyon, from Lees Ferry to the Grand Wash Cliffs, at 100 m/s and at Mach 1, for File > Load Flight Path... |
 | `delphi-neon/` | Neon JSON library (git submodule) |
 | `FastMM5/` | FastMM5 memory manager, used on Windows (git submodule); see [Memory leaks](#memory-leaks) |
 | `tools/pasdoc_check.py` | Checks the units of `GDEMFetch/`, `TileMaker/` and `common/` follow the PasDoc and layout rules; see [Notes for Claude](#notes-for-claude) |
