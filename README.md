@@ -163,6 +163,7 @@ otherwise use showed only the first letter of each menu and item.
 | File | Settings... | Bearer token, data folder, how much of the drive to keep free, files copied at once when importing, download speed, theme, drawing (GPU or CPU), and on Windows which graphics processor to use |
 | File | Refresh Tile Index | Rebuilds the list of tiles that exist, from CMR |
 | File | Save Flight Path... / Save All Flight Paths... | Saves the current flight's path, or every flight's since GDEMFetch started, as a `.flt` file; see [Flight paths](#flight-paths) |
+| File | Load Flight Path... | Opens a `.flt` file and replays a path from it in the 3D view: the only one, or the one chosen from a list when it holds several; see [Replaying a flight path](#replaying-a-flight-path) |
 | Data | Import Existing Tiles... | Copies tiles you already have, from any folder, into the data folder. The originals are not changed. |
 | Data | Move Existing Files... | The same, but deletes each original once it is safely in the data folder; see [Moving instead of copying](#moving-instead-of-copying) |
 | Data | Rescan Data Folder | Rebuilds the downloaded-tiles bitmap from the files, files any misplaced downloads into place, and removes leftovers and empty folders |
@@ -264,11 +265,11 @@ long batch does not end it.
 **Report file.** Each batch writes everything (every request, redirect
 and saved file, with times) to a report file, so the Debug tab stays
 short: it shows the report's path, the lookup, the start, any failures or
-cut-backs, and the summary. Reports are kept in a `Reports` folder beside
-the settings file, named by when the batch started (such as
-`download-20261026-231500.log`), and only the newest 50 are kept. The file
-is written as the batch goes, so it is complete up to the moment even if
-the program stops.
+cut-backs, and the summary. Reports are kept in `Reports/download`
+beside the settings file, named by when the batch started and numbered
+(such as `download-20261026-231500-01.log`). The file is written as the
+batch goes, so it is complete up to the moment even if the program stops.
+See [Report files](#report-files) for how they are rotated and archived.
 
 **Staying awake.** While any job runs, GDEMFetch asks the system not to
 sleep: `SetThreadExecutionState` on Windows, an `NSProcessInfo` activity on
@@ -296,6 +297,35 @@ Whenever data is downloaded (tiles, or the tile index from NASA CMR) a
 progress dialog shows the step in progress, overall progress, and progress
 through the current file, with a Cancel button. The dialog stays until the
 download has actually stopped.
+
+#### Report files
+
+Every log GDEMFetch writes to a file (download reports and flight logs)
+goes in a folder of its own kind inside `Reports`, beside the settings
+file: `Reports/download` and `Reports/flight`.
+
+- **Rotation.** A report is named by its kind, the time it started and a
+  number from 01: `download-20261029-053000-01.log`. When a file reaches
+  10 MB it is closed and the report carries on in the next number
+  (`-02`, `-03`...); the last line of one file and the first of the next
+  name each other, so a whole-world download report runs to several
+  files. Two reports of one kind started in the same second take
+  different numbers rather than one writing over the other.
+- **Archiving.** The newest 50 files of each kind are kept as they are.
+  Older ones are put into a zip archive for the month they were started
+  in, `Reports/download/archive/download-2026-10.zip`, and each file is
+  deleted only once the archive is found to hold all of it. An archive
+  is rewritten as a temporary file and then put in place, so one cut off
+  part way is never left damaged. Archives are kept for 12 months before
+  the current one; older archives are deleted, and so are older files
+  never archived.
+- **When.** Tidying runs in the background each time a report starts or
+  moves to its next file, so nothing waits for it; closing GDEMFetch
+  waits only for the archive being written, if any.
+- **Earlier versions.** Reports left loose in `Reports` by earlier
+  versions are moved into their kind's folder the first time, then
+  archived like the rest. The Debug tab says when it moves them, when it
+  archives more than one at once, and anything that goes wrong.
 
 ### Borders and coastlines
 
@@ -585,6 +615,43 @@ Flight. The file is JSON:
 Paths are kept in memory while GDEMFetch runs (a few dozen bytes a
 point) and are lost when it closes unless saved.
 
+#### Replaying a flight path
+
+**File > Load Flight Path...** opens a `.flt` file. If it holds one path,
+that path plays at once; if it holds several, a list shows each one's
+name, length, when it was flown and how it ended, with where it starts
+and how long its replay takes for the one chosen; Play (or a double
+click) plays it. Paths that go nowhere (fewer than two places a metre or
+more apart) are left out, with a warning in the Debug tab.
+
+Playing works like any launch: Preparing for flight gets the ground
+round the path's start ready, then the flight starts there, hovering at
+the start height above the ground, facing the path's first heading, and
+follows the path corner to corner along great circles. Each leg takes
+the time it took when flown, so it goes at that leg's average speed,
+except that a leg slower than 10 m/s on average (one with a hover or a
+pause in it) is flown at 10 m/s, so the replay never sits still. Where
+the path turned while hovering (a corner of more than 5 degrees), the
+replay hovers and turns there at the flight's own 45 degrees a second.
+Heights are not in the file, so the replay keeps 50 m clear of the
+ground ahead as the autopilot does, whether the autopilot is on or not;
+with Hug ground ticked it hugs the ground instead. The speed panel says
+`Replay` (or `Replay climb`). At the end of the path the flight hovers
+and a banner says so (and, if the path ended in a crash, that this is
+where).
+
+While it plays: Space pauses it; Page Up and Page Down, the wheel, Q and
+A, and dragging up and down change the height and tilt as usual; dragging
+across does not turn it. Up, Down, Left, Right, M or H take over from it:
+the replay stops and you fly on from where it was. R, a double click,
+a bookmark, a search launch or Show in 3D end it. Changing Detail,
+Distance, Heights or Realistic carries on with the replay.
+
+The replay is itself a flight, recorded as a new path named
+`Replay: <name>`, so it is drawn on the map and can be saved like any
+other. The flight log (in `Reports/flight`) has a line when a replay
+starts, ends or is taken over.
+
 **Realistic**, on the 3D toolbar, draws the ground with satellite imagery
 instead of height colours: EOX's
 [Sentinel-2 cloudless](https://s2maps.eu) mosaic, a cloud-free picture of
@@ -678,9 +745,9 @@ are filled from the heights around them. Detail, Distance and Heights are
 remembered in `view.json`.
 
 **The flight log.** The 3D view's working detail goes to a flight log,
-not the Debug tab: `flight-yyyymmdd-hhnnss.log` in the same `Reports`
-folder as the download reports, one per run of GDEMFetch, made at its
-first line (the Debug tab says where; the newest 50 are kept). It holds
+not the Debug tab: `flight-yyyymmdd-hhnnss-01.log` in `Reports/flight`,
+one per run of GDEMFetch, made at its first line (the Debug tab says
+where; rotated and archived as in [Report files](#report-files)). It holds
 the `3D: settled` and `3D: memory with` lines, the imagery service's
 lines, the downloads of tiles ahead of the flight (with their own
 download reports), the display's refresh rate and the like. The Debug
@@ -951,6 +1018,22 @@ leaked block and what it holds to `GDEMFetch_MemoryManager_EventLog.txt`
 start-up, so it only ever holds the last run's leaks; no file means
 nothing leaked. On other platforms the system's memory manager is used.
 
+One leak is expected and not reported: Gorilla3D 1.5.3 makes a lock in
+its unit `Gorilla.Context.Vulkan` when the program starts and keeps it at
+shut-down on purpose, since units finalized after it may still need it.
+Its variable is not visible outside that unit, so the `.dpr` registers
+one plain `TObject` with FastMM5 as an expected leak; a report of a plain
+`System.TObject` therefore means one more has leaked.
+
+To find where a leaked block was made, run once with FastMM5's debug
+mode: add `FastMM_FullDebugModeWhenDLLAvailable` to the project's
+conditional defines, set Linking > Map file to Detailed, copy
+`FastMM5/FullDebugMode DLL/Precompiled/FastMM_FullDebugMode64.dll` beside
+the executable, and Build. Each leak in the event log then has the call
+stack, with unit names and line numbers, of where it was allocated. It
+starts in FastMM5's own initialization, so it also catches blocks made by
+other units' initialization. It is slow; take the define out afterwards.
+
 ### Memory and graphics in the log
 
 At start-up the Debug tab lists the computer's memory, the program's own
@@ -1042,7 +1125,7 @@ Removable drives are normally mounted under `/media/<user>/` or
 |------|-------|
 | Settings (`settings.json`, holds the bearer token) | Windows: `%APPDATA%\GDEM`<br>macOS: `~/Library/Application Support/GDEM`<br>Linux: `$XDG_CONFIG_HOME/GDEM` or `~/.config/GDEM`<br>Android and iOS: `GDEM` in the app's documents folder |
 | Tile index (`tileindex.bin`) | Same folder as the settings |
-| Download reports (`Reports/download-*.log`) and flight logs (`Reports/flight-*.log`) | Same folder as the settings |
+| Download reports (`Reports/download/*.log`) and flight logs (`Reports/flight/*.log`), with their monthly archives (`Reports/<kind>/archive/*.zip`) | Same folder as the settings; see [Report files](#report-files) |
 | Markers (`markers.json`) | Same folder as the settings |
 | What the View menu shows, the 3D tab's Detail, Distance, Heights and Realistic, whether its Controls panel is collapsed, and its Labels (`view.json`) | Same folder as the settings, kept apart from `settings.json` so that saving it never makes a first run look set up |
 | Bookmarks of 3D views (`bookmarks.json`) | Same folder as the settings |
@@ -1356,7 +1439,7 @@ it:
 | `GDEMCMR` | Neon models for CMR search results; no networking |
 | `GDEMDownloader` | Finds and downloads tiles: CMR lookups, single downloads, `TDownloadThrottle` |
 | `GDEMDownloadBatch` | `TDownloadBatch`, a whole batch of downloads: lookup, parallel workers, retries and summary, reporting through events |
-| `GDEMReport` | `TDownloadReport`, the report file for each batch of downloads; `HideURLQueries` |
+| `GDEMReport` | `TDownloadReport`, a report file (each batch of downloads, the flight log) in its kind's folder, rotated at 10 MB, old files archived by month in the background; `HideURLQueries` |
 | `GDEMStore` | The data folder: block layout, downloaded-tiles bitmap, importing, rescanning, moving, deleting, free space; `FormatByteSize` and `FormatDuration` |
 | `GDEMVectors` | `TWorldVectors`: country borders, coastlines and country names, country extents for zooming, and towns and cities (`TGeoPlace`) |
 | `GDEMSearch` | `TPlaceSearch`: finds countries, towns and cities and markers by name, forgiving spelling mistakes |
@@ -1373,7 +1456,8 @@ it:
 | `GDEMTerrainLod` | `TTerrainLod`: the trees of patches for the tiles round the camera, which patches to show from where it is, and making them on worker threads |
 | `GDEMImagery` | `TImageryService`: the 3D view's satellite imagery, EOX's tiles fetched on worker threads, kept in a disk cache with a size limit (least recently used deleted first), and made into a 256 x 256 texture for each patch; `ImageryCredit`, `ImageryLicence`, `ImageryPatchTexCoords` |
 | `GDEMBookmarks` | `TBookmarkList`: the user's bookmarks of 3D views and their folders, kept in `bookmarks.json` with Neon |
-| `GDEMFlight` | `TFlight`: the 3D view's flight (latitude, longitude, true altitude, heading, speed, camera tilt), moved along a great circle by the controls held, and the crash test |
+| `GDEMFlight` | `TFlight`: the 3D view's flight (latitude, longitude, true altitude, heading, speed, camera tilt), moved along a great circle by the controls held, and the crash test; `Following` and `Follow` for a replay |
+| `GDEMFlightPath` | `TFlightPath`: the path of each flight, recorded as corners; saving and loading `.flt` files with Neon; `TFlightReplay`, a saved path as a replay (where the flight is at any time from its start) |
 
 **ui/**
 
@@ -1384,6 +1468,7 @@ it:
 | `ProgressForm` | Modal progress dialog shown while data is downloaded or imported |
 | `MarkersForm` | Modal dialog listing the markers, to go to, rename or delete them |
 | `BookmarkForm` | Modal dialog, built in code, asking for a bookmark's name and its folder from a tree under the Bookmarks menu, with New Folder |
+| `FlightPathForm` | Modal dialog, built in code, listing the flight paths in a `.flt` file to choose the one to play |
 | `GDEMWorldMap` | `TWorldMapView`, the zoomable map with tile selection, borders and coastlines, the high-resolution map's tiles (`MapTiles`), town and city names, markers, and `ZoomToArea` and `CentreOn` for the search |
 | `GDEMTerrainHud` | The instruments over the 3D view: `TTerrainAltimeter` (height above ground, altitude, the ground's height), `TTerrainSpeedPanel`, `TTerrainFrameRate`, `TTerrainCompass`, `TTerrainBanner` (a crash, or Paused), `TTerrainCredit` and the collapsible `TTerrainControls` (the keys); painted controls that let the mouse through, except the controls panel's title |
 | `GDEMDisplays` | Which display a form is on and its refresh rate (from Sprite3D's `DisplayData`), so the 3D view draws no faster than the display shows |
@@ -1614,6 +1699,9 @@ got to, what has been tested and what was learned along the way.
 - Work on the data folder runs as a job through `TfrmMain.RunJob`, one at
   a time, cancellable with a `TCancelToken`. `RunJob` also keeps the
   computer awake (`TKeepAwake`) for as long as the job runs.
+- A new kind of log file is a `TDownloadReport` with its own kind
+  (letters, digits, hyphens, underscores), which gives it its own folder
+  in `Reports`, rotation and archiving; never write log files by hand.
 - A batch that produces a line per file (downloads) writes that detail to
   a `TDownloadReport`, and sends only the start, problems and summary to
   the Debug tab, which would otherwise grow too large to use.

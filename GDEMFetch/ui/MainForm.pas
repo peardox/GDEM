@@ -161,6 +161,9 @@ type
     { File > Save All Flight Paths: saves every flight's path since the
       program started. }
     mnuSaveAllFlightPaths: TMenuItem;
+    { File > Load Flight Path: opens a saved @code(.flt) file and plays a
+      path from it in the 3D view. }
+    mnuLoadFlightPath: TMenuItem;
     { Separator above @link(mnuExit). Hidden on macOS. }
     mnuFileSep: TMenuItem;
     { File > Exit. Hidden on macOS, where Quit is in the application menu. }
@@ -460,6 +463,11 @@ type
       @code(.flt) file.
       @param(Sender The menu item.) }
     procedure mnuSaveAllFlightPathsClick(Sender: TObject);
+
+    { Opens a @code(.flt) file and plays a path from it: the only one, or
+      the one chosen in a dialog when it holds several.
+      @param(Sender The menu item.) }
+    procedure mnuLoadFlightPathClick(Sender: TObject);
 
     { Asks for a name and adds a marker in the middle of the map.
       @param(Sender The menu item.) }
@@ -853,6 +861,14 @@ type
       @param(AFlights The paths.)
       @param(AWhat What is saved, for the log, such as @code(1 flight path).) }
     procedure SaveFlightPathsAs(const AFlights: TArray<TFlightPathRecord>; const AWhat: string);
+
+    { Plays a saved flight path in the 3D view: gets the ground round its
+      start ready, as a launch does, puts the flight there at the start
+      height above the ground facing its first heading, and once ready
+      has the view replay it. Its flight is recorded as a new flight path,
+      named @code(Replay: <name>).
+      @param(AFlight The path.) }
+    procedure PlayFlightPath(const AFlight: TFlightPathRecord);
 
     { The distance detail chosen on the 3D tab.
       @returns(Tenths, from @code(TERRAIN_RANGES).) }
@@ -1482,7 +1498,7 @@ uses
   {$ENDIF}
   GDEMTiles, GDEMDownloadBatch, GDEMDrawing, GDEMMapTiles, GDEMTileSet, GDEMGpuPreference,
   GDEMTerrain, GDEMSystemInfo, GDEMTerrainHud, SettingsForm, MarkersForm, BookmarkForm,
-  System.DateUtils, System.Generics.Defaults, GDEMFlight;
+  System.DateUtils, System.Generics.Defaults, GDEMFlight, FlightPathForm;
 
 const
   { Ticks of the status timer (a second each) between looks for tiles
@@ -1582,6 +1598,14 @@ begin
   UseFmxMenuBar;
   {$ENDIF}
 
+  // Lines about tidying the Reports folder (moving and archiving old
+  // reports, and problems) go to the Debug tab; AddLog is safe from any
+  // thread
+  TDownloadReport.SetHousekeepingLog(
+    procedure(const AText: string)
+    begin
+      AddLog(AText);
+    end);
 
   FMap := TWorldMapView.Create(Self);
   FMap.Parent := layMap;
@@ -1674,6 +1698,9 @@ end;
 procedure TfrmMain.FormDestroy(Sender: TObject);
 begin
   tmrStorage.Enabled := False;
+  // Tidying the reports stops after the archive it is writing, and tells
+  // this window nothing more
+  TDownloadReport.StopHousekeeping;
   // Taken from the 3D view before it goes, and its workers waited for
   CloseImagery;
   if FTerrainView <> nil then
@@ -4138,6 +4165,139 @@ begin
   for LPath in FFlights do
     LRecords := LRecords + [LPath.ToRecord];
   SaveFlightPathsAs(LRecords, Format('%d flight path(s)', [Length(LRecords)]));
+end;
+
+procedure TfrmMain.mnuLoadFlightPathClick(Sender: TObject);
+var
+  LDialog: TOpenDialog;
+  LFolder, LFileName: string;
+  LFlights, LPlayable: TArray<TFlightPathRecord>;
+  LFlight: TFlightPathRecord;
+  LReplay: TFlightReplay;
+  LSkipped: Integer;
+begin
+  LDialog := TOpenDialog.Create(nil);
+  try
+    LFolder := System.IOUtils.TPath.Combine(TGDEMSettings.SettingsFolder, 'Flights');
+    if System.IOUtils.TDirectory.Exists(LFolder) then
+      LDialog.InitialDir := LFolder;
+    LDialog.Filter := 'Flight paths (*' + FLIGHT_PATH_EXTENSION + ')|*' + FLIGHT_PATH_EXTENSION +
+      '|All files (*.*)|*.*';
+    LDialog.Options := LDialog.Options + [TOpenOption.ofFileMustExist];
+    if not LDialog.Execute then
+      Exit;
+    LFileName := LDialog.FileName;
+  finally
+    LDialog.Free;
+  end;
+  try
+    LFlights := LoadFlightPaths(LFileName);
+  except
+    on E: Exception do
+    begin
+      ReportError(E.Message);
+      Exit;
+    end;
+  end;
+  // Only paths with somewhere to go are offered
+  LPlayable := nil;
+  LSkipped := 0;
+  for LFlight in LFlights do
+  begin
+    LReplay := TFlightReplay.Create(LFlight);
+    try
+      if LReplay.Duration > 0 then
+        LPlayable := LPlayable + [LFlight]
+      else
+        Inc(LSkipped);
+    finally
+      LReplay.Free;
+    end;
+  end;
+  AddLog(Format('Loaded %d flight path(s) from %s', [Length(LFlights), LFileName]));
+  if LSkipped > 0 then
+    AddLog(Format('WARNING: %d flight path(s) in %s go nowhere (no two places at least %d m ' +
+      'apart), so they are left out', [LSkipped, ExtractFileName(LFileName), REPLAY_MIN_LEG]));
+  if Length(LPlayable) = 0 then
+  begin
+    ShowMessage(Format('%s holds no flight path that goes anywhere, so there is nothing to ' +
+      'play.', [ExtractFileName(LFileName)]));
+    Exit;
+  end;
+  if Length(LPlayable) = 1 then
+  begin
+    PlayFlightPath(LPlayable[0]);
+    Exit;
+  end;
+  TfrmFlightPath.Choose(LFileName, LPlayable,
+    procedure(AIndex: Integer)
+    var
+      LChosen: TFlightPathRecord;
+    begin
+      if (AIndex < 0) or (AIndex > High(LPlayable)) then
+        Exit;
+      LChosen := LPlayable[AIndex];
+      // Once the dialog has gone, since getting ready opens another
+      TThread.ForceQueue(nil,
+        procedure
+        begin
+          PlayFlightPath(LChosen);
+        end);
+    end);
+end;
+
+procedure TfrmMain.PlayFlightPath(const AFlight: TFlightPathRecord);
+var
+  LReplay: TFlightReplay;
+  LState: TTerrainFlightState;
+  LFlight: TFlightPathRecord;
+  LName: string;
+  LPoints: Integer;
+  LKm, LSeconds: Double;
+begin
+  LReplay := TFlightReplay.Create(AFlight);
+  try
+    if LReplay.Duration <= 0 then
+    begin
+      ShowMessage('This flight path goes nowhere, so there is nothing to play.');
+      Exit;
+    end;
+    LState.Latitude := LReplay.StartLatitude;
+    LState.Longitude := LReplay.StartLongitude;
+    LState.Heading := LReplay.StartHeading;
+    LPoints := LReplay.PointCount;
+    LKm := LReplay.DistanceKm;
+    LSeconds := LReplay.Duration;
+  finally
+    LReplay.Free;
+  end;
+  // Heights are not saved: it starts at the start height above the
+  // ground, hovering, and the replay keeps it clear of the ground
+  LState.Altitude := Max(FSettings.FlightStartHeight, 0);
+  LState.Speed := 0;
+  LState.Tilt := DEFAULT_FLIGHT_TILT;
+  LFlight := AFlight;
+  LName := AFlight.Name.Trim;
+  if LName = '' then
+    LName := 'flight path';
+  // A replay already going gives way now, so it does not pull the flight
+  // back along its own path while the new one is got ready
+  if FTerrainView <> nil then
+    FTerrainView.StopReplay('another flight path was chosen to play');
+  AddLog(Format('3D: playing flight path "%s" (%.1f km, %d points, about %s) from %s %s',
+    [LName, LKm, LPoints, FormatDuration(LSeconds), FormatLat(LState.Latitude),
+     FormatLon(LState.Longitude)]));
+  FNextFlightName := 'Replay: ' + LName;
+  PrepareFlight(TileNameAt(LState.Latitude, LState.Longitude), LState.Latitude, LState.Longitude,
+    procedure
+    begin
+      FTerrainView.JumpTo(LState, True);
+    end,
+    procedure
+    begin
+      if (FTerrainView <> nil) and not FTerrainView.StartReplay(LFlight) then
+        AddLog('WARNING: 3D: the flight path could not be replayed');
+    end);
 end;
 
 procedure TfrmMain.mnuAddMarkerClick(Sender: TObject);

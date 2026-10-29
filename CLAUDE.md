@@ -6,69 +6,94 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 28 October 2026, 19:45, at the end of a session, as the
+Last updated: 29 October 2026, 06:15, at the end of a session, as the
 owner was about to start a new conversation.
 
-## Where to pick up (28 October 2026, 19:45)
+## Where to pick up (29 October 2026, 06:15)
 
-**GitHub.** The owner works on branch `flighttest` (merged into `main`
-by pull requests). The latest push is `3f947dc` "Handover" (CLAUDE.md
-only) on top of `44dc3a5` "Handover", which holds everything up to and
-including the README token note. Clone `flighttest`.
+**GitHub.** Work goes to `main` now: its latest push is `d583285` "Flight
+Path" (on top of "Autopilot", "Ground Hugging", "Log to file", "No data
+startup bug" and the merge of `flighttest` as PR #3). `flighttest` is
+behind it at `3f947dc`. Clone `main`.
 
-**Delivered since `44dc3a5`, not yet pushed** (all in
-`gdem-flightpath.zip`, cumulative, every file changed since the push):
-Autopilot and Mach 1, Ground hugging, Flight log, Flight paths (with the
-10-degree camera, the map fitting the path, and distance flown); see the
-last four dated sections below. Files: README.md, CLAUDE.md;
-GDEMFetch.dpr, GDEMFetch.dproj (new unit `lib/GDEMFlightPath`); lib:
-GDEMFlight, GDEMFlightPath (new), GDEMViewOptions; ui: GDEMTerrainHud,
-GDEMTerrainView, GDEMWorldMap, MainForm (.pas and .fmx). When the owner
-says it is pushed, fetch and compare each of these with GitHub, then
-reset the working copy to `origin/flighttest`.
+**Delivered on 29 October, not yet pushed:** `gdem-reports.zip`
+(cumulative; the earlier `gdem-replay.zip` is inside it). Files:
+README.md, CLAUDE.md; `GDEMFetch/GDEMFetch.dpr`, `GDEMFetch.dproj` (new
+unit `ui/FlightPathForm`); lib: `GDEMFlight`, `GDEMFlightPath`,
+`GDEMReport`; ui: `FlightPathForm` (new), `GDEMTerrainView`, `MainForm`
+(.pas and .fmx). It holds:
 
-**Built and tried by the owner:** everything up to the autopilot and
-Mach 1 ("That's working well"), and ground hugging was then built and
-used enough to ask for the flight log (the owner's Debug tab paste
-showed the settled/memory lines, tiles fetched ahead at N50W074, EOX
-pace 32, 2 refusals, vertices copied straight). So the earlier "not yet
-built" list (cover with a picture, starts above summits, 3D search,
-bookmarks at flags, fetching ahead, cache size in Settings, label poles
-after resize, bookmark flags) compiled and ran; no problems were
-reported about them, but none was confirmed item by item. Worth asking:
-whether the cover showed a picture (the log line `3D: covered with a
-picture of the view` or `... no picture`), and whether flags stay on
-their poles after a resize.
+1. File > Load Flight Path... and replaying a saved path in the 3D view
+   (section "Replaying flight paths").
+2. Report files in a folder per kind (`Reports/download`,
+   `Reports/flight`), rotated at 10 MB, old ones archived by month
+   (section "Report files: folders, rotation, archives").
+3. Gorilla3D's lock registered as an expected leak in `GDEMFetch.dpr`
+   (section "Gorilla3D's expected leak").
 
-**Not yet built (newest first), and what to check:**
+When the owner says it is pushed, fetch and compare each of these files
+with GitHub, then reset the working copy to `origin/main`.
 
-1. Flight paths: menu items File > Save Flight Path... and Save All
-   Flight Paths... (`TSaveDialog`, `TOpenOption.ofOverwritePrompt`), View
-   > Show Flight Path; the map zooming to the path on switching from 3D
-   to Map while in flight; the path across 180 degrees; a `.flt` file's
-   contents; `12.3 km flown` on the speed panel (now 74 pixels high:
-   check the instruments below it still fit); points made by the great
-   circle's own turning on long straight flights (about one a degree).
-2. Camera 10 degrees down by default: launches start 5.7 km back.
-3. Flight log (`Reports/flight-*.log`): the Debug tab should now be
-   quiet while flying.
-4. Ground hugging in use (Hug ground box).
+**Built and run by the owner:** all of the above compiled and ran on
+Windows (several runs while tracing the leak, the last with no leak
+report: "the leak is fixed"). Nothing in them has been reported on in
+use yet. Before that: everything up to the autopilot and Mach 1 ("That's
+working well"), and ground hugging, used enough to ask for the flight
+log. The earlier lists (cover with a picture, starts above summits, 3D
+search, bookmarks at flags, fetching ahead, cache size in Settings, label
+poles after resize, bookmark flags) compiled and ran with no problems
+reported, but none was confirmed item by item.
+
+**To check in use (newest first):**
+
+1. Report files: the first run moves the old loose `Reports/download-*.log`
+   and `flight-*.log` into their folders (Debug tab `Reports: moved N
+   ...`, then `Reports: archived N ...` if more than 50 of a kind); the
+   `archive/<kind>-yyyy-mm.zip` files open and hold the reports; new names
+   end `-01.log`; the Debug tab's report and flight log paths point into
+   the new folders; a long download batch rotates (`Continued in ...`);
+   closing is not held up.
+2. Replaying: File > Load Flight Path... with a file of one path (plays at
+   once) and of several (the chooser); the flight log's `3D: replaying
+   ...`, `... finished ...` and `... ended ...: taken over` lines; the blue
+   `Replay finished` banner; `Replay climb` / `Replay descend` fitting on
+   the speed panel beside the camera line; a replay carrying on through a
+   Detail change; taking over with an arrow key; R ending it.
+3. Flight paths (28 October): File > Save Flight Path... and Save All
+   Flight Paths..., View > Show Flight Path; the map zooming to the path
+   on switching from 3D to Map while in flight; a path across 180
+   degrees; `12.3 km flown` on the speed panel (74 pixels high now: check
+   the instruments below it still fit).
+4. Camera 10 degrees down by default: launches start 5.7 km back.
+5. The flight log: the Debug tab quiet while flying.
+6. Worth asking: whether the cover showed a picture (`3D: covered with a
+   picture of the view` or `... no picture`), and whether flags stay on
+   their poles after a resize.
 
 **Known gaps and ideas waiting:**
 
 - Flight paths are kept only for the run; nothing is saved
-  automatically, and there is no way yet to open a `.flt` and draw it.
+  automatically. A loaded path is replayed, not drawn on the map by
+  itself (the replay's own recording is what the map shows).
+- Replays have no heights and only each leg's average speed (a `.flt`
+  holds neither); a later format could add altitude and speed to each
+  point. Recorded points come only every 1 degree of heading, so fast
+  gentle curves replay as straight legs (up to about 185 m off in the
+  simulation).
 - Labels: whether `TERRAIN_FOV` is vertical (labels drifting sideways at
   the screen's edges would say horizontal).
 - A country launched from the search goes to the middle of its extent,
   which can be sea.
 - Black patches without imagery (seen once; may be the `ColorF0` copy).
-- macOS and Linux have not run anything 3D yet.
+- macOS and Linux have not run anything 3D yet, nor the report archiving.
 - The 3D toolbar is about 1,300 pixels wide; narrow windows cut off the
   search box.
+- Gorilla3D keeps `GLiveVulkanContextsLock` at shut-down on purpose; worth
+  telling its author, so it can register the leak itself.
 - Ideas: `GDEMSystemInfo` figures to choose drawing defaults on a first
   run; fog; a list of peaks Natural Earth leaves out; Natural Earth 1:10m
-  lines for the high-resolution map.
+  lines for the high-resolution map; a menu item to open the Reports
+  folder.
 - Licensing: FastMM5 commercial licence to buy (then `CREDITS.md` note 2
   and the README's Licence); permission for the `8081_earthmap10k` image
   (Planet Pixel Emporium) to confirm or replace; the source of
@@ -2193,6 +2218,156 @@ switches; distance travelled on the 3D readouts. Not yet built.
 - HUD: speed panel `FlownKm` third line (`12.3 km flown`; whole km from
   100), `SPEED_PANEL_HEIGHT` 56 to 74; view `FlownKm` property.
 
+### Replaying flight paths (29 October 2026)
+
+The owner: a menu item to load a saved flight path; a single path is
+played, several show a dialog to choose one, which is then played.
+"Play" was taken as replaying the flight in the 3D view (said to the
+owner, who said to continue). Built and run on Windows; not yet
+reported on in use.
+
+- `lib/GDEMFlightPath`: `LoadFlightPaths` (Neon, `RaiseExceptions`;
+  `EFlightPathError` for an unreadable file, no format number, or a later
+  format); `TryReadFlightTime`; `TFlightReplay`, built from a
+  `TFlightPathRecord`: points that are not places are dropped, legs under
+  `REPLAY_MIN_LEG` (1 m) skipped (their time goes into the next leg), each
+  leg timed from its points' times clamped to between distance /
+  `MAX_FLIGHT_SPEED` and distance / `REPLAY_MIN_SPEED` (10 m/s, so hovers
+  and pauses are squeezed out), or distance / `REPLAY_UNTIMED_SPEED` (200)
+  without readable times; before a leg whose start bearing differs from
+  the heading by more than `REPLAY_TURN_FROM` (5 degrees), a turn on the
+  spot at `FLIGHT_TURN_RATE` (45 deg/s), since turning while hovering
+  makes no corners and would otherwise swing the view in one frame.
+  `PositionAt(seconds)`: on a leg, the great-circle intermediate point
+  (slerp) and the bearing on to the leg's end; on a turn, the heading
+  turned by the share; after the end, the last point, hovering. A cursor
+  makes forward searches cheap. `GDEMFlightPath` now uses `GDEMFlight`
+  (implementation).
+- `GDEMFlight`: `Following` and `Follow(lat, lon, heading, speed)`.
+  While following, `Step` ignores the speed and turn controls and the
+  target speed, does not move the flight (the replay put it in place),
+  and keeps clear of the ground (`KeepClear`) even with the autopilot off;
+  hugging still applies with Hug ground on.
+- `GDEMTerrainView`: `StartReplay(record)` (`False` if it goes nowhere),
+  `StopReplay(why)`, `Replaying`. `TimerTick` calls `AdvanceReplay` with
+  the step's own clamped time (at most 0.1 s) before `Step`, not while
+  paused, covered or crashed; at the end `FinishReplay` hovers, shows the
+  banner (`BANNER_NOTE`; hidden by the next flight key) and logs. Arrow
+  keys, M and H stop the replay and fly on; `ResetView` (R, double click,
+  Show in 3D) and `StartLookingAlong` (bookmarks, search) stop it; a
+  crash stops it; `JumpTo` does not, so `RelaunchTerrain` carries on.
+  Dragging only tilts while replaying. Log lines go to `OnLog` (the
+  flight log).
+- `ui/FlightPathForm` (new; in the `.dpr` and `.dproj`): built in code
+  like `BookmarkForm`, a `TListBox` of `DescribeFlightPath` lines (name,
+  km, local start time, end reason), a detail line for the one chosen
+  (start, heading, points, replay time), Play / Cancel, double click
+  plays; Android callback form as in `BookmarkForm`.
+- `MainForm`: File > Load Flight Path... (`mnuLoadFlightPath`, after Save
+  All) opens a `TOpenDialog` in `Flights`, loads, keeps only paths with a
+  replay longer than 0 (a `WARNING` for the rest), plays one at once or
+  asks with `TfrmFlightPath.Choose` (the play is `ForceQueue`d so the
+  chooser has closed before the progress dialog opens).
+  `PlayFlightPath`: stops any replay going, `FNextFlightName := 'Replay:
+  <name>'`, `PrepareFlight` at the start's tile with `JumpTo` (above the
+  ground, start height, first heading, tilt 10) and `StartReplay` as the
+  finish.
+- Checked in Python (scratchpad, lost with the session): a line-by-line
+  port of `TFlightReplay` and the view's tick, on six simulated 5-minute
+  flights (120 to 336 km, speeds to 3,000 m/s, turns at 45 deg/s, hovers,
+  at 50N, Everest, across 180, Sydney, the equator and 89.5N), saved and
+  read back as `.flt` JSON: the replay ends exactly on the last point;
+  the heading changes at most 5 to 8 degrees between frames (165 degrees
+  in one frame before the turns on the spot); 1 to 43 turns on the spot
+  per flight; replays 263 to 286 s for 300 s flown (hovers squeezed).
+  Against the track actually flown (every frame), the replay is within
+  about 1.5 to 6 m where the recording has dense corners, and up to about
+  185 m where it does not: a point is only made after a 1-degree change,
+  so a gentle curve flown fast becomes a straight leg; that is the
+  recording's resolution, not the replay's. An earlier design that let
+  `Step` fly on from the replay's place drifted 50 to 100 m; placing it
+  each frame does not. Edge cases: one point, points under 1 m apart (no
+  replay); identical times (flown at 3,000 m/s); unreadable times (200
+  m/s); a NaN place (dropped); crossing 180 degrees.
+
+### Report files: folders, rotation, archives (29 October 2026)
+
+The owner: put the log files in Reports in subfolders by log type, with
+log rotation and archiving. Built and run on Windows; not yet reported
+on in use.
+
+- Two kinds exist: `download` (every `TDownloadBatch`, including each
+  batch of tiles fetched ahead of a flight, which makes many) and
+  `flight` (`TfrmMain.FlightLog`, one per run). Both go through
+  `TDownloadReport` (`lib/GDEMReport`), rewritten; its users
+  (`GDEMDownloadBatch`, `MainForm.FlightLog`) are unchanged, as `Create`,
+  `Add` and `FileName` keep their signatures.
+- Folders: `Reports/<kind>` (`KindFolder`), archives in
+  `Reports/<kind>/archive` (`ArchiveFolder`). The kind must be letters,
+  digits, hyphens and underscores (`EArgumentException` otherwise).
+- Names: `<kind>-yyyymmdd-hhnnss-NN.log`, NN from 01 (`NextFileName`
+  takes the next number not on disk, so two reports in one second no
+  longer overwrite each other, which the old naming allowed). They sort
+  by start, then part, with the old names (no number) in the right
+  place too; 100 parts would sort out of order (1 GB in one report).
+- Rotation: `Add` checks `BaseStream.Size` after each line; at
+  `REPORT_ROTATE_BYTES` (10 MB) `Rotate` writes `Continued in <next>`,
+  opens the next with `Continued from <previous>`, and starts a tidy.
+  `FileName` (now read under the lock) changes. If the next file cannot
+  be made it reopens the old one for appending, writes a WARNING line
+  and stops trying (`FRotateFailed`).
+- Tidying (`Tidy`, on a `TTask` from `Create` and `Rotate`; one at a time
+  under `GHousekeepingLock`): moves loose old reports from `Reports`
+  (`MoveLooseReports`); all but the newest `REPORTS_KEPT` (50) `.log`
+  files per kind, grouped by the month in their names (or their write
+  time), go to `ArchiveReports`: the month's zip is copied to `.tmp`,
+  opened `zmReadWrite` (or `zmWrite` if new), files not already in it
+  added, closed, put in place (delete and move, as `SaveFlightPaths`
+  does), then reopened and each file deleted only if its entry's
+  uncompressed size equals the file's. Months before the
+  `REPORT_ARCHIVE_MONTHS` (12) kept are deleted directly, not archived.
+  `DeleteOldArchives` removes zips from before then, and `.zip.tmp`
+  files over an hour old. Problems go to `SetHousekeepingLog` (MainForm
+  sets it to `AddLog` in `FormCreate`) as `WARNING: reports: ...`, never
+  raised; routine one-file archiving is silent, more than one at once
+  gets a line.
+- Closing: `TfrmMain.FormDestroy` calls `TDownloadReport.StopHousekeeping`
+  first: no new tidy starts, a running one stops after its current
+  month's archive, which is waited for, and the log hook is cleared. The
+  unit's finalization does the same and frees the lock (no leak report).
+- Checked in Python (scratchpad, lost with the session): a port of the
+  naming, rotation and tidying on a fake Reports folder with 70 old
+  download and 60 old flight reports over 15 months in the old layout:
+  all moved, 9 and 9 from before the 12 months deleted, the rest beyond 50
+  archived by month; kept + archived accounts for every file; a 240,000
+  line report split into 10, 10, 10 MB and a small fourth part, each
+  naming the other; 200 reports in 100 seconds (two a second) took
+  distinct numbers, the 2026-10 archive held 163 files and passed
+  `testzip`; a year on, the old archive was deleted.
+
+### Gorilla3D's expected leak (29 October 2026)
+
+FastMM5 reported one leaked `System.TObject` (16 bytes) at every shut-down.
+FastMM5's debug mode traced it to Gorilla3D: `Gorilla.Context.Vulkan`'s
+initialization (line 9167) makes `GLiveVulkanContextsLock`, and its
+finalization keeps it on purpose, as units finalized after it may still
+need it. It predates the work of 29 October. `GDEMFetch.dpr` now
+registers it as expected under `REPORT_LEAKS` on Windows with
+`FastMM_RegisterExpectedMemoryLeak(TObject, 1)`: the variable is not in
+the unit's interface (a `{$IF DECLARED(GLiveVulkanContextsLock)}` test
+compiled its other branch), so the object itself cannot be named. The
+cost: one plain `TObject` leaked by anything else would also go
+unreported, but GDEM's own plain `TObject` locks belong to objects that
+would show up leaked with them. Owner: "the leak is fixed". Worth telling
+Gorilla3D's author.
+
+Kept from the hunt: in `GDEMReport`, tidying tasks are counted
+(`GHousekeepingTasks`) and `WaitForHousekeeping` (from `StopHousekeeping`
+and the finalization) waits up to 30 s for all of them before the lock is
+freed, since a task that had passed its stopped check could otherwise
+reach the freed lock. The diagnostic lock classes (`THousekeepingLock`,
+`TReportFileLock`) were removed again.
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection
@@ -2374,3 +2549,23 @@ reasons are here.
   field added to `TImageryService`, with `System.Diagnostics` only in the
   implementation uses, gave 30 errors, most of them knock-on (28 October
   2026). When adding a field, check the interface uses.
+- Before following this file's "clone branch X", compare the branches
+  (`git log --oneline -3 origin/main origin/flighttest`): on 29 October
+  `main` held a day's pushed work that `flighttest` did not.
+- A leak made in another unit's initialization needs FastMM5's debug mode
+  from FastMM5's own initialization: the conditional define
+  `FastMM_FullDebugModeWhenDLLAvailable` in the project options (a
+  `{$DEFINE}` in the `.dpr` does not reach FastMM5.pas), Build,
+  `FastMM_FullDebugMode64.dll` (in the submodule's `FullDebugMode
+  DLL/Precompiled`) beside the executable, and Linking > Map file =
+  Detailed for unit names and lines. `FastMM_EnterDebugMode` in the
+  `.dpr`'s `begin` starts too late. The same block at the same heap
+  address every run is a sign of start-up code.
+- `{$IF DECLARED(Name)}` tells at compile time whether a library's
+  variable is visible; the IDE greys the branch not compiled, which the
+  owner can read off.
+- Giving each lock its own empty class makes a leak report name it; used
+  to rule `GDEMReport` out, then removed.
+- A replay must put the flight on the path every frame
+  (`TFlight.Follow`), not let `Step` fly on from it: flying on drifted 50
+  to 100 m off the path in the simulation, placing it did not.

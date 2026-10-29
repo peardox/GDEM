@@ -36,6 +36,13 @@ the viewport, letting the mouse through
   names on and off; R starts again. The keys are listed in a panel at the
   bottom left, which collapses to its title.
 
+  A saved flight path can be replayed (@link(TTerrainView.StartReplay)):
+  the flight follows it (@code(TFlightReplay), in @code(GDEMFlightPath)),
+  keeping clear of the ground since heights are not saved, and hovers at
+  its end. Space pauses it, and the height and tilt keys work; a speed or
+  turn key, M or H takes over from it and the flight carries on from
+  there; R, a double click, or a new start elsewhere ends it.
+
   Named places (@link(TTerrainView.PlaceLabels): towns and cities,
   mountains, the user's markers) within @link(LABEL_RANGE_KM) are labelled
   on poles standing on the ground under them, the most important first,
@@ -86,7 +93,7 @@ uses
   FMX.Objects3D,
   Gorilla.Viewport, Gorilla.Camera, Gorilla.Light, Gorilla.Mesh, Gorilla.Material.VertexColor,
   Gorilla.Material.Default,
-  GDEMTerrain, GDEMTerrainLod, GDEMTerrainHud, GDEMFlight, GDEMImagery;
+  GDEMTerrain, GDEMTerrainLod, GDEMTerrainHud, GDEMFlight, GDEMImagery, GDEMFlightPath;
 
 const
   { The most milliseconds a timer tick spends turning patches into meshes;
@@ -359,6 +366,13 @@ type
     FOnSettled: TTerrainReportEvent;
     { Backing field for @link(OnLog). }
     FOnLog: TTerrainReportEvent;
+    { The flight path being replayed; @nil when none. }
+    FReplay: TFlightReplay;
+    { How far the replay has got, seconds of its time. }
+    FReplaySeconds: Double;
+    { @true while the banner says a replay has finished; the next flight
+      key hides it. }
+    FReplayEndShown: Boolean;
 
     { Puts the camera where the flight is, looking along its heading and
       down by its tilt, and has the instruments show it. }
@@ -480,6 +494,22 @@ type
 
     { Measures everything again from the tile under the flight. }
     procedure Rebase;
+
+    { Moves the replay on and puts the flight where it now is; finishes it
+      at its end.
+      @param(ASeconds The time to move it on by.) }
+    procedure AdvanceReplay(ASeconds: Double);
+
+    { Ends the replay at its end: the flight hovers there, takes the
+      controls back, and the banner says so. }
+    procedure FinishReplay;
+
+    { The replay's name for the log and the banner.
+      @returns(Its name in quotes, or "the flight path".) }
+    function ReplayName: string;
+
+    { Reader for @link(Replaying). @returns(@true while replaying.) }
+    function GetReplaying: Boolean;
 
     { Writer for @link(Exaggeration): every patch is made again, and the
       flight drawn as much higher.
@@ -677,6 +707,19 @@ type
     procedure StartLookingAlong(ALatitude, ALongitude, AHeading, AHeight: Double;
       AAboveGround: Boolean; ATilt: Double);
 
+    { Replays a saved flight path from where the flight is now, which
+      should be its start (put there with @link(JumpTo)): the flight
+      follows it, at its times, keeping clear of the ground, until its end,
+      where it hovers. Replaces any replay already going.
+      @param(APath The path.)
+      @returns(@false if the path has nothing to fly.) }
+    function StartReplay(const APath: TFlightPathRecord): Boolean;
+
+    { Ends the replay, if one is going, leaving the flight where it is and
+      as it goes, under the user's control.
+      @param(AWhy Why, for the log.) }
+    procedure StopReplay(const AWhy: string);
+
     { Says a tile has been downloaded since it was drawn flat: its
       patches are made again from its heights.
       @param(ASouth The tile's south edge.)
@@ -786,6 +829,9 @@ type
     { Told when the flight crashes into the ground; @link(FlightState) says
       where. }
     property OnCrash: TNotifyEvent read FOnCrash write FOnCrash;
+
+    { @true while a flight path is being replayed. }
+    property Replaying: Boolean read GetReplaying;
 
     { Told when the user starts the flight again (R or a double-click),
       after it has been put back over the tile. }
@@ -977,6 +1023,7 @@ begin
   FImagery := nil;
   FreeAndNil(FLod);
   FreeAndNil(FMeshes);
+  FreeAndNil(FReplay);
   FreeAndNil(FFlight);
   inherited;
 end;
@@ -1168,7 +1215,9 @@ procedure TTerrainView.ResetView;
 var
   LStart: TPoint3D;
 begin
+  StopReplay('the flight was started again');
   FBanner.Visible := False;
+  FReplayEndShown := False;
   FHeld := [];
   if not FHasArea then
     Exit;
@@ -1253,7 +1302,10 @@ var
   LWhere: string;
 begin
   FHeld := [];
+  StopReplay('the flight crashed');
+  FReplayEndShown := False;
   LWhere := Format('%.4f, %.4f', [FFlight.Latitude, FFlight.Longitude]);
+  FBanner.Colour := BANNER_ALERT;
   FBanner.ShowText('Crashed',
     Format('Into the ground at %s, %s km/h. Press R to start again.',
       [FormatHudHeight(FFlight.Altitude), FormatFloat('#,##0', ASpeed * 3.6)]));
@@ -1272,7 +1324,7 @@ var
   LNode: TTerrainNode;
   LPatch: TTerrainPatch;
   LMesh: TObject;
-  LChanged, LBusy, LWasCrashed: Boolean;
+  LChanged, LBusy, LWasCrashed, LReplayed: Boolean;
   LSeconds, LSpeed: Double;
   LReport, LCopy, LMessage: string;
   LImagery: TImageryResult;
@@ -1291,7 +1343,16 @@ begin
     FFlightWatch := TStopwatch.StartNew;
     LWasCrashed := FFlight.Crashed;
     LSpeed := FFlight.Speed;
-    if not FPaused and FFlight.Step(FHeld, LSeconds) then
+    // A replay puts the flight in place first, at the same time the step
+    // would take (at most a tenth of a second); it waits while the view
+    // is covered, being got ready
+    LReplayed := False;
+    if (FReplay <> nil) and not FPaused and not Covered and not FFlight.Crashed then
+    begin
+      AdvanceReplay(EnsureRange(LSeconds, 0, 0.1));
+      LReplayed := True;
+    end;
+    if not FPaused and FFlight.Step(FHeld, LSeconds) or LReplayed then
       PlaceCamera;
     // Also when hovering, when the camera does not move
     UpdateAutopilotText;
@@ -1941,7 +2002,11 @@ begin
     Exit;
   // As looking round with the head: dragging right turns right, dragging
   // down looks further down
-  FFlight.Look((X - FDragLast.X) * DRAG_TURN, (Y - FDragLast.Y) * DRAG_TILT);
+  // A replay keeps its own heading; only the tilt follows the mouse
+  if FReplay <> nil then
+    FFlight.Look(0, (Y - FDragLast.Y) * DRAG_TILT)
+  else
+    FFlight.Look((X - FDragLast.X) * DRAG_TURN, (Y - FDragLast.Y) * DRAG_TILT);
   FDragLast := PointF(X, Y);
   PlaceCamera;
 end;
@@ -2010,7 +2075,17 @@ begin
   begin
     // A crash or a pause holds the flight
     if not FFlight.Crashed and not FPaused then
+    begin
+      // The speed and turn keys take over from a replay
+      if (FReplay <> nil) and (LControl in [fcFaster, fcSlower, fcTurnLeft, fcTurnRight]) then
+        StopReplay('taken over with the keys; flying on from there');
+      if FReplayEndShown then
+      begin
+        FBanner.Visible := False;
+        FReplayEndShown := False;
+      end;
       Include(FHeld, LControl);
+    end;
   end
   else if (Key = vkSpace) or ((Key = 0) and (KeyChar = ' ')) then
   begin
@@ -2039,6 +2114,7 @@ begin
   end
   else if (Key = vkH) or ((Key = 0) and (UpCase(KeyChar) = 'H')) then
   begin
+    StopReplay('stopped with H; hovering there');
     FFlight.Stop;
     UpdateInstruments;
   end
@@ -2046,7 +2122,10 @@ begin
   begin
     // Up to the speed of sound over a few seconds; Up, Down or H take over
     if not FFlight.Crashed and not FPaused then
+    begin
+      StopReplay('taken over with M; flying on from there');
       FFlight.SpeedTo(MACH_1_SPEED, MACH_1_SECONDS);
+    end;
   end
   else if (Key = vkR) or ((Key = 0) and (UpCase(KeyChar) = 'R')) then
   begin
@@ -2124,8 +2203,10 @@ var
 begin
   if (FLod = nil) or not FLod.Started then
     Exit;
+  StopReplay('a new flight was started');
   FHeld := [];
   FBanner.Visible := False;
+  FReplayEndShown := False;
   FFlight.StartHeight := FStartHeight;
   FFlight.LookStretch := FExaggeration;
   FFlight.StartLookingAlong(ALatitude, ALongitude, AHeading, AHeight, AAboveGround, ATilt);
@@ -2198,7 +2279,17 @@ procedure TTerrainView.UpdateAutopilotText;
 begin
   if FSpeedPanel = nil then
     Exit;
-  if not FFlight.Autopilot then
+  if FReplay <> nil then
+  begin
+    // A replay keeps clear of the ground whether the autopilot is on or not
+    if FFlight.AutopilotClimbing then
+      FSpeedPanel.AutopilotText := 'Replay climb'
+    else if FFlight.AutopilotDescending then
+      FSpeedPanel.AutopilotText := 'Replay descend'
+    else
+      FSpeedPanel.AutopilotText := 'Replay';
+  end
+  else if not FFlight.Autopilot then
     FSpeedPanel.AutopilotText := ''
   else if FFlight.GroundHug then
   begin
@@ -2429,6 +2520,117 @@ begin
   BeginWork;
   FFlightWatch := TStopwatch.StartNew;
   PlaceCamera;
+end;
+
+{ A replay's time for the log, such as @code(4 min 05 s) or @code(38 s).
+  @param(ASeconds Seconds.)
+  @returns(The time, to the second.) }
+function FormatSeconds(ASeconds: Double): string;
+var
+  LSeconds: Int64;
+begin
+  LSeconds := Round(Max(ASeconds, 0));
+  if LSeconds >= 3600 then
+    Result := Format('%d h %.2d min', [LSeconds div 3600, (LSeconds mod 3600) div 60])
+  else if LSeconds >= 60 then
+    Result := Format('%d min %.2d s', [LSeconds div 60, LSeconds mod 60])
+  else
+    Result := Format('%d s', [LSeconds]);
+end;
+
+function TTerrainView.ReplayName: string;
+begin
+  if (FReplay = nil) or (FReplay.Name = '') then
+    Result := 'the flight path'
+  else
+    Result := '"' + FReplay.Name + '"';
+end;
+
+function TTerrainView.GetReplaying: Boolean;
+begin
+  Result := FReplay <> nil;
+end;
+
+function TTerrainView.StartReplay(const APath: TFlightPathRecord): Boolean;
+var
+  LReplay: TFlightReplay;
+begin
+  Result := False;
+  if not FHasArea then
+    Exit;
+  LReplay := TFlightReplay.Create(APath);
+  if LReplay.Duration <= 0 then
+  begin
+    LReplay.Free;
+    Exit;
+  end;
+  StopReplay('another flight path is being replayed');
+  FReplay := LReplay;
+  FReplaySeconds := 0;
+  FHeld := [];
+  FBanner.Visible := False;
+  FReplayEndShown := False;
+  FFlight.Following := True;
+  // On its way at once, from its start
+  AdvanceReplay(0);
+  FFlightWatch := TStopwatch.StartNew;
+  PlaceCamera;
+  if Assigned(FOnLog) then
+    FOnLog(Self, Format('3D: replaying %s: %d points, %.1f km, %d turns on the spot, ' +
+      'taking %s', [ReplayName, FReplay.PointCount, FReplay.DistanceKm, FReplay.TurnCount,
+       FormatSeconds(FReplay.Duration)]));
+  Result := True;
+end;
+
+procedure TTerrainView.StopReplay(const AWhy: string);
+begin
+  if FReplay = nil then
+    Exit;
+  if Assigned(FOnLog) then
+    FOnLog(Self, Format('3D: replay of %s ended after %s of %s: %s', [ReplayName,
+      FormatSeconds(FReplaySeconds), FormatSeconds(FReplay.Duration), AWhy]));
+  FreeAndNil(FReplay);
+  FFlight.Following := False;
+  UpdateAutopilotText;
+end;
+
+procedure TTerrainView.AdvanceReplay(ASeconds: Double);
+var
+  LLatitude, LLongitude, LHeading, LSpeed: Double;
+begin
+  if FReplay = nil then
+    Exit;
+  FReplaySeconds := FReplaySeconds + Max(ASeconds, 0);
+  FReplay.PositionAt(FReplaySeconds, LLatitude, LLongitude, LHeading, LSpeed);
+  FFlight.Follow(LLatitude, LLongitude, LHeading, LSpeed);
+  if FReplaySeconds >= FReplay.Duration then
+    FinishReplay;
+end;
+
+procedure TTerrainView.FinishReplay;
+var
+  LDetail: string;
+begin
+  if FReplay = nil then
+    Exit;
+  if FReplay.EndReason = FLIGHT_END_CRASHED then
+    LDetail := 'This is where it crashed. '
+  else
+    LDetail := '';
+  LDetail := Format('The end of %s, %.1f km. %sFly on with the arrow keys, or press R to ' +
+    'start again.', [ReplayName, FReplay.DistanceKm, LDetail]);
+  if Assigned(FOnLog) then
+    FOnLog(Self, Format('3D: replay of %s finished after %s, at %.4f, %.4f', [ReplayName,
+      FormatSeconds(FReplay.Duration), FFlight.Latitude, FFlight.Longitude]));
+  FreeAndNil(FReplay);
+  FFlight.Following := False;
+  FFlight.Stop;
+  FHeld := [];
+  FBanner.Colour := BANNER_NOTE;
+  FBanner.ShowText('Replay finished', LDetail);
+  FReplayEndShown := True;
+  PlaceInstruments;
+  UpdateAutopilotText;
 end;
 
 procedure TTerrainView.DoExit;

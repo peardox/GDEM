@@ -232,6 +232,8 @@ type
     { @true while ground hugging is coming back to @link(HUG_HEIGHT),
       having left the band. }
     FHugReturning: Boolean;
+    { Backing field for @link(Following). }
+    FFollowing: Boolean;
 
     { The height above the ground now, metres, for the climb rate; the
       altitude if the ground is not known.
@@ -403,6 +405,24 @@ type
       it, aiming at 50 m (@link(HugGround)). The height keys and the
       wheel do nothing meanwhile. }
     property GroundHug: Boolean read FGroundHug write FGroundHug;
+
+    { Puts the flight where a replay is, as @link(Following) needs each
+      step: its place, heading and speed; the altitude, the tilt and the
+      rest are left as they are.
+      @param(ALatitude Latitude, degrees.)
+      @param(ALongitude Longitude, degrees.)
+      @param(AHeading Degrees clockwise from true north.)
+      @param(ASpeed Metres a second, 0 to @link(MAX_FLIGHT_SPEED).) }
+    procedure Follow(ALatitude, ALongitude, AHeading, ASpeed: Double);
+
+    { @true while the flight follows a replay: something else puts it in
+      place with @link(Follow) before each @link(Step), so @link(Step) does
+      not move it, the speed and turn controls (and a change to a target
+      speed) do nothing, and it keeps clear of the ground as the
+      @link(Autopilot) does even with the autopilot off (or hugs the
+      ground, with @link(GroundHug)), since heights are not replayed. The
+      height and tilt controls still work. }
+    property Following: Boolean read FFollowing write FFollowing;
 
     { How far above the ground the flight starts, metres. }
     property StartHeight: Double read FStartHeight write FStartHeight;
@@ -716,6 +736,9 @@ begin
   // Speed: faster the faster already, never backwards
   LBefore := FSpeed;
   LRate := Max(FLIGHT_ACCEL_MIN, FLIGHT_ACCEL_SHARE * FSpeed) * ASeconds;
+  // A replay sets the speed and heading
+  if FFollowing then
+    AControls := AControls - [fcFaster, fcSlower, fcTurnLeft, fcTurnRight];
   // The speed keys take over from a change to a target speed
   if AControls * [fcFaster, fcSlower] <> [] then
     FSpeedTarget := -1;
@@ -723,7 +746,7 @@ begin
     FSpeed := FSpeed + LRate;
   if fcSlower in AControls then
     FSpeed := FSpeed - LRate;
-  if FSpeedTarget >= 0 then
+  if (FSpeedTarget >= 0) and not FFollowing then
   begin
     if Abs(FSpeedTarget - FSpeed) <= FSpeedChange * ASeconds then
     begin
@@ -766,7 +789,10 @@ begin
   if AControls * [fcTurnLeft, fcTurnRight, fcTiltUp, fcTiltDown, fcClimb, fcDescend] <> [] then
     Result := True;
 
-  if FSpeed > 0 then
+  // A replay has put it in place already
+  if FFollowing then
+    Result := True
+  else if FSpeed > 0 then
   begin
     MoveOn(FSpeed * ASeconds);
     Result := True;
@@ -780,7 +806,7 @@ begin
     if HugGround(ASeconds) then
       Result := True;
   end
-  else if FAutopilot and not FStartPending and KeepClear(ASeconds) then
+  else if (FAutopilot or FFollowing) and not FStartPending and KeepClear(ASeconds) then
   begin
     FAutopilotClimbing := True;
     Result := True;
@@ -828,6 +854,16 @@ begin
     Exit;
   FSpeedTarget := EnsureRange(ATarget, 0, MAX_FLIGHT_SPEED);
   FSpeedChange := Max(FSpeedTarget, 1) / Max(ASeconds, 0.1);
+end;
+
+procedure TFlight.Follow(ALatitude, ALongitude, AHeading, ASpeed: Double);
+begin
+  if FCrashed then
+    Exit;
+  FLatitude := EnsureRange(ALatitude, -90, 90);
+  FLongitude := WrapDegrees(ALongitude + 180) - 180;
+  FHeading := WrapDegrees(AHeading);
+  FSpeed := EnsureRange(ASpeed, 0, MAX_FLIGHT_SPEED);
 end;
 
 procedure TFlight.SetState(ALatitude, ALongitude, AAltitude, AHeading, ASpeed, ATilt: Double);

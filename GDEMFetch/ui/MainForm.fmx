@@ -35,6 +35,10 @@ object frmMain: TfrmMain
         Text = 'Save All Flight Paths...'
         OnClick = mnuSaveAllFlightPathsClick
       end
+      object mnuLoadFlightPath: TMenuItem
+        Text = 'Load Flight Path...'
+        OnClick = mnuLoadFlightPathClick
+      end
       object mnuFileSep: TMenuItem
         Text = '-'
       end

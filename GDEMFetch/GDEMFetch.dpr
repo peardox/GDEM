@@ -110,6 +110,7 @@ uses
   GDEMBookmarks in 'lib\GDEMBookmarks.pas',
   GDEMFlightPath in 'lib\GDEMFlightPath.pas',
   BookmarkForm in 'ui\BookmarkForm.pas',
+  FlightPathForm in 'ui\FlightPathForm.pas',
   GDEMDisplays in 'ui\GDEMDisplays.pas',
   GDEMTerrainHud in 'ui\GDEMTerrainHud.pas',
   GDEMTerrainView in 'ui\GDEMTerrainView.pas';
@@ -135,6 +136,12 @@ begin
   FastMM_DeleteEventLogFile;
   FastMM_LogToFileEvents := FastMM_LogToFileEvents +
     [mmetUnexpectedMemoryLeakSummary, mmetUnexpectedMemoryLeakDetail];
+  // Gorilla3D 1.5.3 makes a lock (a plain TObject) in
+  // Gorilla.Context.Vulkan's initialization and keeps it on purpose at
+  // shut-down, since units finalized after it may still need it. Its
+  // variable is not visible outside the unit, so one TObject is registered
+  // as expected; a report of a plain TObject means one more has leaked
+  FastMM_RegisterExpectedMemoryLeak(TObject, 1);
   {$ENDIF}
   {$ENDIF}
   {$IF DEFINED(MSWINDOWS)}
