@@ -2441,21 +2441,54 @@ begin
     ReportError('Please wait for the current job to finish, or cancel it, first.');
     Exit;
   end;
-  if not FStore.IsAvailable then
+  if not FStore.IsAvailable or not FStoreOpen then
   begin
-    ReportError('The data folder is not available, so there is no ground to fly over.');
+    // A data folder not made yet (a first run: nothing downloaded) is
+    // made here, and its downloaded-tiles bitmap set up; a drive that was
+    // used before and is missing is asked for, with Retry. Then this runs
+    // again, queued, so its own modal dialog does not open inside the
+    // finishing job's clean-up.
+    LTileArg := ATile;
+    LLatitude := ALatitude;
+    LLongitude := ALongitude;
+    LPlaceArg := APlace;
+    LFinishArg := AFinish;
+    LNewFlightArg := ANewFlight;
+    AddLog('3D: preparing for flight: opening the data folder ' + FStore.Root + ' first');
+    WithStore(
+      procedure
+      begin
+        TThread.ForceQueue(nil,
+          procedure
+          begin
+            if not FStore.IsAvailable or not FStoreOpen then
+            begin
+              ReportError('The data folder ' + FStore.Root + ' could not be opened, so ' +
+                'the tiles to fly over cannot be downloaded. Choose another folder in ' +
+                'File > Settings.');
+              Exit;
+            end;
+            // Imagery asked for before the folder was there would not be
+            // kept on disk; made again on first need, with the cache
+            CloseImagery;
+            PrepareFlight(LTileArg, LLatitude, LLongitude, LPlaceArg, LFinishArg,
+              LNewFlightArg);
+          end);
+      end);
     Exit;
   end;
   LTileName := ATile;
   LPlace := APlace;
 
   // The tiles the view will load round the place that exist but are not
-  // here yet
+  // here yet. With no tile index (its download failed, say) every tile in
+  // the window is asked for: CMR's lookup leaves out those with no data,
+  // which the summary counts as having none
   LMissing := nil;
-  if not FTileIndex.IsEmpty then
-    for LTile in TerrainWindowTiles(ALatitude, ALongitude) do
-      if FTileIndex.Has(LTile.Y, LTile.X) and not FDownloaded.Has(LTile.Y, LTile.X) then
-        LMissing := LMissing + [TileName(LTile.Y, LTile.X)];
+  for LTile in TerrainWindowTiles(ALatitude, ALongitude) do
+    if (FTileIndex.IsEmpty or FTileIndex.Has(LTile.Y, LTile.X)) and
+       not FDownloaded.Has(LTile.Y, LTile.X) then
+      LMissing := LMissing + [TileName(LTile.Y, LTile.X)];
   LDownload := Length(LMissing) > 0;
   if LDownload and (FSettings.BearerToken = '') then
   begin

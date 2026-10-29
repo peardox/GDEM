@@ -391,8 +391,13 @@ with an **Abort** button:
 
 1. The tiles the view will load round the place (the 170 km window: about
    20 tiles in Britain) that exist but are not downloaded yet are
-   downloaded, as Fetch selection would. With no bearer token they are
-   left out and drawn flat.
+   downloaded, as Fetch selection would. Nothing needs downloading
+   beforehand: on a first run the data folder is made at this point, and
+   every tile round the place comes down now. With no bearer token they
+   are left out and drawn flat. If the tile index could not be had, every
+   tile in the window is asked for, and CMR's lookup leaves out those over
+   open sea. If the data folder is on a drive that is not connected, you
+   are asked to connect it (Retry) first.
 2. The ground is made, and with Realistic on its imagery is fetched, the
    bar counting the pieces made and still to come.
 3. The dialog closes and the 3D tab opens, ready to fly.

@@ -6,17 +6,19 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 29 October 2026, 07:50, after making `GrandCanyon.flt`, as
-the owner was about to start a new conversation.
+Last updated: 29 October 2026, 09:10, after restoring the fix for a first
+flight with no data folder, which a later delivery had undone.
 
-## Where to pick up (29 October 2026, 07:50)
+## Where to pick up (29 October 2026, 09:10)
 
 **GitHub.** Clone `main`. Its latest push, `9f57e52` "Vulkan leak fixed"
 (on top of `d583285` "Flight Path"), holds all the program's code
 delivered up to the end of 29 October; `flighttest` is behind it at
-`3f947dc`. Waiting to be pushed: this file only (`gdem-handover.zip`),
-which records the push, the checks below and the Grand Canyon flight
-path.
+`3f947dc`. Waiting to be pushed (`gdem-nodata.zip`): `MainForm.pas`
+(the first-flight fix restored, section "First flight with no data
+folder, again"), README.md (its paragraph restored) and this file
+(which also records the push, the checks below and the Grand Canyon
+flight path).
 
 **Also delivered, not in the repository:** `GrandCanyon.flt`, a flight
 path down the Colorado River through the Grand Canyon at Mach 1 (section
@@ -51,6 +53,11 @@ reported, but none was confirmed item by item.
 
 **To check in use (newest first):**
 
+00. First flight from scratch (no settings, no data folder): token, tile
+    index, search Squid Game, arrow. Expected in the Debug tab: `3D:
+    preparing for flight: opening the data folder ...`, the rescan of the
+    new folder, then `3D: preparing for flight at ...: N tile(s) to
+    download` with N > 0, and the dialog downloading them.
 0. `GrandCanyon.flt` with File > Load Flight Path...: that it stays in
    the canyon; with Hug ground on, how close it comes to the walls, and
    how far it rises over steep ledges at Mach 1; the view's swing in the
@@ -2438,6 +2445,36 @@ rewrite from this if needed):
   view can swing up to about 60 degrees between frames in the tightest
   bends at Mach 1.
 
+### First flight with no data folder, again (29 October 2026)
+
+The owner, from a fresh install (token, tile index, search "Squid Game",
+arrow): "The data folder is not available, so there is no ground to fly
+over"; no `ASTGTM` folder in Documents. This had been fixed on 28
+October in `f64b30e` "No data startup bug" (section "Launching with no
+data folder yet", lost with it), and the fix was undone by the very next
+commit, `536c504` "Autopilot", whose `MainForm.pas` had been built from
+a copy older than the fix. Its README paragraph and CLAUDE.md section
+went the same way.
+
+- Restored in `TfrmMain.PrepareFlight`, as in `f64b30e`: if the store is
+  not available or not open (`FStoreOpen`), log `3D: preparing for
+  flight: opening the data folder ...` and call `WithStore`, which makes
+  a folder never used (`EnsureCreated`), loads or rescans its bitmap, or
+  asks for a used folder's missing drive with Retry; its action queues
+  (`ForceQueue`) `PrepareFlight` again after `CloseImagery`, or reports
+  that the folder could not be opened. One change from `f64b30e`: the
+  retry passes `ANewFlight` too, a parameter added since for flight paths.
+- Restored: with no tile index, every tile in the window not downloaded
+  is asked for (CMR leaves out sea tiles).
+- Every launch goes through `PrepareFlight` (search, Show in 3D,
+  bookmarks, Load Flight Path, `RelaunchTerrain`); the other
+  `IsAvailable` tests (`ShowTerrainTile`, `TerrainTileInfo`,
+  `FetchTilesAhead`, the imagery cache) run only once the folder is open.
+- A scan of every commit since `44dc3a5` for lines added by one commit,
+  removed by the next and still missing found nothing else lost (two
+  hits were deliberate rewrites: the autopilot test in `TFlight.Step` and
+  the Autopilot box's width).
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection
@@ -2647,3 +2684,9 @@ reasons are here.
   stops to turn at each one.
 - Writing ISO times from fractional seconds: round to whole milliseconds
   before formatting, or .9995 s becomes .000 without carrying.
+- A delivery built on a stale copy silently undoes fixes made since:
+  `536c504` removed `f64b30e`'s fix the day after it went in. Before
+  delivering, diff each file against GitHub's latest
+  (`git diff origin/main -- <file>`) and make sure every hunk is one made
+  in this session; and after a push, scan for lines added by one commit
+  and removed by the next.
