@@ -6,22 +6,30 @@ Notes for picking this project up in a new conversation. Read
 the README does not: where the work has got to, what has been tested and
 how it went, and lessons learned along the way.
 
-Last updated: 29 October 2026, 06:15, at the end of a session, as the
-owner was about to start a new conversation.
+Last updated: 29 October 2026, 07:50, after making `GrandCanyon.flt`, as
+the owner was about to start a new conversation.
 
-## Where to pick up (29 October 2026, 06:15)
+## Where to pick up (29 October 2026, 07:50)
 
-**GitHub.** Work goes to `main` now: its latest push is `d583285` "Flight
-Path" (on top of "Autopilot", "Ground Hugging", "Log to file", "No data
-startup bug" and the merge of `flighttest` as PR #3). `flighttest` is
-behind it at `3f947dc`. Clone `main`.
+**GitHub.** Clone `main`. Its latest push, `9f57e52` "Vulkan leak fixed"
+(on top of `d583285` "Flight Path"), holds all the program's code
+delivered up to the end of 29 October; `flighttest` is behind it at
+`3f947dc`. Waiting to be pushed: this file only (`gdem-handover.zip`),
+which records the push, the checks below and the Grand Canyon flight
+path.
 
-**Delivered on 29 October, not yet pushed:** `gdem-reports.zip`
-(cumulative; the earlier `gdem-replay.zip` is inside it). Files:
-README.md, CLAUDE.md; `GDEMFetch/GDEMFetch.dpr`, `GDEMFetch.dproj` (new
-unit `ui/FlightPathForm`); lib: `GDEMFlight`, `GDEMFlightPath`,
-`GDEMReport`; ui: `FlightPathForm` (new), `GDEMTerrainView`, `MainForm`
-(.pas and .fmx). It holds:
+**Also delivered, not in the repository:** `GrandCanyon.flt`, a flight
+path down the Colorado River through the Grand Canyon at Mach 1 (section
+"Grand Canyon flight path"). The owner has not yet said how it flies.
+
+**Checked at 06:25 against `9f57e52`:** every file delivered on 29
+October is identical on GitHub (README.md, CLAUDE.md;
+`GDEMFetch/GDEMFetch.dpr`, `.dproj`; lib `GDEMFlight`, `GDEMFlightPath`,
+`GDEMReport`; ui `FlightPathForm`, `GDEMTerrainView`, `MainForm` .pas and
+.fmx); `pasdoc_check.py` clean; every source ASCII; both `.dproj` files
+keep their BOM; every unit in `lib/` and `ui/` is in both the `.dpr` and
+the `.dproj` and every listed path exists; every object and event in
+`MainForm.fmx` matches its unit. The push holds:
 
 1. File > Load Flight Path... and replaying a saved path in the 3D view
    (section "Replaying flight paths").
@@ -30,9 +38,6 @@ unit `ui/FlightPathForm`); lib: `GDEMFlight`, `GDEMFlightPath`,
    (section "Report files: folders, rotation, archives").
 3. Gorilla3D's lock registered as an expected leak in `GDEMFetch.dpr`
    (section "Gorilla3D's expected leak").
-
-When the owner says it is pushed, fetch and compare each of these files
-with GitHub, then reset the working copy to `origin/main`.
 
 **Built and run by the owner:** all of the above compiled and ran on
 Windows (several runs while tracing the leak, the last with no leak
@@ -46,6 +51,10 @@ reported, but none was confirmed item by item.
 
 **To check in use (newest first):**
 
+0. `GrandCanyon.flt` with File > Load Flight Path...: that it stays in
+   the canyon; with Hug ground on, how close it comes to the walls, and
+   how far it rises over steep ledges at Mach 1; the view's swing in the
+   tightest bends.
 1. Report files: the first run moves the old loose `Reports/download-*.log`
    and `flight-*.log` into their folders (Debug tab `Reports: moved N
    ...`, then `Reports: archived N ...` if more than 50 of a kind); the
@@ -2368,6 +2377,67 @@ freed, since a task that had passed its stopped check could otherwise
 reach the freed lock. The diagnostic lock classes (`THousekeepingLock`,
 `TReportFileLock`) were removed again.
 
+### Grand Canyon flight path (29 October 2026)
+
+The owner: a flight path following the Colorado River through the Grand
+Canyon from Lees Ferry to the Grand Wash Cliffs, as long as is sensible
+between heading changes but not too close to the cliffs; then at Mach 1.
+Delivered as `GrandCanyon.flt` (one flight, "Grand Canyon: Lees Ferry to
+the Grand Wash Cliffs"): 3,910 points, 435.8 km, 21.3 minutes at 340.3
+m/s (`MACH_1_SPEED`), times from 2026-10-29T07:00:00.000Z, end reason
+Flight Ended. Not in the repository (the owner did not ask for it there).
+
+How it was made (Python in the session's scratch folder, lost with it;
+rewrite from this if needed):
+
+- **Data.** No detailed river line could be reached: the USGS Colorado
+  River Mile System service (`grandcanyon.usgs.gov`), OpenStreetMap and
+  the USGS hydrography service are not on the session's allowlist, and
+  Natural Earth's line (cloned from GitHub) has a point only every 2.5
+  km. The owner attached the eight ASTER tiles N35W112 to N36W115
+  (`_dem.tif`). Pillow reads them (tifffile needs `imagecodecs`, which
+  pip cannot get here). No voids.
+- **The river:** a least-cost path (scikit-image `MCP_Geometric`, 8
+  neighbours) on the mosaic, cost 1 + ((height above the lowest ground
+  within 1.5 km) / 10 m)^2, kept within 10 km of Natural Earth's line,
+  from Lees Ferry (snapped to 36.8642 N, 111.5900 W, 938 m) to Pearce
+  Ferry (36.1167 N, 114.0017 W). Checked: 277.2 miles smoothed against
+  the official 280; Little Colorado, Phantom Ranch, Lava Falls and
+  Diamond Creek within a few miles of their river miles. The Grand Wash
+  Cliffs (mile 277) placed 4.8 km above Pearce Ferry, where the highest
+  ground within 4 km drops from 1,470 m to 1,047 m: 36.1289 N, 113.9544 W.
+- **Walls:** ground more than 100 m above the river level beside it (the
+  traced floor smoothed over 1 km and made never to rise downstream), or
+  more than 400 m from the river; clearance is the distance to a wall.
+  The river itself: median 144 m, 1% under 40 m, 2.4% under 60 m.
+- **Legs:** greedy longest legs (doubling then bisecting) such that every
+  10 m along a leg is at least 100 m from a wall, or 80% of the river's
+  own clearance at the nearest point of the river where that is less,
+  and within 300 m of the river. Judging a leg by the river's single
+  worst point let a noisy zero relax whole legs; judging by a 1 km median
+  made the river itself fail and the legs crawl; the per-place rule
+  works. 672 legs, mean 650 m, up to 4.8 km.
+- **Corners:** the replay turns on the spot at more than 5 degrees
+  (`REPLAY_TURN_FROM`), so every corner over 4.5 degrees is an arc (on
+  the bisector, the short way, points every 4.5 degrees at most), radius
+  for the flight's own 45 deg/s turn at the speed (433 m at Mach 1),
+  limited to half of each leg, halved until the arc passes the same wall
+  test (78 times at Mach 1). Points where two arcs meet kept once.
+  Coordinates to 7 decimals: at 6, rounding pushed some 5-degree bends
+  over the limit and gave 375 turns on the spot.
+- **Times:** distance / speed, written to whole milliseconds first (a
+  first version wrapped .9995 s to .000 without carrying the second,
+  stamping some points a second early; the 100 m/s file sent first had
+  that fault and was replaced).
+- **Checked** through the Python port of `TFlightReplay`: 0 turns on the
+  spot; ends on the last point, hovering; times always rising; all but
+  0.24 km within 5% of Mach 1 (chords under 5 m, millisecond rounding).
+  Clearance every 10 m: median 133 m, 1% 40 m, 5% 75 m, 2.2% under 60 m
+  (the river: 144, 40, 75, 2.4%); 0.32% of samples short of the rule, by
+  at most 21 m, at the tightest arcs; at most 300 m from the river. The
+  view can swing up to about 60 degrees between frames in the tightest
+  bends at Mach 1.
+
 ## NASA: what was found by testing
 
 - CMR (`cmr.earthdata.nasa.gov/search/granules.json`, collection
@@ -2569,3 +2639,11 @@ reasons are here.
 - A replay must put the flight on the path every frame
   (`TFlight.Follow`), not let `Step` fly on from it: flying on drifted 50
   to 100 m off the path in the simulation, placing it did not.
+- Making a flight path for a real place: trace it on the owner's ASTER
+  tiles (least-cost path on height above the local floor) rather than
+  from a coarse vector line, check its length and landmarks against
+  published figures, and run the result through the replay's port before
+  delivering. A designed path needs arcs at its corners, or the replay
+  stops to turn at each one.
+- Writing ISO times from fractional seconds: round to whole milliseconds
+  before formatting, or .9995 s becomes .000 without carrying.
