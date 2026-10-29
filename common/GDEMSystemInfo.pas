@@ -51,7 +51,7 @@ unit GDEMSystemInfo;
 interface
 
 uses
-  System.SysUtils;
+  System.SysUtils, System.StrUtils;
 
 const
   { A size the system did not give. }
@@ -942,7 +942,7 @@ begin
   if FindFirst(DRM_FOLDER + '/card*', faAnyFile, LSearch) = 0 then
   try
     repeat
-      if not LSearch.Name.Contains('-') then
+      if not ContainsStr(LSearch.Name, '-') then
         LCards := LCards + [LSearch.Name];
     until FindNext(LSearch) <> 0;
   finally
